@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -20,6 +21,8 @@ type Config struct {
 	OIDCUserInfoURL        string
 	OIDCScopes             []string
 	OIDCBootstrapAdminSubs []string
+	SyncInterval           time.Duration
+	SyncRunOnStart         bool
 }
 
 func Load() (Config, error) {
@@ -36,7 +39,18 @@ func Load() (Config, error) {
 		OIDCUserInfoURL:        strings.TrimSpace(os.Getenv("OPS_OIDC_USERINFO_URL")),
 		OIDCScopes:             parseCSV(getenv("OPS_OIDC_SCOPES", "openid,profile,email")),
 		OIDCBootstrapAdminSubs: parseCSV(strings.TrimSpace(os.Getenv("OPS_OIDC_BOOTSTRAP_ADMIN_SUBS"))),
+		SyncRunOnStart:         !strings.EqualFold(strings.TrimSpace(getenv("OPS_SYNC_RUN_ON_START", "true")), "false"),
 	}
+
+	intervalText := strings.TrimSpace(getenv("OPS_SYNC_INTERVAL", "15m"))
+	interval, err := time.ParseDuration(intervalText)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid OPS_SYNC_INTERVAL: %w", err)
+	}
+	if interval < time.Minute {
+		return Config{}, errors.New("OPS_SYNC_INTERVAL must be >= 1m")
+	}
+	cfg.SyncInterval = interval
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("OPS_DATABASE_URL is required")

@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"ops-platform/internal/aws"
+	"ops-platform/internal/awssync"
 	"ops-platform/internal/cmdb"
 	"ops-platform/internal/config"
 	"ops-platform/internal/iam"
@@ -38,6 +39,10 @@ func (s *Server) Router() http.Handler {
 		iam.RequirePermission("iam.user", "write"),
 	)
 	tokenService := iam.NewTokenService(s.cfg.MasterKey)
+	awsRepo := aws.NewRepository(s.db, s.cfg.MasterKey)
+	awsSyncService := awssync.NewService(s.cfg, s.db, awsRepo)
+	awsSyncRunner := awssync.NewRunner(awsSyncService)
+	awsSyncHandler := newAWSSyncHandler(awsRepo, awsSyncRunner)
 
 	cmdbHandler := cmdb.NewHandler(
 		cmdb.NewRepository(s.db),
@@ -45,7 +50,7 @@ func (s *Server) Router() http.Handler {
 		iam.RequirePermission("cmdb.asset", "write"),
 	)
 	awsHandler := aws.NewHandler(
-		aws.NewRepository(s.db, s.cfg.MasterKey),
+		awsRepo,
 		iam.RequirePermission("aws.account", "read"),
 		iam.RequirePermission("aws.account", "write"),
 	)
@@ -63,6 +68,9 @@ func (s *Server) Router() http.Handler {
 		r.Use(iam.AuditMiddleware(iamRepo))
 		r.Mount("/cmdb/assets", cmdbHandler.Routes())
 		r.Mount("/aws/accounts", awsHandler.Routes())
+		r.With(iam.RequirePermission("aws.account", "read")).Get("/aws/sync/runs", awsSyncHandler.ListRuns)
+		r.With(iam.RequirePermission("aws.account", "read")).Get("/aws/sync/status", awsSyncHandler.Status)
+		r.With(iam.RequirePermission("aws.account", "write")).Post("/aws/sync/run", awsSyncHandler.Trigger)
 		r.Mount("/iam", iamAdminHandler.Routes())
 	})
 

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -225,4 +226,147 @@ RETURNING id, account_id, display_name, auth_mode, COALESCE(role_arn, ''), COALE
 		return Account{}, err
 	}
 	return updated, nil
+}
+
+func (r *Repository) ListSyncAccounts(ctx context.Context) ([]SyncAccount, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT
+    id,
+    account_id,
+    display_name,
+    auth_mode,
+    COALESCE(role_arn, ''),
+    COALESCE(external_id, ''),
+    COALESCE(access_key_id, ''),
+    COALESCE(secret_access_key_encrypted, ''),
+    region_allowlist,
+    enabled
+FROM aws_account
+WHERE enabled = true
+ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]SyncAccount, 0, 16)
+	for rows.Next() {
+		var item SyncAccount
+		var regionsRaw []byte
+		var encryptedSecret string
+		if err := rows.Scan(
+			&item.ID,
+			&item.AccountID,
+			&item.DisplayName,
+			&item.AuthMode,
+			&item.RoleARN,
+			&item.ExternalID,
+			&item.AccessKeyID,
+			&encryptedSecret,
+			&regionsRaw,
+			&item.Enabled,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(regionsRaw, &item.RegionAllowlist); err != nil {
+			return nil, err
+		}
+		if encryptedSecret != "" {
+			decrypted, err := security.Decrypt(encryptedSecret, r.masterKey)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt account secret for %s: %w", item.AccountID, err)
+			}
+			item.SecretAccessKey = decrypted
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *Repository) StartSyncRun(ctx context.Context, accountUUID, region, resourceType string) (string, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx, `
+INSERT INTO aws_sync_run (account_id, region, resource_type, status)
+VALUES ($1::uuid, $2, $3, 'running')
+RETURNING id::text
+`, accountUUID, region, resourceType).Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (r *Repository) FinishSyncRun(ctx context.Context, runID, status string, resourcesProcessed int, errorMessage string) error {
+	if status == "" {
+		status = "success"
+	}
+	_, err := r.db.ExecContext(ctx, `
+UPDATE aws_sync_run
+SET status = $2,
+    resources_processed = $3,
+    error_message = NULLIF($4, ''),
+    finished_at = now()
+WHERE id = $1::uuid
+`, runID, status, resourcesProcessed, errorMessage)
+	return err
+}
+
+func (r *Repository) ListSyncRuns(ctx context.Context, limit int) ([]SyncRun, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+SELECT
+    run.id::text,
+    account.account_id,
+    account.display_name,
+    run.region,
+    run.resource_type,
+    run.status,
+    run.resources_processed,
+    COALESCE(run.error_message, ''),
+    run.started_at,
+    run.finished_at
+FROM aws_sync_run run
+JOIN aws_account account ON account.id = run.account_id
+ORDER BY run.started_at DESC
+LIMIT $1
+`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]SyncRun, 0, limit)
+	for rows.Next() {
+		var item SyncRun
+		var finishedAt sql.NullTime
+		if err := rows.Scan(
+			&item.ID,
+			&item.AccountID,
+			&item.AccountDisplayName,
+			&item.Region,
+			&item.ResourceType,
+			&item.Status,
+			&item.ResourcesProcessed,
+			&item.ErrorMessage,
+			&item.StartedAt,
+			&finishedAt,
+		); err != nil {
+			return nil, err
+		}
+		if finishedAt.Valid {
+			t := finishedAt.Time
+			item.FinishedAt = &t
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
