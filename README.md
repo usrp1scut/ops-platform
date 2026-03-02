@@ -49,6 +49,7 @@ Service endpoint:
 
 - API: `http://localhost:8080`
 - Health: `GET /healthz`
+- Validation UI: `http://localhost:8080/ui/`
 
 ## Local development without Docker
 
@@ -88,6 +89,13 @@ go run ./cmd/ops-api
 
 All `/api/v1/*` endpoints require platform bearer token.
 Token is returned by `GET /auth/oidc/callback` after successful OIDC login.
+
+## Frontend validation flow
+
+1. Open `http://localhost:8080/ui/`.
+2. Click `Start OIDC Login` and complete IdP login (if OIDC is configured).
+3. Browser callback auto-saves token to `localStorage` and redirects back to `/ui/`.
+4. Click `Check /auth/me`, then validate CMDB/AWS list/create operations.
 
 ## Next planned additions
 
