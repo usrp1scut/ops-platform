@@ -1,7 +1,10 @@
 package iam
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -131,14 +134,36 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		map[string]any{"provider": h.cfg.OIDCIssuerURL},
 	)
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"access_token": token,
 		"token_type":   "Bearer",
 		"expires_in":   8 * 3600,
 		"user":         identity.User,
 		"roles":        identity.Roles,
 		"permissions":  identity.Permissions,
-	})
+	}
+
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	if strings.Contains(accept, "text/html") {
+		tokenJSON, _ := json.Marshal(token)
+		html := fmt.Sprintf(`<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>OIDC Login Complete</title></head>
+  <body>
+    <script>
+      localStorage.setItem("ops_platform_access_token", %s);
+      window.location.href = "/ui/";
+    </script>
+    <p>Login complete. Redirecting...</p>
+  </body>
+</html>`, string(tokenJSON))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(html))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
