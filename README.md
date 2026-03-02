@@ -24,6 +24,13 @@ export HTTPS_PROXY=http://127.0.0.1:7890
 docker compose up --build
 ```
 
+If you set `OPS_MASTER_KEY`, ensure it is exactly 32 ASCII characters:
+
+```bash
+export OPS_MASTER_KEY='01234567890123456789012345678901'
+docker compose up --build
+```
+
 Service endpoint:
 
 - API: `http://localhost:8080`

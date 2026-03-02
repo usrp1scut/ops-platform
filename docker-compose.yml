@@ -60,7 +60,7 @@ services:
     environment:
       OPS_HTTP_ADDR: ":8080"
       OPS_DATABASE_URL: postgres://ops:ops@postgres:5432/ops_platform?sslmode=disable
-      OPS_MASTER_KEY: 01234567890123456789012345678901
+      OPS_MASTER_KEY: "${OPS_MASTER_KEY:-01234567890123456789012345678901}"
       HTTP_PROXY: ${HTTP_PROXY-}
       HTTPS_PROXY: ${HTTPS_PROXY-}
     ports:
