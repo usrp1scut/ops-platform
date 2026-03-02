@@ -10,6 +10,7 @@
     awsAccounts: [],
     awsSyncRuns: [],
     awsSyncStatus: null,
+    oidcSettings: null,
     iamUsers: [],
     iamRoles: [],
     selectedUserID: "",
@@ -23,6 +24,9 @@
     pageTitle: document.getElementById("page-title"),
     currentUser: document.getElementById("current-user"),
     tokenInput: document.getElementById("token-input"),
+    localUsernameInput: document.getElementById("local-username-input"),
+    localPasswordInput: document.getElementById("local-password-input"),
+    localLoginBtn: document.getElementById("local-login-btn"),
     authStatus: document.getElementById("auth-status"),
     permissionBadges: document.getElementById("permission-badges"),
     consoleOutput: document.getElementById("console-output"),
@@ -52,6 +56,18 @@
     refreshIamRolesBtn: document.getElementById("refresh-iam-roles-btn"),
     refreshIamSelectionBtn: document.getElementById("refresh-iam-selection-btn"),
     iamBindRoleBtn: document.getElementById("iam-bind-role-btn"),
+    oidcSettingsForm: document.getElementById("oidc-settings-form"),
+    oidcEnabledInput: document.getElementById("oidc-enabled-input"),
+    oidcIssuerURLInput: document.getElementById("oidc-issuer-url-input"),
+    oidcClientIDInput: document.getElementById("oidc-client-id-input"),
+    oidcClientSecretInput: document.getElementById("oidc-client-secret-input"),
+    oidcRedirectURLInput: document.getElementById("oidc-redirect-url-input"),
+    oidcAuthorizeURLInput: document.getElementById("oidc-authorize-url-input"),
+    oidcTokenURLInput: document.getElementById("oidc-token-url-input"),
+    oidcUserInfoURLInput: document.getElementById("oidc-userinfo-url-input"),
+    oidcScopesInput: document.getElementById("oidc-scopes-input"),
+    refreshOIDCSettingsBtn: document.getElementById("refresh-oidc-settings-btn"),
+    oidcSettingsOutput: document.getElementById("oidc-settings-output"),
   };
 
   function pretty(value) {
@@ -297,6 +313,40 @@
     });
   }
 
+  function renderOIDCSettings() {
+    if (!elements.oidcSettingsOutput) {
+      return;
+    }
+    if (!state.oidcSettings) {
+      elements.oidcSettingsOutput.textContent = "OIDC config not loaded.";
+      return;
+    }
+
+    const settings = state.oidcSettings;
+    elements.oidcEnabledInput.checked = !!settings.enabled;
+    elements.oidcIssuerURLInput.value = settings.issuer_url || "";
+    elements.oidcClientIDInput.value = settings.client_id || "";
+    elements.oidcClientSecretInput.value = "";
+    elements.oidcRedirectURLInput.value = settings.redirect_url || "";
+    elements.oidcAuthorizeURLInput.value = settings.authorize_url || "";
+    elements.oidcTokenURLInput.value = settings.token_url || "";
+    elements.oidcUserInfoURLInput.value = settings.userinfo_url || "";
+    elements.oidcScopesInput.value = (settings.scopes || []).join(",");
+
+    elements.oidcSettingsOutput.textContent = pretty({
+      enabled: settings.enabled,
+      issuer_url: settings.issuer_url || "",
+      client_id: settings.client_id || "",
+      has_client_secret: !!settings.has_client_secret,
+      redirect_url: settings.redirect_url || "",
+      authorize_url: settings.authorize_url || "",
+      token_url: settings.token_url || "",
+      userinfo_url: settings.userinfo_url || "",
+      scopes: settings.scopes || [],
+      updated_at: settings.updated_at || null,
+    });
+  }
+
   function renderIAMUserTable() {
     elements.iamUsersTableBody.innerHTML = "";
 
@@ -452,6 +502,17 @@
     elements.iamUserSearch.disabled = disableIAMRead;
     elements.iamRoleSelect.disabled = disableIAMRead || disableIAMWrite;
     elements.iamBindRoleBtn.disabled = disableIAMRead || disableIAMWrite || !state.selectedUserID;
+    if (elements.refreshOIDCSettingsBtn) {
+      elements.refreshOIDCSettingsBtn.disabled = disableIAMRead;
+    }
+    if (elements.oidcSettingsForm) {
+      elements.oidcSettingsForm.querySelectorAll("input,button,select,textarea").forEach(function (el) {
+        if (el.id === "refresh-oidc-settings-btn") {
+          return;
+        }
+        el.disabled = disableIAMWrite;
+      });
+    }
   }
 
   async function api(path, options) {
@@ -498,6 +559,23 @@
       .filter(Boolean);
   }
 
+  function parseScopes(csv) {
+    if (!csv || !csv.trim()) {
+      return ["openid", "profile", "email"];
+    }
+    const unique = new Set();
+    csv
+      .split(",")
+      .map(function (item) {
+        return item.trim();
+      })
+      .filter(Boolean)
+      .forEach(function (item) {
+        unique.add(item);
+      });
+    return Array.from(unique);
+  }
+
   async function refreshHealth() {
     try {
       const health = await api("/healthz");
@@ -516,7 +594,7 @@
       state.permissions = [];
       renderAuthState();
       applyPermissionUI();
-      writeConsole("Missing token. Use OIDC login or paste token manually.", false);
+      writeConsole("Missing token. Use local login / OIDC login or paste token manually.", false);
       return false;
     }
 
@@ -636,6 +714,91 @@
     } catch (error) {
       writeConsole(error.message, false);
       logActivity("AWS sync trigger failed.");
+    }
+  }
+
+  async function localLogin() {
+    const username = (elements.localUsernameInput.value || "").trim();
+    const password = String(elements.localPasswordInput.value || "");
+    if (!username || !password) {
+      writeConsole("username and password are required", false);
+      return;
+    }
+    try {
+      const data = await api("/auth/local/login", {
+        method: "POST",
+        body: JSON.stringify({
+          username: username,
+          password: password,
+        }),
+      });
+      saveToken(data.access_token || "");
+      elements.localPasswordInput.value = "";
+      writeConsole(data, true);
+      logActivity("Local admin login succeeded.");
+      const ok = await refreshProfile();
+      if (ok) {
+        await loadAuthorizedData();
+      }
+    } catch (error) {
+      writeConsole(error.message, false);
+      logActivity("Local admin login failed.");
+    }
+  }
+
+  async function refreshOIDCSettings() {
+    if (!canReadIAM()) {
+      state.oidcSettings = null;
+      renderOIDCSettings();
+      return;
+    }
+    try {
+      state.oidcSettings = await api("/api/v1/iam/oidc-config");
+      renderOIDCSettings();
+      logActivity("OIDC settings refreshed.");
+    } catch (error) {
+      state.oidcSettings = null;
+      renderOIDCSettings();
+      writeConsole(error.message, false);
+      logActivity("OIDC settings refresh failed.");
+    }
+  }
+
+  async function saveOIDCSettings(event) {
+    event.preventDefault();
+    if (!canWriteIAM()) {
+      writeConsole("Permission required: iam.user:write", false);
+      return;
+    }
+
+    const body = {
+      enabled: !!elements.oidcEnabledInput.checked,
+      issuer_url: (elements.oidcIssuerURLInput.value || "").trim(),
+      client_id: (elements.oidcClientIDInput.value || "").trim(),
+      client_secret: elements.oidcClientSecretInput.value || "",
+      redirect_url: (elements.oidcRedirectURLInput.value || "").trim(),
+      authorize_url: (elements.oidcAuthorizeURLInput.value || "").trim(),
+      token_url: (elements.oidcTokenURLInput.value || "").trim(),
+      userinfo_url: (elements.oidcUserInfoURLInput.value || "").trim(),
+      scopes: parseScopes(elements.oidcScopesInput.value || ""),
+    };
+
+    if (!body.client_secret) {
+      delete body.client_secret;
+    }
+
+    try {
+      const settings = await api("/api/v1/iam/oidc-config", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+      state.oidcSettings = settings;
+      renderOIDCSettings();
+      writeConsole(settings, true);
+      logActivity("OIDC settings updated.");
+    } catch (error) {
+      writeConsole(error.message, false);
+      logActivity("OIDC settings update failed.");
     }
   }
 
@@ -858,6 +1021,7 @@
       refreshAwsSyncRuns(),
       refreshIAMRoles(),
       refreshIAMUsers(),
+      refreshOIDCSettings(),
     ]);
     await refreshSelectedUserIdentity();
     applyPermissionUI();
@@ -875,6 +1039,17 @@
     document.getElementById("oidc-login-btn").addEventListener("click", function () {
       window.location.href = "/auth/oidc/login";
     });
+    if (elements.localLoginBtn) {
+      elements.localLoginBtn.addEventListener("click", localLogin);
+    }
+    if (elements.localPasswordInput) {
+      elements.localPasswordInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          localLogin();
+        }
+      });
+    }
 
     document.getElementById("auth-refresh-btn").addEventListener("click", async function () {
       const ok = await refreshProfile();
@@ -899,6 +1074,12 @@
     elements.refreshIamRolesBtn.addEventListener("click", refreshIAMRoles);
     elements.refreshIamSelectionBtn.addEventListener("click", refreshSelectedUserIdentity);
     elements.iamBindRoleBtn.addEventListener("click", bindRoleToSelectedUser);
+    if (elements.refreshOIDCSettingsBtn) {
+      elements.refreshOIDCSettingsBtn.addEventListener("click", refreshOIDCSettings);
+    }
+    if (elements.oidcSettingsForm) {
+      elements.oidcSettingsForm.addEventListener("submit", saveOIDCSettings);
+    }
 
     document.getElementById("save-token-btn").addEventListener("click", async function () {
       const value = elements.tokenInput.value.trim();
@@ -919,6 +1100,7 @@
       state.awsAccounts = [];
       state.awsSyncRuns = [];
       state.awsSyncStatus = null;
+      state.oidcSettings = null;
       state.iamUsers = [];
       state.iamRoles = [];
       state.selectedUserID = "";
@@ -928,6 +1110,7 @@
       renderAwsTable();
       renderAwsSyncStatus();
       renderAwsSyncRunsTable();
+      renderOIDCSettings();
       renderIAMUserTable();
       renderIAMRolesTable();
       renderIAMSelectedUser();
@@ -990,6 +1173,7 @@
     renderAwsTable();
     renderAwsSyncStatus();
     renderAwsSyncRunsTable();
+    renderOIDCSettings();
     renderIAMUserTable();
     renderIAMRolesTable();
     renderIAMSelectedUser();

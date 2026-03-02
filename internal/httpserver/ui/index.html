@@ -38,6 +38,13 @@
           </div>
           <div id="auth-status" class="status">No active session</div>
           <div id="permission-badges" class="badge-row"></div>
+          <div class="split-row">
+            <input id="local-username-input" value="admin" placeholder="local admin username" />
+            <input id="local-password-input" type="password" placeholder="local admin password" />
+          </div>
+          <div class="auth-actions">
+            <button id="local-login-btn" class="btn subtle">Local Login</button>
+          </div>
         </section>
       </aside>
 
@@ -269,6 +276,31 @@
                 <pre id="iam-role-permissions-output" class="log-box">Select a role to view permissions.</pre>
               </div>
             </div>
+          </div>
+
+          <div class="panel">
+            <header class="panel-header">
+              <h3>OIDC Settings</h3>
+              <div class="row">
+                <button id="refresh-oidc-settings-btn" class="btn subtle">Refresh Config</button>
+              </div>
+            </header>
+            <form id="oidc-settings-form" class="form-grid">
+              <label class="inline">
+                <input id="oidc-enabled-input" type="checkbox" />
+                Enabled
+              </label>
+              <input id="oidc-issuer-url-input" placeholder="issuer_url (optional if explicit endpoints filled)" />
+              <input id="oidc-client-id-input" placeholder="client_id" />
+              <input id="oidc-client-secret-input" type="password" placeholder="client_secret (leave empty to keep)" />
+              <input id="oidc-redirect-url-input" placeholder="redirect_url (http://localhost:8080/auth/oidc/callback)" />
+              <input id="oidc-authorize-url-input" placeholder="authorize_url (optional if issuer_url set)" />
+              <input id="oidc-token-url-input" placeholder="token_url (optional if issuer_url set)" />
+              <input id="oidc-userinfo-url-input" placeholder="userinfo_url (optional if issuer_url set)" />
+              <input id="oidc-scopes-input" placeholder="scopes csv: openid,profile,email" />
+              <button id="save-oidc-settings-btn" type="submit" class="btn">Save OIDC Config</button>
+            </form>
+            <pre id="oidc-settings-output" class="log-box">OIDC config not loaded.</pre>
           </div>
         </section>
 
