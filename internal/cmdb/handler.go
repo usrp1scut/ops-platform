@@ -9,23 +9,47 @@ import (
 )
 
 type Handler struct {
-	repo *Repository
+	repo    *Repository
+	readMW  func(http.Handler) http.Handler
+	writeMW func(http.Handler) http.Handler
 }
 
-func NewHandler(repo *Repository) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(
+	repo *Repository,
+	readMW func(http.Handler) http.Handler,
+	writeMW func(http.Handler) http.Handler,
+) *Handler {
+	return &Handler{
+		repo:    repo,
+		readMW:  readMW,
+		writeMW: writeMW,
+	}
 }
 
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	r.Get("/", h.ListAssets)
-	r.Post("/", h.CreateAsset)
-	r.Get("/{assetID}", h.GetAsset)
-	r.Patch("/{assetID}", h.UpdateAsset)
-	r.Delete("/{assetID}", h.DeleteAsset)
+	r.With(h.withReadAuth).Get("/", h.ListAssets)
+	r.With(h.withWriteAuth).Post("/", h.CreateAsset)
+	r.With(h.withReadAuth).Get("/{assetID}", h.GetAsset)
+	r.With(h.withWriteAuth).Patch("/{assetID}", h.UpdateAsset)
+	r.With(h.withWriteAuth).Delete("/{assetID}", h.DeleteAsset)
 
 	return r
+}
+
+func (h *Handler) withReadAuth(next http.Handler) http.Handler {
+	if h.readMW == nil {
+		return next
+	}
+	return h.readMW(next)
+}
+
+func (h *Handler) withWriteAuth(next http.Handler) http.Handler {
+	if h.writeMW == nil {
+		return next
+	}
+	return h.writeMW(next)
 }
 
 func (h *Handler) ListAssets(w http.ResponseWriter, r *http.Request) {

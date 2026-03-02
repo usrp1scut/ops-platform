@@ -9,20 +9,44 @@ import (
 )
 
 type Handler struct {
-	repo *Repository
+	repo    *Repository
+	readMW  func(http.Handler) http.Handler
+	writeMW func(http.Handler) http.Handler
 }
 
-func NewHandler(repo *Repository) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(
+	repo *Repository,
+	readMW func(http.Handler) http.Handler,
+	writeMW func(http.Handler) http.Handler,
+) *Handler {
+	return &Handler{
+		repo:    repo,
+		readMW:  readMW,
+		writeMW: writeMW,
+	}
 }
 
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.Get("/", h.ListAccounts)
-	r.Post("/", h.CreateAccount)
-	r.Get("/{accountID}", h.GetAccount)
-	r.Patch("/{accountID}", h.UpdateAccount)
+	r.With(h.withReadAuth).Get("/", h.ListAccounts)
+	r.With(h.withWriteAuth).Post("/", h.CreateAccount)
+	r.With(h.withReadAuth).Get("/{accountID}", h.GetAccount)
+	r.With(h.withWriteAuth).Patch("/{accountID}", h.UpdateAccount)
 	return r
+}
+
+func (h *Handler) withReadAuth(next http.Handler) http.Handler {
+	if h.readMW == nil {
+		return next
+	}
+	return h.readMW(next)
+}
+
+func (h *Handler) withWriteAuth(next http.Handler) http.Handler {
+	if h.writeMW == nil {
+		return next
+	}
+	return h.writeMW(next)
 }
 
 func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
