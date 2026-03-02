@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,6 +26,11 @@ type Config struct {
 	OIDCBootstrapAdminSubs []string
 	SyncInterval           time.Duration
 	SyncRunOnStart         bool
+	ProbeInterval          time.Duration
+	ProbeRunOnStart        bool
+	ProbeTimeout           time.Duration
+	ProbeConcurrency       int
+	ProbeBatchSize         int
 }
 
 func Load() (Config, error) {
@@ -44,6 +50,7 @@ func Load() (Config, error) {
 		OIDCScopes:             parseCSV(getenv("OPS_OIDC_SCOPES", "openid,profile,email")),
 		OIDCBootstrapAdminSubs: parseCSV(strings.TrimSpace(os.Getenv("OPS_OIDC_BOOTSTRAP_ADMIN_SUBS"))),
 		SyncRunOnStart:         !strings.EqualFold(strings.TrimSpace(getenv("OPS_SYNC_RUN_ON_START", "true")), "false"),
+		ProbeRunOnStart:        !strings.EqualFold(strings.TrimSpace(getenv("OPS_PROBE_RUN_ON_START", "true")), "false"),
 	}
 
 	intervalText := strings.TrimSpace(getenv("OPS_SYNC_INTERVAL", "15m"))
@@ -55,6 +62,46 @@ func Load() (Config, error) {
 		return Config{}, errors.New("OPS_SYNC_INTERVAL must be >= 1m")
 	}
 	cfg.SyncInterval = interval
+
+	probeIntervalText := strings.TrimSpace(getenv("OPS_PROBE_INTERVAL", "30m"))
+	probeInterval, err := time.ParseDuration(probeIntervalText)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid OPS_PROBE_INTERVAL: %w", err)
+	}
+	if probeInterval < time.Minute {
+		return Config{}, errors.New("OPS_PROBE_INTERVAL must be >= 1m")
+	}
+	cfg.ProbeInterval = probeInterval
+
+	probeTimeoutText := strings.TrimSpace(getenv("OPS_PROBE_TIMEOUT", "20s"))
+	probeTimeout, err := time.ParseDuration(probeTimeoutText)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid OPS_PROBE_TIMEOUT: %w", err)
+	}
+	if probeTimeout < 5*time.Second {
+		return Config{}, errors.New("OPS_PROBE_TIMEOUT must be >= 5s")
+	}
+	cfg.ProbeTimeout = probeTimeout
+
+	probeConcurrencyText := strings.TrimSpace(getenv("OPS_PROBE_CONCURRENCY", "4"))
+	probeConcurrency, err := parsePositiveInt(probeConcurrencyText)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid OPS_PROBE_CONCURRENCY: %w", err)
+	}
+	if probeConcurrency > 32 {
+		return Config{}, errors.New("OPS_PROBE_CONCURRENCY must be <= 32")
+	}
+	cfg.ProbeConcurrency = probeConcurrency
+
+	probeBatchSizeText := strings.TrimSpace(getenv("OPS_PROBE_BATCH_SIZE", "200"))
+	probeBatchSize, err := parsePositiveInt(probeBatchSizeText)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid OPS_PROBE_BATCH_SIZE: %w", err)
+	}
+	if probeBatchSize > 1000 {
+		return Config{}, errors.New("OPS_PROBE_BATCH_SIZE must be <= 1000")
+	}
+	cfg.ProbeBatchSize = probeBatchSize
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("OPS_DATABASE_URL is required")
@@ -117,4 +164,15 @@ func parseCSV(input string) []string {
 		values = append(values, trimmed)
 	}
 	return values
+}
+
+func parsePositiveInt(raw string) (int, error) {
+	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, err
+	}
+	if parsed <= 0 {
+		return 0, errors.New("must be > 0")
+	}
+	return parsed, nil
 }
