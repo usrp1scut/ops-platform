@@ -16,6 +16,14 @@ This repository contains an initial implementation aligned with `docs/design/ops
 docker compose up --build
 ```
 
+If you need proxy during build/runtime, set optional env vars before starting:
+
+```bash
+export HTTP_PROXY=http://127.0.0.1:7890
+export HTTPS_PROXY=http://127.0.0.1:7890
+docker compose up --build
+```
+
 Service endpoint:
 
 - API: `http://localhost:8080`
@@ -60,4 +68,3 @@ go run ./cmd/ops-api
 - Bastion gateway service with SSH session recording.
 - Nightingale webhook ingestion and Lark notification routing.
 - AWS sync worker for EC2/VPC/SG/RDS resources.
-
