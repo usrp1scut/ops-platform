@@ -3,71 +3,220 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ops Platform Validation Console</title>
+    <title>Ops Platform Console</title>
     <link rel="stylesheet" href="/ui/styles.css" />
   </head>
   <body>
-    <div class="bg-grid"></div>
-    <main class="layout">
-      <header class="hero">
-        <p class="kicker">Ops Platform</p>
-        <h1>Validation Console</h1>
-        <p class="subtitle">Verify OIDC, RBAC, CMDB, and AWS-account APIs in one place.</p>
-      </header>
+    <div class="backdrop"></div>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <p class="brand-mini">OPS PLATFORM</p>
+          <h1 class="brand-title">Control Room</h1>
+        </div>
 
-      <section class="card">
-        <h2>Authentication</h2>
-        <div class="row">
-          <button id="oidc-login-btn" class="btn">Start OIDC Login</button>
-          <button id="check-me-btn" class="btn secondary">Check /auth/me</button>
-          <button id="clear-token-btn" class="btn ghost">Clear Token</button>
-        </div>
-        <label for="token-input">Bearer Token</label>
-        <textarea id="token-input" rows="3" placeholder="Paste access token from /auth/oidc/callback response"></textarea>
-        <div class="row">
-          <button id="save-token-btn" class="btn">Save Token</button>
-        </div>
-        <pre id="auth-output" class="output"></pre>
-      </section>
+        <nav class="nav" id="nav-menu">
+          <button class="nav-item active" data-view="overview">Overview</button>
+          <button class="nav-item" data-view="cmdb">CMDB</button>
+          <button class="nav-item" data-view="aws">AWS Accounts</button>
+          <button class="nav-item" data-view="alerts">Alerts</button>
+          <button class="nav-item" data-view="bastion">Bastion</button>
+        </nav>
 
-      <section class="card">
-        <h2>CMDB Assets</h2>
-        <form id="asset-form" class="form-grid">
-          <input name="type" placeholder="type (e.g. aws_ec2_instance)" required />
-          <input name="name" placeholder="name" required />
-          <input name="env" placeholder="env (default/prod)" />
-          <input name="source" placeholder="source (manual/aws)" />
-          <button type="submit" class="btn">Create Asset</button>
-        </form>
-        <div class="row">
-          <button id="refresh-assets-btn" class="btn secondary">Refresh Assets</button>
-        </div>
-        <pre id="assets-output" class="output"></pre>
-      </section>
+        <section class="auth-panel">
+          <h2>Access</h2>
+          <div class="auth-actions">
+            <button id="oidc-login-btn" class="btn">OIDC Login</button>
+            <button id="auth-refresh-btn" class="btn ghost">Refresh Profile</button>
+          </div>
+          <label for="token-input">Access Token</label>
+          <textarea id="token-input" rows="3" placeholder="Paste token for local debug"></textarea>
+          <div class="auth-actions">
+            <button id="save-token-btn" class="btn subtle">Save</button>
+            <button id="clear-token-btn" class="btn subtle">Clear</button>
+          </div>
+          <div id="auth-status" class="status">No active session</div>
+          <div id="permission-badges" class="badge-row"></div>
+        </section>
+      </aside>
 
-      <section class="card">
-        <h2>AWS Accounts</h2>
-        <form id="aws-form" class="form-grid">
-          <input name="account_id" placeholder="account_id (12 digits)" required />
-          <input name="display_name" placeholder="display_name" required />
-          <select name="auth_mode">
-            <option value="assume_role">assume_role</option>
-            <option value="static">static</option>
-          </select>
-          <input name="role_arn" placeholder="role_arn (for assume_role)" />
-          <input name="access_key_id" placeholder="access_key_id (for static)" />
-          <input name="secret_access_key" placeholder="secret_access_key (for static)" />
-          <input name="region_allowlist" placeholder="region csv (e.g. us-east-1,ap-southeast-1)" />
-          <button type="submit" class="btn">Create AWS Account</button>
-        </form>
-        <div class="row">
-          <button id="refresh-aws-btn" class="btn secondary">Refresh AWS Accounts</button>
-        </div>
-        <pre id="aws-output" class="output"></pre>
-      </section>
-    </main>
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="page-kicker">Unified Ops Console</p>
+            <h2 id="page-title">Overview</h2>
+          </div>
+          <div class="topbar-right">
+            <span id="current-user" class="user-chip">Guest</span>
+            <span class="env-chip">Single Tenant</span>
+          </div>
+        </header>
+
+        <section id="view-overview" class="view active">
+          <div class="stats-grid">
+            <article class="stat-card">
+              <p class="stat-label">Assets</p>
+              <p id="stat-assets" class="stat-value">0</p>
+            </article>
+            <article class="stat-card">
+              <p class="stat-label">AWS Accounts</p>
+              <p id="stat-accounts" class="stat-value">0</p>
+            </article>
+            <article class="stat-card">
+              <p class="stat-label">User Roles</p>
+              <p id="stat-roles" class="stat-value">0</p>
+            </article>
+            <article class="stat-card">
+              <p class="stat-label">Write Access</p>
+              <p id="stat-write-access" class="stat-value">No</p>
+            </article>
+          </div>
+
+          <div class="panel-grid">
+            <article class="panel">
+              <header class="panel-header">
+                <h3>Platform Health</h3>
+                <button id="refresh-overview-btn" class="btn subtle">Refresh</button>
+              </header>
+              <div id="overview-health" class="log-box">Waiting for check...</div>
+            </article>
+            <article class="panel">
+              <header class="panel-header">
+                <h3>Recent Activity</h3>
+              </header>
+              <div id="overview-activity" class="log-box">No activity yet.</div>
+            </article>
+          </div>
+        </section>
+
+        <section id="view-cmdb" class="view">
+          <div class="panel">
+            <header class="panel-header">
+              <h3>Asset Inventory</h3>
+              <div class="row">
+                <input id="asset-search" class="compact-input" placeholder="Search by name or external id" />
+                <button id="refresh-assets-btn" class="btn subtle">Refresh</button>
+              </div>
+            </header>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Env</th>
+                    <th>Status</th>
+                    <th>Source</th>
+                    <th>External ID</th>
+                  </tr>
+                </thead>
+                <tbody id="assets-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <header class="panel-header">
+              <h3>Create Asset</h3>
+            </header>
+            <form id="asset-form" class="form-grid">
+              <input name="name" placeholder="asset name" required />
+              <input name="type" placeholder="asset type (aws_ec2_instance)" required />
+              <input name="env" placeholder="env (default/prod)" />
+              <input name="status" placeholder="status (active/terminated)" />
+              <input name="source" placeholder="source (manual/aws)" />
+              <input name="external_id" placeholder="external_id (optional)" />
+              <button type="submit" class="btn">Create Asset</button>
+            </form>
+          </div>
+        </section>
+
+        <section id="view-aws" class="view">
+          <div class="panel">
+            <header class="panel-header">
+              <h3>AWS Account Registry</h3>
+              <button id="refresh-aws-btn" class="btn subtle">Refresh</button>
+            </header>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Account ID</th>
+                    <th>Name</th>
+                    <th>Auth Mode</th>
+                    <th>Role ARN</th>
+                    <th>Regions</th>
+                    <th>Enabled</th>
+                  </tr>
+                </thead>
+                <tbody id="aws-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <header class="panel-header">
+              <h3>Add AWS Account</h3>
+            </header>
+            <form id="aws-form" class="form-grid">
+              <input name="account_id" placeholder="12-digit account_id" required />
+              <input name="display_name" placeholder="display name" required />
+              <select name="auth_mode">
+                <option value="assume_role">assume_role</option>
+                <option value="static">static</option>
+              </select>
+              <input name="role_arn" placeholder="role_arn for assume_role mode" />
+              <input name="access_key_id" placeholder="access_key_id for static mode" />
+              <input name="secret_access_key" placeholder="secret_access_key for static mode" />
+              <input name="external_id" placeholder="optional external_id for assume_role" />
+              <input name="region_allowlist" placeholder="regions csv: us-east-1,ap-southeast-1" />
+              <button type="submit" class="btn">Create AWS Account</button>
+            </form>
+          </div>
+        </section>
+
+        <section id="view-alerts" class="view">
+          <div class="panel">
+            <header class="panel-header">
+              <h3>Alert Center</h3>
+            </header>
+            <p class="muted">
+              Nightingale event ingestion and Lark routing UI will be wired when alert APIs are ready.
+            </p>
+            <ul class="checkpoint-list">
+              <li>Alert list and status timeline</li>
+              <li>Acknowledge / silence actions</li>
+              <li>CMDB enrichment and owner mapping</li>
+              <li>Lark route and template management</li>
+            </ul>
+          </div>
+        </section>
+
+        <section id="view-bastion" class="view">
+          <div class="panel">
+            <header class="panel-header">
+              <h3>Bastion Console</h3>
+            </header>
+            <p class="muted">
+              SSH gateway/session replay management UI is staged for next backend milestone.
+            </p>
+            <ul class="checkpoint-list">
+              <li>Session launch by asset and policy</li>
+              <li>Access request and approval queue</li>
+              <li>Session recording search and playback</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="panel footer-panel">
+          <header class="panel-header">
+            <h3>Response Console</h3>
+          </header>
+          <pre id="console-output" class="console-box">Ready.</pre>
+        </section>
+      </main>
+    </div>
 
     <script src="/ui/app.js"></script>
   </body>
 </html>
-
