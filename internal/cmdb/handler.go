@@ -9,20 +9,23 @@ import (
 )
 
 type Handler struct {
-	repo    *Repository
-	readMW  func(http.Handler) http.Handler
-	writeMW func(http.Handler) http.Handler
+	masterKey string
+	repo      *Repository
+	readMW    func(http.Handler) http.Handler
+	writeMW   func(http.Handler) http.Handler
 }
 
 func NewHandler(
+	masterKey string,
 	repo *Repository,
 	readMW func(http.Handler) http.Handler,
 	writeMW func(http.Handler) http.Handler,
 ) *Handler {
 	return &Handler{
-		repo:    repo,
-		readMW:  readMW,
-		writeMW: writeMW,
+		masterKey: masterKey,
+		repo:      repo,
+		readMW:    readMW,
+		writeMW:   writeMW,
 	}
 }
 
@@ -34,6 +37,11 @@ func (h *Handler) Routes() chi.Router {
 	r.With(h.withReadAuth).Get("/{assetID}", h.GetAsset)
 	r.With(h.withWriteAuth).Patch("/{assetID}", h.UpdateAsset)
 	r.With(h.withWriteAuth).Delete("/{assetID}", h.DeleteAsset)
+	r.With(h.withReadAuth).Get("/{assetID}/connection", h.GetAssetConnection)
+	r.With(h.withWriteAuth).Get("/{assetID}/connection/resolve", h.ResolveAssetConnection)
+	r.With(h.withWriteAuth).Put("/{assetID}/connection", h.UpsertAssetConnection)
+	r.With(h.withReadAuth).Get("/{assetID}/probe/latest", h.GetLatestAssetProbe)
+	r.With(h.withWriteAuth).Post("/{assetID}/probe", h.UpsertAssetProbe)
 
 	return r
 }
@@ -137,6 +145,94 @@ func (h *Handler) DeleteAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *Handler) GetAssetConnection(w http.ResponseWriter, r *http.Request) {
+	assetID := chi.URLParam(r, "assetID")
+	profile, err := h.repo.GetAssetConnectionProfile(r.Context(), assetID, false, h.masterKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAssetNotFound), errors.Is(err, ErrConnectionProfileNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, profile)
+}
+
+func (h *Handler) ResolveAssetConnection(w http.ResponseWriter, r *http.Request) {
+	assetID := chi.URLParam(r, "assetID")
+	profile, err := h.repo.ResolveAssetConnectionProfile(r.Context(), assetID, h.masterKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAssetNotFound), errors.Is(err, ErrConnectionProfileNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, profile)
+}
+
+func (h *Handler) UpsertAssetConnection(w http.ResponseWriter, r *http.Request) {
+	assetID := chi.URLParam(r, "assetID")
+
+	var req UpsertAssetConnectionProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	profile, err := h.repo.UpsertAssetConnectionProfile(r.Context(), assetID, req, h.masterKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAssetNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, profile)
+}
+
+func (h *Handler) GetLatestAssetProbe(w http.ResponseWriter, r *http.Request) {
+	assetID := chi.URLParam(r, "assetID")
+	snapshot, err := h.repo.GetLatestAssetProbeSnapshot(r.Context(), assetID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAssetNotFound), errors.Is(err, ErrProbeSnapshotNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (h *Handler) UpsertAssetProbe(w http.ResponseWriter, r *http.Request) {
+	assetID := chi.URLParam(r, "assetID")
+	var req UpsertAssetProbeSnapshotRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	snapshot, err := h.repo.UpsertAssetProbeSnapshot(r.Context(), assetID, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAssetNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 type errorBody struct {

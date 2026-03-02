@@ -46,6 +46,7 @@ func (s *Server) Router() http.Handler {
 	awsSyncHandler := newAWSSyncHandler(awsRepo, awsSyncRunner)
 
 	cmdbHandler := cmdb.NewHandler(
+		s.cfg.MasterKey,
 		cmdb.NewRepository(s.db),
 		iam.RequirePermission("cmdb.asset", "read"),
 		iam.RequirePermission("cmdb.asset", "write"),
