@@ -28,6 +28,7 @@ func (s *Server) Router() http.Handler {
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
+	mountUIRoutes(router)
 
 	iamRepo := iam.NewRepository(s.db)
 	iamHandler := iam.NewHandler(s.cfg, iamRepo)
