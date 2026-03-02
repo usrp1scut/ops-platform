@@ -19,6 +19,7 @@
           <button class="nav-item active" data-view="overview">Overview</button>
           <button class="nav-item" data-view="cmdb">CMDB</button>
           <button class="nav-item" data-view="aws">AWS Accounts</button>
+          <button class="nav-item" data-view="iam">IAM</button>
           <button class="nav-item" data-view="alerts">Alerts</button>
           <button class="nav-item" data-view="bastion">Bastion</button>
         </nav>
@@ -172,6 +173,75 @@
               <input name="region_allowlist" placeholder="regions csv: us-east-1,ap-southeast-1" />
               <button type="submit" class="btn">Create AWS Account</button>
             </form>
+          </div>
+        </section>
+
+        <section id="view-iam" class="view">
+          <div class="iam-grid">
+            <div class="panel">
+              <header class="panel-header">
+                <h3>Users</h3>
+                <div class="row">
+                  <input id="iam-user-search" class="compact-input" placeholder="Search user email/name/subject" />
+                  <button id="refresh-iam-users-btn" class="btn subtle">Refresh</button>
+                </div>
+              </header>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>User</th>
+                      <th>Email</th>
+                      <th>Subject</th>
+                      <th>Roles</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="iam-users-table-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="panel">
+              <header class="panel-header">
+                <h3>Selected User Access</h3>
+                <button id="refresh-iam-selection-btn" class="btn subtle">Reload</button>
+              </header>
+              <div id="iam-selected-user" class="log-box">No user selected.</div>
+              <div class="split-row">
+                <select id="iam-role-select"></select>
+                <button id="iam-bind-role-btn" class="btn">Bind Role</button>
+              </div>
+              <div id="iam-user-roles" class="role-chip-row"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <header class="panel-header">
+              <h3>Role Permissions</h3>
+              <div class="row">
+                <button id="refresh-iam-roles-btn" class="btn subtle">Refresh Roles</button>
+              </div>
+            </header>
+            <div class="iam-grid">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Role</th>
+                      <th>Description</th>
+                      <th>Permissions</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="iam-roles-table-body"></tbody>
+                </table>
+              </div>
+              <div>
+                <h4 class="sub-title">Permission Details</h4>
+                <pre id="iam-role-permissions-output" class="log-box">Select a role to view permissions.</pre>
+              </div>
+            </div>
           </div>
         </section>
 

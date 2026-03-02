@@ -87,6 +87,13 @@ go run ./cmd/ops-api
 - `POST /api/v1/aws/accounts`
 - `GET /api/v1/aws/accounts/{accountID}`
 - `PATCH /api/v1/aws/accounts/{accountID}`
+- `GET /api/v1/iam/users`
+- `GET /api/v1/iam/users/{userID}`
+- `GET /api/v1/iam/roles`
+- `GET /api/v1/iam/roles?include_permissions=true`
+- `GET /api/v1/iam/roles/{roleName}/permissions`
+- `POST /api/v1/iam/users/{userID}/roles` (body: `{"role_name":"ops"}`)
+- `DELETE /api/v1/iam/users/{userID}/roles/{roleName}`
 
 All `/api/v1/*` endpoints require platform bearer token.
 Token is returned by `GET /auth/oidc/callback` after successful OIDC login.
@@ -96,11 +103,10 @@ Token is returned by `GET /auth/oidc/callback` after successful OIDC login.
 1. Open `http://localhost:8080/ui/`.
 2. Click `OIDC Login` and complete IdP login (if OIDC is configured).
 3. Browser callback auto-saves token to `localStorage` and redirects back to `/ui/`.
-4. Use left navigation to operate `Overview`, `CMDB`, and `AWS Accounts`.
+4. Use left navigation to operate `Overview`, `CMDB`, `AWS Accounts`, and `IAM`.
 
 ## Next planned additions
 
-- User/role management APIs (bind/unbind roles).
 - Bastion gateway service with SSH session recording.
 - Nightingale webhook ingestion and Lark notification routing.
 - AWS sync worker for EC2/VPC/SG/RDS resources.

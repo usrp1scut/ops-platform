@@ -275,6 +275,12 @@ body {
   gap: 12px;
 }
 
+.iam-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -390,6 +396,50 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.split-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.role-chip-row {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid #d8c9b0;
+  padding: 4px 8px;
+  background: #f8ecd7;
+  color: #6b4718;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.role-chip button {
+  border: none;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #e9c5b8;
+  color: #7b2d24;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sub-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+
 .compact-input {
   min-width: 240px;
 }
@@ -417,6 +467,11 @@ select:focus {
 .btn.subtle {
   background: #d8e8ee;
   color: #18455a;
+}
+
+.btn.small {
+  padding: 6px 9px;
+  font-size: 12px;
 }
 
 .is-error {

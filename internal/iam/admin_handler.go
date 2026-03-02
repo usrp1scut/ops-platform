@@ -1,0 +1,178 @@
+package iam
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+)
+
+type AdminHandler struct {
+	repo    *Repository
+	readMW  func(http.Handler) http.Handler
+	writeMW func(http.Handler) http.Handler
+}
+
+func NewAdminHandler(
+	repo *Repository,
+	readMW func(http.Handler) http.Handler,
+	writeMW func(http.Handler) http.Handler,
+) *AdminHandler {
+	return &AdminHandler{
+		repo:    repo,
+		readMW:  readMW,
+		writeMW: writeMW,
+	}
+}
+
+func (h *AdminHandler) Routes() chi.Router {
+	r := chi.NewRouter()
+
+	r.With(h.withReadAuth).Get("/users", h.ListUsers)
+	r.With(h.withReadAuth).Get("/users/{userID}", h.GetUserIdentity)
+	r.With(h.withReadAuth).Get("/roles", h.ListRoles)
+	r.With(h.withReadAuth).Get("/roles/{roleName}/permissions", h.GetRolePermissions)
+	r.With(h.withWriteAuth).Post("/users/{userID}/roles", h.BindRole)
+	r.With(h.withWriteAuth).Delete("/users/{userID}/roles/{roleName}", h.UnbindRole)
+
+	return r
+}
+
+func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := h.repo.ListUsers(r.Context(), r.URL.Query().Get("q"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": users})
+}
+
+func (h *AdminHandler) GetUserIdentity(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	identity, err := h.repo.IdentityForUser(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, identity)
+}
+
+func (h *AdminHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
+	includePermissions := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_permissions")), "true") ||
+		strings.TrimSpace(r.URL.Query().Get("include_permissions")) == "1"
+	if includePermissions {
+		roles, err := h.repo.ListRolesWithPermissions(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": roles})
+		return
+	}
+
+	roles, err := h.repo.ListRoles(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": roles})
+}
+
+func (h *AdminHandler) GetRolePermissions(w http.ResponseWriter, r *http.Request) {
+	roleName := strings.TrimSpace(chi.URLParam(r, "roleName"))
+	if roleName == "" {
+		writeError(w, http.StatusBadRequest, "roleName is required")
+		return
+	}
+
+	permissions, err := h.repo.ListRolePermissions(r.Context(), roleName)
+	if err != nil {
+		if errors.Is(err, ErrRoleNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"role_name":   roleName,
+		"permissions": permissions,
+	})
+}
+
+func (h *AdminHandler) BindRole(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	var req BindRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	req.RoleName = strings.TrimSpace(req.RoleName)
+	if req.RoleName == "" {
+		writeError(w, http.StatusBadRequest, "role_name is required")
+		return
+	}
+
+	if err := h.repo.BindRoleToUser(r.Context(), userID, req.RoleName); err != nil {
+		switch {
+		case errors.Is(err, ErrUserNotFound), errors.Is(err, ErrRoleNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	identity, err := h.repo.IdentityForUser(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, identity)
+}
+
+func (h *AdminHandler) UnbindRole(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	roleName := strings.TrimSpace(chi.URLParam(r, "roleName"))
+	if roleName == "" {
+		writeError(w, http.StatusBadRequest, "roleName is required")
+		return
+	}
+
+	if err := h.repo.UnbindRoleFromUser(r.Context(), userID, roleName); err != nil {
+		switch {
+		case errors.Is(err, ErrUserNotFound), errors.Is(err, ErrRoleNotFound), errors.Is(err, ErrUserRoleBindingNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	identity, err := h.repo.IdentityForUser(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, identity)
+}
+
+func (h *AdminHandler) withReadAuth(next http.Handler) http.Handler {
+	if h.readMW == nil {
+		return next
+	}
+	return h.readMW(next)
+}
+
+func (h *AdminHandler) withWriteAuth(next http.Handler) http.Handler {
+	if h.writeMW == nil {
+		return next
+	}
+	return h.writeMW(next)
+}

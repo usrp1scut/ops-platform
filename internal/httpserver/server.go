@@ -32,6 +32,11 @@ func (s *Server) Router() http.Handler {
 
 	iamRepo := iam.NewRepository(s.db)
 	iamHandler := iam.NewHandler(s.cfg, iamRepo)
+	iamAdminHandler := iam.NewAdminHandler(
+		iamRepo,
+		iam.RequirePermission("iam.user", "read"),
+		iam.RequirePermission("iam.user", "write"),
+	)
 	tokenService := iam.NewTokenService(s.cfg.MasterKey)
 
 	cmdbHandler := cmdb.NewHandler(
@@ -58,6 +63,7 @@ func (s *Server) Router() http.Handler {
 		r.Use(iam.AuditMiddleware(iamRepo))
 		r.Mount("/cmdb/assets", cmdbHandler.Routes())
 		r.Mount("/aws/accounts", awsHandler.Routes())
+		r.Mount("/iam", iamAdminHandler.Routes())
 	})
 
 	return router
