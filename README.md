@@ -7,7 +7,9 @@ This repository contains an initial implementation aligned with `docs/design/ops
 - Go backend scaffold (`ops-api`) with structured routes.
 - PostgreSQL schema migrations for CMDB and AWS account onboarding.
 - IAM schema + seeded roles/permissions (`admin`, `ops`, `viewer`).
+- Local admin login endpoint (no OIDC required).
 - OIDC login endpoints with user sync (profile only).
+- OIDC runtime config API (manageable from web IAM page).
 - Platform bearer token auth + RBAC middleware + write-operation audit log.
 - Embedded frontend console for platform operations.
 - CMDB asset CRUD API.
@@ -34,6 +36,14 @@ If you set `OPS_MASTER_KEY`, ensure it is exactly 32 ASCII characters:
 
 ```bash
 export OPS_MASTER_KEY='01234567890123456789012345678901'
+docker compose up --build
+```
+
+Local admin defaults (change in non-dev environments):
+
+```bash
+export OPS_LOCAL_ADMIN_USERNAME='admin'
+export OPS_LOCAL_ADMIN_PASSWORD='admin123456'
 docker compose up --build
 ```
 
@@ -85,6 +95,8 @@ Service endpoint:
 export GOPROXY='https://goproxy.cn,direct'
 export OPS_DATABASE_URL='postgres://ops:ops@localhost:5432/ops_platform?sslmode=disable'
 export OPS_MASTER_KEY='01234567890123456789012345678901'
+export OPS_LOCAL_ADMIN_USERNAME='admin'
+export OPS_LOCAL_ADMIN_PASSWORD='admin123456'
 ```
 
 2. Run migrations:
@@ -109,6 +121,7 @@ go run ./cmd/ops-worker
 
 - `GET /auth/oidc/login`
 - `GET /auth/oidc/callback`
+- `POST /auth/local/login`
 - `GET /auth/me` (requires `Authorization: Bearer <token>`)
 - `GET /api/v1/cmdb/assets`
 - `POST /api/v1/cmdb/assets`
@@ -127,18 +140,21 @@ go run ./cmd/ops-worker
 - `GET /api/v1/iam/roles`
 - `GET /api/v1/iam/roles?include_permissions=true`
 - `GET /api/v1/iam/roles/{roleName}/permissions`
+- `GET /api/v1/iam/oidc-config`
+- `PUT /api/v1/iam/oidc-config`
 - `POST /api/v1/iam/users/{userID}/roles` (body: `{"role_name":"ops"}`)
 - `DELETE /api/v1/iam/users/{userID}/roles/{roleName}`
 
 All `/api/v1/*` endpoints require platform bearer token.
-Token is returned by `GET /auth/oidc/callback` after successful OIDC login.
+Token is returned by `POST /auth/local/login` or `GET /auth/oidc/callback`.
 
 ## Frontend console flow
 
 1. Open `http://localhost:8080/ui/`.
-2. Click `OIDC Login` and complete IdP login (if OIDC is configured).
-3. Browser callback auto-saves token to `localStorage` and redirects back to `/ui/`.
-4. Use left navigation to operate `Overview`, `CMDB`, `AWS Accounts`, and `IAM`.
+2. Use `Local Login` (default admin) or click `OIDC Login`.
+3. Browser callback/local login saves token to `localStorage`.
+4. Use IAM page `OIDC Settings` panel to view/update OIDC runtime config.
+5. Use left navigation to operate `Overview`, `CMDB`, `AWS Accounts`, and `IAM`.
 
 ## Next planned additions
 
