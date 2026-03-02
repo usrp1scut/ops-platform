@@ -12,7 +12,8 @@ This repository contains an initial implementation aligned with `docs/design/ops
 - Embedded frontend console for platform operations.
 - CMDB asset CRUD API.
 - AWS account onboarding API (multi-account model, assume-role/static modes).
-- Docker Compose stack with Postgres, Redis, MinIO, migration job, and API service.
+- AWS sync worker v1 (`ops-worker`) for EC2/VPC/SG/RDS asset ingestion.
+- Docker Compose stack with Postgres, Redis, MinIO, migration job, API service, and worker.
 
 ## Quick start
 
@@ -23,6 +24,7 @@ docker compose up --build
 If you need proxy during build/runtime, set optional env vars before starting:
 
 ```bash
+export GOPROXY='https://goproxy.cn,direct'
 export HTTP_PROXY=http://127.0.0.1:7890
 export HTTPS_PROXY=http://127.0.0.1:7890
 docker compose up --build
@@ -46,6 +48,29 @@ export OPS_OIDC_BOOTSTRAP_ADMIN_SUBS='oidc-subject-1,oidc-subject-2'
 docker compose up --build
 ```
 
+AWS sync worker controls (optional):
+
+```bash
+export OPS_SYNC_INTERVAL='15m'
+export OPS_SYNC_RUN_ON_START='true'
+docker compose up --build
+```
+
+AWS sync scope in v1:
+
+- EC2 instances
+- VPC
+- Security Groups
+- RDS instances
+
+Auth behavior:
+
+- `static` account mode uses `access_key_id` + `secret_access_key` stored in platform.
+- `assume_role` mode requires `role_arn`; base credentials come from:
+  - account-level key pair if provided, or
+  - worker runtime environment (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), or
+  - default AWS SDK credential chain.
+
 Service endpoint:
 
 - API: `http://localhost:8080`
@@ -57,6 +82,7 @@ Service endpoint:
 1. Set environment variables:
 
 ```bash
+export GOPROXY='https://goproxy.cn,direct'
 export OPS_DATABASE_URL='postgres://ops:ops@localhost:5432/ops_platform?sslmode=disable'
 export OPS_MASTER_KEY='01234567890123456789012345678901'
 ```
@@ -73,6 +99,12 @@ go run ./cmd/migrate
 go run ./cmd/ops-api
 ```
 
+4. Run AWS sync worker:
+
+```bash
+go run ./cmd/ops-worker
+```
+
 ## API endpoints (initial)
 
 - `GET /auth/oidc/login`
@@ -87,6 +119,9 @@ go run ./cmd/ops-api
 - `POST /api/v1/aws/accounts`
 - `GET /api/v1/aws/accounts/{accountID}`
 - `PATCH /api/v1/aws/accounts/{accountID}`
+- `POST /api/v1/aws/sync/run`
+- `GET /api/v1/aws/sync/status`
+- `GET /api/v1/aws/sync/runs?limit=120`
 - `GET /api/v1/iam/users`
 - `GET /api/v1/iam/users/{userID}`
 - `GET /api/v1/iam/roles`
@@ -109,4 +144,3 @@ Token is returned by `GET /auth/oidc/callback` after successful OIDC login.
 
 - Bastion gateway service with SSH session recording.
 - Nightingale webhook ingestion and Lark notification routing.
-- AWS sync worker for EC2/VPC/SG/RDS resources.
