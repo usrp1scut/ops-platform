@@ -51,6 +51,38 @@ type BindRoleRequest struct {
 	RoleName string `json:"role_name"`
 }
 
+type LocalLoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type OIDCSettings struct {
+	Exists          bool      `json:"-"`
+	Enabled         bool      `json:"enabled"`
+	IssuerURL       string    `json:"issuer_url"`
+	ClientID        string    `json:"client_id"`
+	ClientSecret    string    `json:"-"`
+	HasClientSecret bool      `json:"has_client_secret"`
+	RedirectURL     string    `json:"redirect_url"`
+	AuthorizeURL    string    `json:"authorize_url"`
+	TokenURL        string    `json:"token_url"`
+	UserInfoURL     string    `json:"userinfo_url"`
+	Scopes          []string  `json:"scopes"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+}
+
+type UpdateOIDCSettingsRequest struct {
+	Enabled      bool     `json:"enabled"`
+	IssuerURL    string   `json:"issuer_url"`
+	ClientID     string   `json:"client_id"`
+	ClientSecret *string  `json:"client_secret"`
+	RedirectURL  string   `json:"redirect_url"`
+	AuthorizeURL string   `json:"authorize_url"`
+	TokenURL     string   `json:"token_url"`
+	UserInfoURL  string   `json:"userinfo_url"`
+	Scopes       []string `json:"scopes"`
+}
+
 type TokenClaims struct {
 	UserID      string   `json:"uid"`
 	Subject     string   `json:"sub"`

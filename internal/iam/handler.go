@@ -1,7 +1,9 @@
 package iam
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,7 +18,6 @@ type Handler struct {
 	cfg        config.Config
 	repo       *Repository
 	tokens     *TokenService
-	oidc       *OIDCClient
 	stateStore *OIDCStateStore
 }
 
@@ -25,21 +26,89 @@ func NewHandler(cfg config.Config, repo *Repository) *Handler {
 		cfg:        cfg,
 		repo:       repo,
 		tokens:     NewTokenService(cfg.MasterKey),
-		oidc:       NewOIDCClient(cfg),
 		stateStore: NewOIDCStateStore(),
 	}
 }
 
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
+	r.Post("/local/login", h.LocalLogin)
 	r.Get("/oidc/login", h.OIDCLogin)
 	r.Get("/oidc/callback", h.OIDCCallback)
 	r.With(AuthMiddleware(h.tokens, h.repo)).Get("/me", h.Me)
 	return r
 }
 
+func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
+	var req LocalLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	req.Username = strings.TrimSpace(req.Username)
+	req.Password = strings.TrimSpace(req.Password)
+	if req.Username == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "username and password are required")
+		return
+	}
+	if strings.ToLower(req.Username) != strings.ToLower(h.cfg.LocalAdminUsername) {
+		writeError(w, http.StatusUnauthorized, ErrInvalidCredentials.Error())
+		return
+	}
+
+	if err := h.repo.EnsureLocalAdmin(r.Context(), h.cfg.LocalAdminUsername, h.cfg.LocalAdminPassword); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	identity, err := h.repo.LocalLogin(r.Context(), req.Username, req.Password)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCredentials) {
+			writeError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	token, err := h.tokens.Issue(identity, 8*time.Hour)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	_ = h.repo.WriteAuditLog(
+		r.Context(),
+		identity.User.ID,
+		identity.User.OIDCSubject,
+		"login",
+		"auth",
+		"local",
+		"success",
+		r.RemoteAddr,
+		r.UserAgent(),
+		requestID(r),
+		map[string]any{"username": req.Username},
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"access_token": token,
+		"token_type":   "Bearer",
+		"expires_in":   8 * 3600,
+		"user":         identity.User,
+		"roles":        identity.Roles,
+		"permissions":  identity.Permissions,
+	})
+}
+
 func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
-	if !h.oidc.Enabled() {
+	oidcClient, _, err := h.oidcClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !oidcClient.Enabled() {
 		writeError(w, http.StatusNotImplemented, "oidc is not configured")
 		return
 	}
@@ -59,7 +128,7 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:    time.Now().Add(5 * time.Minute),
 	})
 
-	authURL, err := h.oidc.BuildAuthorizationURL(state, BuildCodeChallenge(codeVerifier))
+	authURL, err := oidcClient.BuildAuthorizationURL(state, BuildCodeChallenge(codeVerifier))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -69,7 +138,12 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
-	if !h.oidc.Enabled() {
+	oidcClient, oidcCfg, err := h.oidcClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !oidcClient.Enabled() {
 		writeError(w, http.StatusNotImplemented, "oidc is not configured")
 		return
 	}
@@ -87,13 +161,13 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := h.oidc.ExchangeCode(r.Context(), code, stateData.CodeVerifier)
+	accessToken, err := oidcClient.ExchangeCode(r.Context(), code, stateData.CodeVerifier)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	profile, err := h.oidc.UserInfo(r.Context(), accessToken)
+	profile, err := oidcClient.UserInfo(r.Context(), accessToken)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -131,7 +205,7 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		r.RemoteAddr,
 		r.UserAgent(),
 		requestID(r),
-		map[string]any{"provider": h.cfg.OIDCIssuerURL},
+		map[string]any{"provider": oidcCfg.OIDCIssuerURL},
 	)
 
 	response := map[string]any{
@@ -164,6 +238,43 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) oidcClient(ctx context.Context) (*OIDCClient, config.Config, error) {
+	settings, err := h.repo.GetOIDCSettings(ctx, h.cfg.MasterKey)
+	if err != nil {
+		return nil, config.Config{}, err
+	}
+
+	effective := h.cfg
+	if settings.Exists {
+		effective.OIDCIssuerURL = strings.TrimSpace(settings.IssuerURL)
+		effective.OIDCClientID = strings.TrimSpace(settings.ClientID)
+		effective.OIDCClientSecret = settings.ClientSecret
+		effective.OIDCRedirectURL = strings.TrimSpace(settings.RedirectURL)
+		effective.OIDCAuthorizeURL = strings.TrimSpace(settings.AuthorizeURL)
+		effective.OIDCTokenURL = strings.TrimSpace(settings.TokenURL)
+		effective.OIDCUserInfoURL = strings.TrimSpace(settings.UserInfoURL)
+		effective.OIDCScopes = normalizeScopes(settings.Scopes)
+		if !settings.Enabled {
+			effective.OIDCClientID = ""
+			effective.OIDCRedirectURL = ""
+		}
+	}
+
+	if effective.OIDCClientID != "" && effective.OIDCRedirectURL != "" {
+		if effective.OIDCAuthorizeURL == "" && effective.OIDCIssuerURL != "" {
+			effective.OIDCAuthorizeURL = strings.TrimRight(effective.OIDCIssuerURL, "/") + "/authorize"
+		}
+		if effective.OIDCTokenURL == "" && effective.OIDCIssuerURL != "" {
+			effective.OIDCTokenURL = strings.TrimRight(effective.OIDCIssuerURL, "/") + "/token"
+		}
+		if effective.OIDCUserInfoURL == "" && effective.OIDCIssuerURL != "" {
+			effective.OIDCUserInfoURL = strings.TrimRight(effective.OIDCIssuerURL, "/") + "/userinfo"
+		}
+	}
+
+	return NewOIDCClient(effective), effective, nil
 }
 
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {

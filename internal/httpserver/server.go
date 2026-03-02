@@ -34,6 +34,7 @@ func (s *Server) Router() http.Handler {
 	iamRepo := iam.NewRepository(s.db)
 	iamHandler := iam.NewHandler(s.cfg, iamRepo)
 	iamAdminHandler := iam.NewAdminHandler(
+		s.cfg,
 		iamRepo,
 		iam.RequirePermission("iam.user", "read"),
 		iam.RequirePermission("iam.user", "write"),

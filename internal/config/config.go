@@ -12,6 +12,8 @@ type Config struct {
 	HTTPAddr               string
 	DatabaseURL            string
 	MasterKey              string
+	LocalAdminUsername     string
+	LocalAdminPassword     string
 	OIDCIssuerURL          string
 	OIDCClientID           string
 	OIDCClientSecret       string
@@ -30,6 +32,8 @@ func Load() (Config, error) {
 		HTTPAddr:               getenv("OPS_HTTP_ADDR", ":8080"),
 		DatabaseURL:            os.Getenv("OPS_DATABASE_URL"),
 		MasterKey:              strings.TrimSpace(os.Getenv("OPS_MASTER_KEY")),
+		LocalAdminUsername:     strings.TrimSpace(getenv("OPS_LOCAL_ADMIN_USERNAME", "admin")),
+		LocalAdminPassword:     getenv("OPS_LOCAL_ADMIN_PASSWORD", "admin123456"),
 		OIDCIssuerURL:          strings.TrimSpace(os.Getenv("OPS_OIDC_ISSUER_URL")),
 		OIDCClientID:           strings.TrimSpace(os.Getenv("OPS_OIDC_CLIENT_ID")),
 		OIDCClientSecret:       strings.TrimSpace(os.Getenv("OPS_OIDC_CLIENT_SECRET")),
@@ -60,6 +64,12 @@ func Load() (Config, error) {
 	}
 	if len(cfg.MasterKey) != 32 {
 		return Config{}, fmt.Errorf("OPS_MASTER_KEY must be exactly 32 chars (got %d)", len(cfg.MasterKey))
+	}
+	if cfg.LocalAdminUsername == "" {
+		return Config{}, errors.New("OPS_LOCAL_ADMIN_USERNAME is required")
+	}
+	if strings.TrimSpace(cfg.LocalAdminPassword) == "" {
+		return Config{}, errors.New("OPS_LOCAL_ADMIN_PASSWORD is required")
 	}
 	if cfg.OIDCClientID != "" || cfg.OIDCRedirectURL != "" {
 		if cfg.OIDCClientID == "" || cfg.OIDCRedirectURL == "" {

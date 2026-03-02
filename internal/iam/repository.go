@@ -10,11 +10,14 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"ops-platform/internal/security"
 )
 
 var ErrUserNotFound = errors.New("user not found")
 var ErrRoleNotFound = errors.New("role not found")
 var ErrUserRoleBindingNotFound = errors.New("user role binding not found")
+var ErrInvalidCredentials = errors.New("invalid credentials")
 
 type Repository struct {
 	db *sql.DB
@@ -160,6 +163,219 @@ func (r *Repository) IdentityBySubject(ctx context.Context, subject string) (Use
 		return UserIdentity{}, err
 	}
 	return r.IdentityForUser(ctx, userID)
+}
+
+func (r *Repository) EnsureLocalAdmin(ctx context.Context, username, password string) error {
+	name := strings.TrimSpace(strings.ToLower(username))
+	if name == "" || strings.TrimSpace(password) == "" {
+		return ErrInvalidCredentials
+	}
+
+	passwordHash, err := security.HashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	subject := "local:" + name
+	var userID string
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO iam_user (id, oidc_subject, name)
+VALUES ($1, $2, $3)
+ON CONFLICT (oidc_subject)
+DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+RETURNING id
+`, uuid.NewString(), subject, name).Scan(&userID)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM iam_local_user
+WHERE user_id = $1 OR username = $2
+`, userID, name); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO iam_local_user (username, user_id, password_hash, enabled)
+VALUES ($1, $2, $3, true)
+`, name, userID, passwordHash); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO iam_user_role_binding (id, user_id, role_id)
+SELECT $1, $2, r.id
+FROM iam_role r
+WHERE r.name = 'admin'
+ON CONFLICT (user_id, role_id) DO NOTHING
+`, uuid.NewString(), userID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *Repository) LocalLogin(ctx context.Context, username, password string) (UserIdentity, error) {
+	name := strings.TrimSpace(strings.ToLower(username))
+	if name == "" || strings.TrimSpace(password) == "" {
+		return UserIdentity{}, ErrInvalidCredentials
+	}
+
+	var userID string
+	var passwordHash string
+	var enabled bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT user_id, password_hash, enabled
+FROM iam_local_user
+WHERE username = $1
+`, name).Scan(&userID, &passwordHash, &enabled)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return UserIdentity{}, ErrInvalidCredentials
+		}
+		return UserIdentity{}, err
+	}
+	if !enabled || !security.ComparePassword(passwordHash, password) {
+		return UserIdentity{}, ErrInvalidCredentials
+	}
+
+	_, _ = r.db.ExecContext(ctx, `
+UPDATE iam_local_user
+SET last_login_at = now(), updated_at = now()
+WHERE username = $1
+`, name)
+	_, _ = r.db.ExecContext(ctx, `
+UPDATE iam_user
+SET last_login_at = now(), updated_at = now()
+WHERE id = $1
+`, userID)
+
+	return r.IdentityForUser(ctx, userID)
+}
+
+func (r *Repository) GetOIDCSettings(ctx context.Context, masterKey string) (OIDCSettings, error) {
+	var settings OIDCSettings
+	var encryptedSecret string
+	var scopesRaw []byte
+
+	err := r.db.QueryRowContext(ctx, `
+SELECT
+    enabled,
+    COALESCE(issuer_url, ''),
+    COALESCE(client_id, ''),
+    COALESCE(client_secret_encrypted, ''),
+    COALESCE(redirect_url, ''),
+    COALESCE(authorize_url, ''),
+    COALESCE(token_url, ''),
+    COALESCE(userinfo_url, ''),
+    scopes,
+    updated_at
+FROM iam_oidc_config
+WHERE id = 1
+`).Scan(
+		&settings.Enabled,
+		&settings.IssuerURL,
+		&settings.ClientID,
+		&encryptedSecret,
+		&settings.RedirectURL,
+		&settings.AuthorizeURL,
+		&settings.TokenURL,
+		&settings.UserInfoURL,
+		&scopesRaw,
+		&settings.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return OIDCSettings{}, nil
+		}
+		return OIDCSettings{}, err
+	}
+	settings.Exists = true
+
+	if err := json.Unmarshal(scopesRaw, &settings.Scopes); err != nil {
+		return OIDCSettings{}, err
+	}
+	if len(settings.Scopes) == 0 {
+		settings.Scopes = []string{"openid", "profile", "email"}
+	}
+
+	if encryptedSecret != "" {
+		decrypted, err := security.Decrypt(encryptedSecret, masterKey)
+		if err != nil {
+			return OIDCSettings{}, err
+		}
+		settings.ClientSecret = decrypted
+		settings.HasClientSecret = true
+	}
+
+	return settings, nil
+}
+
+func (r *Repository) SaveOIDCSettings(ctx context.Context, req UpdateOIDCSettingsRequest, masterKey string) (OIDCSettings, error) {
+	current, err := r.GetOIDCSettings(ctx, masterKey)
+	if err != nil {
+		return OIDCSettings{}, err
+	}
+
+	clientSecret := current.ClientSecret
+	if req.ClientSecret != nil {
+		clientSecret = strings.TrimSpace(*req.ClientSecret)
+	}
+	encryptedSecret, err := security.Encrypt(clientSecret, masterKey)
+	if err != nil {
+		return OIDCSettings{}, err
+	}
+
+	scopes := normalizeScopes(req.Scopes)
+	scopesRaw, err := json.Marshal(scopes)
+	if err != nil {
+		return OIDCSettings{}, err
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+INSERT INTO iam_oidc_config (
+    id, enabled, issuer_url, client_id, client_secret_encrypted, redirect_url, authorize_url, token_url, userinfo_url, scopes, updated_at
+) VALUES (
+    1, $1, $2, $3, $4, $5, $6, $7, $8, $9, now()
+)
+ON CONFLICT (id) DO UPDATE SET
+    enabled = EXCLUDED.enabled,
+    issuer_url = EXCLUDED.issuer_url,
+    client_id = EXCLUDED.client_id,
+    client_secret_encrypted = EXCLUDED.client_secret_encrypted,
+    redirect_url = EXCLUDED.redirect_url,
+    authorize_url = EXCLUDED.authorize_url,
+    token_url = EXCLUDED.token_url,
+    userinfo_url = EXCLUDED.userinfo_url,
+    scopes = EXCLUDED.scopes,
+    updated_at = now()
+`,
+		req.Enabled,
+		strings.TrimSpace(req.IssuerURL),
+		strings.TrimSpace(req.ClientID),
+		encryptedSecret,
+		strings.TrimSpace(req.RedirectURL),
+		strings.TrimSpace(req.AuthorizeURL),
+		strings.TrimSpace(req.TokenURL),
+		strings.TrimSpace(req.UserInfoURL),
+		scopesRaw,
+	)
+	if err != nil {
+		return OIDCSettings{}, err
+	}
+
+	settings, err := r.GetOIDCSettings(ctx, masterKey)
+	if err != nil {
+		return OIDCSettings{}, err
+	}
+	return settings, nil
 }
 
 func (r *Repository) ListUsers(ctx context.Context, query string) ([]UserWithRoles, error) {
@@ -423,4 +639,28 @@ INSERT INTO audit_log (
 		rawDetails,
 	)
 	return err
+}
+
+func normalizeScopes(scopes []string) []string {
+	if len(scopes) == 0 {
+		return []string{"openid", "profile", "email"}
+	}
+	unique := make(map[string]struct{}, len(scopes))
+	items := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		normalized := strings.TrimSpace(scope)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := unique[normalized]; ok {
+			continue
+		}
+		unique[normalized] = struct{}{}
+		items = append(items, normalized)
+	}
+	if len(items) == 0 {
+		return []string{"openid", "profile", "email"}
+	}
+	sort.Strings(items)
+	return items
 }

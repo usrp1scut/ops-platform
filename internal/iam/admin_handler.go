@@ -7,20 +7,25 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"ops-platform/internal/config"
 )
 
 type AdminHandler struct {
+	cfg     config.Config
 	repo    *Repository
 	readMW  func(http.Handler) http.Handler
 	writeMW func(http.Handler) http.Handler
 }
 
 func NewAdminHandler(
+	cfg config.Config,
 	repo *Repository,
 	readMW func(http.Handler) http.Handler,
 	writeMW func(http.Handler) http.Handler,
 ) *AdminHandler {
 	return &AdminHandler{
+		cfg:     cfg,
 		repo:    repo,
 		readMW:  readMW,
 		writeMW: writeMW,
@@ -34,6 +39,8 @@ func (h *AdminHandler) Routes() chi.Router {
 	r.With(h.withReadAuth).Get("/users/{userID}", h.GetUserIdentity)
 	r.With(h.withReadAuth).Get("/roles", h.ListRoles)
 	r.With(h.withReadAuth).Get("/roles/{roleName}/permissions", h.GetRolePermissions)
+	r.With(h.withReadAuth).Get("/oidc-config", h.GetOIDCSettings)
+	r.With(h.withWriteAuth).Put("/oidc-config", h.UpdateOIDCSettings)
 	r.With(h.withWriteAuth).Post("/users/{userID}/roles", h.BindRole)
 	r.With(h.withWriteAuth).Delete("/users/{userID}/roles/{roleName}", h.UnbindRole)
 
@@ -161,6 +168,82 @@ func (h *AdminHandler) UnbindRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, identity)
+}
+
+func (h *AdminHandler) GetOIDCSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.repo.GetOIDCSettings(r.Context(), h.cfg.MasterKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if !settings.Exists {
+		settings = OIDCSettings{
+			Enabled:         h.cfg.OIDCClientID != "" && h.cfg.OIDCRedirectURL != "",
+			IssuerURL:       h.cfg.OIDCIssuerURL,
+			ClientID:        h.cfg.OIDCClientID,
+			HasClientSecret: strings.TrimSpace(h.cfg.OIDCClientSecret) != "",
+			RedirectURL:     h.cfg.OIDCRedirectURL,
+			AuthorizeURL:    h.cfg.OIDCAuthorizeURL,
+			TokenURL:        h.cfg.OIDCTokenURL,
+			UserInfoURL:     h.cfg.OIDCUserInfoURL,
+			Scopes:          normalizeScopes(h.cfg.OIDCScopes),
+		}
+	}
+
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (h *AdminHandler) UpdateOIDCSettings(w http.ResponseWriter, r *http.Request) {
+	var req UpdateOIDCSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	req.IssuerURL = strings.TrimSpace(req.IssuerURL)
+	req.ClientID = strings.TrimSpace(req.ClientID)
+	req.RedirectURL = strings.TrimSpace(req.RedirectURL)
+	req.AuthorizeURL = strings.TrimSpace(req.AuthorizeURL)
+	req.TokenURL = strings.TrimSpace(req.TokenURL)
+	req.UserInfoURL = strings.TrimSpace(req.UserInfoURL)
+	req.Scopes = normalizeScopes(req.Scopes)
+
+	if req.Enabled {
+		if req.ClientID == "" || req.RedirectURL == "" {
+			writeError(w, http.StatusBadRequest, "client_id and redirect_url are required when enabled")
+			return
+		}
+		if req.AuthorizeURL == "" {
+			if req.IssuerURL == "" {
+				writeError(w, http.StatusBadRequest, "authorize_url or issuer_url is required when enabled")
+				return
+			}
+			req.AuthorizeURL = strings.TrimRight(req.IssuerURL, "/") + "/authorize"
+		}
+		if req.TokenURL == "" {
+			if req.IssuerURL == "" {
+				writeError(w, http.StatusBadRequest, "token_url or issuer_url is required when enabled")
+				return
+			}
+			req.TokenURL = strings.TrimRight(req.IssuerURL, "/") + "/token"
+		}
+		if req.UserInfoURL == "" {
+			if req.IssuerURL == "" {
+				writeError(w, http.StatusBadRequest, "userinfo_url or issuer_url is required when enabled")
+				return
+			}
+			req.UserInfoURL = strings.TrimRight(req.IssuerURL, "/") + "/userinfo"
+		}
+	}
+
+	settings, err := h.repo.SaveOIDCSettings(r.Context(), req, h.cfg.MasterKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, settings)
 }
 
 func (h *AdminHandler) withReadAuth(next http.Handler) http.Handler {
