@@ -6,6 +6,9 @@ This repository contains an initial implementation aligned with `docs/design/ops
 
 - Go backend scaffold (`ops-api`) with structured routes.
 - PostgreSQL schema migrations for CMDB and AWS account onboarding.
+- IAM schema + seeded roles/permissions (`admin`, `ops`, `viewer`).
+- OIDC login endpoints with user sync (profile only).
+- Platform bearer token auth + RBAC middleware + write-operation audit log.
 - CMDB asset CRUD API.
 - AWS account onboarding API (multi-account model, assume-role/static modes).
 - Docker Compose stack with Postgres, Redis, MinIO, migration job, and API service.
@@ -28,6 +31,17 @@ If you set `OPS_MASTER_KEY`, ensure it is exactly 32 ASCII characters:
 
 ```bash
 export OPS_MASTER_KEY='01234567890123456789012345678901'
+docker compose up --build
+```
+
+OIDC is optional in local startup. To enable:
+
+```bash
+export OPS_OIDC_ISSUER_URL='https://your-idp.example.com/oauth2'
+export OPS_OIDC_CLIENT_ID='ops-platform'
+export OPS_OIDC_CLIENT_SECRET='your-client-secret'
+export OPS_OIDC_REDIRECT_URL='http://localhost:8080/auth/oidc/callback'
+export OPS_OIDC_BOOTSTRAP_ADMIN_SUBS='oidc-subject-1,oidc-subject-2'
 docker compose up --build
 ```
 
@@ -59,6 +73,9 @@ go run ./cmd/ops-api
 
 ## API endpoints (initial)
 
+- `GET /auth/oidc/login`
+- `GET /auth/oidc/callback`
+- `GET /auth/me` (requires `Authorization: Bearer <token>`)
 - `GET /api/v1/cmdb/assets`
 - `POST /api/v1/cmdb/assets`
 - `GET /api/v1/cmdb/assets/{assetID}`
@@ -69,9 +86,12 @@ go run ./cmd/ops-api
 - `GET /api/v1/aws/accounts/{accountID}`
 - `PATCH /api/v1/aws/accounts/{accountID}`
 
+All `/api/v1/*` endpoints require platform bearer token.
+Token is returned by `GET /auth/oidc/callback` after successful OIDC login.
+
 ## Next planned additions
 
-- OIDC login and session middleware.
+- User/role management APIs (bind/unbind roles).
 - Bastion gateway service with SSH session recording.
 - Nightingale webhook ingestion and Lark notification routing.
 - AWS sync worker for EC2/VPC/SG/RDS resources.
