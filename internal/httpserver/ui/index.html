@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ops Platform Validation Console</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <main class="layout">
+      <header class="hero">
+        <p class="kicker">Ops Platform</p>
+        <h1>Validation Console</h1>
+        <p class="subtitle">Verify OIDC, RBAC, CMDB, and AWS-account APIs in one place.</p>
+      </header>
+
+      <section class="card">
+        <h2>Authentication</h2>
+        <div class="row">
+          <button id="oidc-login-btn" class="btn">Start OIDC Login</button>
+          <button id="check-me-btn" class="btn secondary">Check /auth/me</button>
+          <button id="clear-token-btn" class="btn ghost">Clear Token</button>
+        </div>
+        <label for="token-input">Bearer Token</label>
+        <textarea id="token-input" rows="3" placeholder="Paste access token from /auth/oidc/callback response"></textarea>
+        <div class="row">
+          <button id="save-token-btn" class="btn">Save Token</button>
+        </div>
+        <pre id="auth-output" class="output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>CMDB Assets</h2>
+        <form id="asset-form" class="form-grid">
+          <input name="type" placeholder="type (e.g. aws_ec2_instance)" required />
+          <input name="name" placeholder="name" required />
+          <input name="env" placeholder="env (default/prod)" />
+          <input name="source" placeholder="source (manual/aws)" />
+          <button type="submit" class="btn">Create Asset</button>
+        </form>
+        <div class="row">
+          <button id="refresh-assets-btn" class="btn secondary">Refresh Assets</button>
+        </div>
+        <pre id="assets-output" class="output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>AWS Accounts</h2>
+        <form id="aws-form" class="form-grid">
+          <input name="account_id" placeholder="account_id (12 digits)" required />
+          <input name="display_name" placeholder="display_name" required />
+          <select name="auth_mode">
+            <option value="assume_role">assume_role</option>
+            <option value="static">static</option>
+          </select>
+          <input name="role_arn" placeholder="role_arn (for assume_role)" />
+          <input name="access_key_id" placeholder="access_key_id (for static)" />
+          <input name="secret_access_key" placeholder="secret_access_key (for static)" />
+          <input name="region_allowlist" placeholder="region csv (e.g. us-east-1,ap-southeast-1)" />
+          <button type="submit" class="btn">Create AWS Account</button>
+        </form>
+        <div class="row">
+          <button id="refresh-aws-btn" class="btn secondary">Refresh AWS Accounts</button>
+        </div>
+        <pre id="aws-output" class="output"></pre>
+      </section>
+    </main>
+
+    <script src="/ui/app.js"></script>
+  </body>
+</html>
+
