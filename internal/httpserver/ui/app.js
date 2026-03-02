@@ -8,6 +8,8 @@
     permissions: [],
     assets: [],
     awsAccounts: [],
+    awsSyncRuns: [],
+    awsSyncStatus: null,
     iamUsers: [],
     iamRoles: [],
     selectedUserID: "",
@@ -32,6 +34,10 @@
     statWriteAccess: document.getElementById("stat-write-access"),
     assetsTableBody: document.getElementById("assets-table-body"),
     awsTableBody: document.getElementById("aws-table-body"),
+    awsSyncStatus: document.getElementById("aws-sync-status"),
+    awsSyncRunsTableBody: document.getElementById("aws-sync-runs-table-body"),
+    triggerAwsSyncBtn: document.getElementById("trigger-aws-sync-btn"),
+    refreshAwsSyncBtn: document.getElementById("refresh-aws-sync-btn"),
     assetSearch: document.getElementById("asset-search"),
     assetForm: document.getElementById("asset-form"),
     awsForm: document.getElementById("aws-form"),
@@ -221,6 +227,76 @@
     });
   }
 
+  function formatDateTime(value) {
+    if (!value) {
+      return "-";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+    return date.toLocaleString();
+  }
+
+  function renderAwsSyncStatus() {
+    if (!elements.awsSyncStatus) {
+      return;
+    }
+    if (!state.awsSyncStatus) {
+      elements.awsSyncStatus.textContent = "No sync status yet.";
+      return;
+    }
+
+    elements.awsSyncStatus.textContent = pretty({
+      running: state.awsSyncStatus.running,
+      last_started_at: state.awsSyncStatus.last_started_at || null,
+      last_finished_at: state.awsSyncStatus.last_finished_at || null,
+      last_error: state.awsSyncStatus.last_error || "",
+    });
+  }
+
+  function renderAwsSyncRunsTable() {
+    if (!elements.awsSyncRunsTableBody) {
+      return;
+    }
+    elements.awsSyncRunsTableBody.innerHTML = "";
+
+    if (!hasPermission("aws.account:read")) {
+      const row = document.createElement("tr");
+      row.innerHTML = '<td colspan="7">Permission required: aws.account:read</td>';
+      elements.awsSyncRunsTableBody.appendChild(row);
+      return;
+    }
+
+    if (state.awsSyncRuns.length === 0) {
+      const row = document.createElement("tr");
+      row.innerHTML = '<td colspan="7">No sync runs yet.</td>';
+      elements.awsSyncRunsTableBody.appendChild(row);
+      return;
+    }
+
+    state.awsSyncRuns.forEach(function (run) {
+      const row = document.createElement("tr");
+      row.innerHTML =
+        "<td>" +
+        safe(formatDateTime(run.started_at)) +
+        "</td><td>" +
+        safe((run.account_display_name || "") + " (" + (run.account_id || "") + ")") +
+        "</td><td>" +
+        safe(run.region || "-") +
+        "</td><td>" +
+        safe(run.resource_type || "-") +
+        "</td><td>" +
+        safe(run.status || "-") +
+        "</td><td>" +
+        String(run.resources_processed || 0) +
+        "</td><td>" +
+        safe(run.error_message || "-") +
+        "</td>";
+      elements.awsSyncRunsTableBody.appendChild(row);
+    });
+  }
+
   function renderIAMUserTable() {
     elements.iamUsersTableBody.innerHTML = "";
 
@@ -353,6 +429,7 @@
   function applyPermissionUI() {
     const canAssetWrite = hasPermission("cmdb.asset:write");
     const canAwsWrite = hasPermission("aws.account:write");
+    const canAwsRead = hasPermission("aws.account:read");
 
     elements.assetForm.querySelectorAll("input,button,select,textarea").forEach(function (el) {
       el.disabled = !canAssetWrite;
@@ -360,6 +437,12 @@
     elements.awsForm.querySelectorAll("input,button,select,textarea").forEach(function (el) {
       el.disabled = !canAwsWrite;
     });
+    if (elements.triggerAwsSyncBtn) {
+      elements.triggerAwsSyncBtn.disabled = !canAwsWrite;
+    }
+    if (elements.refreshAwsSyncBtn) {
+      elements.refreshAwsSyncBtn.disabled = !canAwsRead;
+    }
 
     const disableIAMRead = !canReadIAM();
     const disableIAMWrite = !canWriteIAM();
@@ -500,6 +583,59 @@
       renderStats();
       writeConsole(error.message, false);
       logActivity("AWS account refresh failed.");
+    }
+  }
+
+  async function refreshAwsSyncStatus() {
+    if (!hasPermission("aws.account:read")) {
+      state.awsSyncStatus = null;
+      renderAwsSyncStatus();
+      return;
+    }
+    try {
+      state.awsSyncStatus = await api("/api/v1/aws/sync/status");
+      renderAwsSyncStatus();
+    } catch (error) {
+      state.awsSyncStatus = null;
+      renderAwsSyncStatus();
+      writeConsole(error.message, false);
+      logActivity("AWS sync status refresh failed.");
+    }
+  }
+
+  async function refreshAwsSyncRuns() {
+    if (!hasPermission("aws.account:read")) {
+      state.awsSyncRuns = [];
+      renderAwsSyncRunsTable();
+      return;
+    }
+    try {
+      const data = await api("/api/v1/aws/sync/runs?limit=120");
+      state.awsSyncRuns = data.items || [];
+      renderAwsSyncRunsTable();
+      logActivity("AWS sync run list refreshed (" + state.awsSyncRuns.length + ").");
+    } catch (error) {
+      state.awsSyncRuns = [];
+      renderAwsSyncRunsTable();
+      writeConsole(error.message, false);
+      logActivity("AWS sync runs refresh failed.");
+    }
+  }
+
+  async function triggerAwsSync() {
+    if (!hasPermission("aws.account:write")) {
+      writeConsole("Permission required: aws.account:write", false);
+      return;
+    }
+    try {
+      const result = await api("/api/v1/aws/sync/run", { method: "POST", body: "{}" });
+      writeConsole(result, true);
+      logActivity(result.triggered ? "AWS sync triggered." : "AWS sync already running.");
+      await refreshAwsSyncStatus();
+      await refreshAwsSyncRuns();
+    } catch (error) {
+      writeConsole(error.message, false);
+      logActivity("AWS sync trigger failed.");
     }
   }
 
@@ -715,7 +851,14 @@
   }
 
   async function loadAuthorizedData() {
-    await Promise.all([refreshAssets(), refreshAwsAccounts(), refreshIAMRoles(), refreshIAMUsers()]);
+    await Promise.all([
+      refreshAssets(),
+      refreshAwsAccounts(),
+      refreshAwsSyncStatus(),
+      refreshAwsSyncRuns(),
+      refreshIAMRoles(),
+      refreshIAMUsers(),
+    ]);
     await refreshSelectedUserIdentity();
     applyPermissionUI();
   }
@@ -743,6 +886,15 @@
     document.getElementById("refresh-overview-btn").addEventListener("click", refreshHealth);
     document.getElementById("refresh-assets-btn").addEventListener("click", refreshAssets);
     document.getElementById("refresh-aws-btn").addEventListener("click", refreshAwsAccounts);
+    if (elements.triggerAwsSyncBtn) {
+      elements.triggerAwsSyncBtn.addEventListener("click", triggerAwsSync);
+    }
+    if (elements.refreshAwsSyncBtn) {
+      elements.refreshAwsSyncBtn.addEventListener("click", async function () {
+        await refreshAwsSyncStatus();
+        await refreshAwsSyncRuns();
+      });
+    }
     elements.refreshIamUsersBtn.addEventListener("click", refreshIAMUsers);
     elements.refreshIamRolesBtn.addEventListener("click", refreshIAMRoles);
     elements.refreshIamSelectionBtn.addEventListener("click", refreshSelectedUserIdentity);
@@ -765,6 +917,8 @@
       state.permissions = [];
       state.assets = [];
       state.awsAccounts = [];
+      state.awsSyncRuns = [];
+      state.awsSyncStatus = null;
       state.iamUsers = [];
       state.iamRoles = [];
       state.selectedUserID = "";
@@ -772,6 +926,8 @@
       renderAuthState();
       renderAssetTable();
       renderAwsTable();
+      renderAwsSyncStatus();
+      renderAwsSyncRunsTable();
       renderIAMUserTable();
       renderIAMRolesTable();
       renderIAMSelectedUser();
@@ -832,6 +988,8 @@
     renderAuthState();
     renderAssetTable();
     renderAwsTable();
+    renderAwsSyncStatus();
+    renderAwsSyncRunsTable();
     renderIAMUserTable();
     renderIAMRolesTable();
     renderIAMSelectedUser();

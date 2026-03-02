@@ -174,6 +174,33 @@
               <button type="submit" class="btn">Create AWS Account</button>
             </form>
           </div>
+
+          <div class="panel">
+            <header class="panel-header">
+              <h3>AWS Sync Worker</h3>
+              <div class="row">
+                <button id="trigger-aws-sync-btn" class="btn">Run Sync Now</button>
+                <button id="refresh-aws-sync-btn" class="btn subtle">Refresh Runs</button>
+              </div>
+            </header>
+            <div id="aws-sync-status" class="log-box">No sync status yet.</div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Started</th>
+                    <th>Account</th>
+                    <th>Region</th>
+                    <th>Resource</th>
+                    <th>Status</th>
+                    <th>Processed</th>
+                    <th>Error</th>
+                  </tr>
+                </thead>
+                <tbody id="aws-sync-runs-table-body"></tbody>
+              </table>
+            </div>
+          </div>
         </section>
 
         <section id="view-iam" class="view">
