@@ -9,6 +9,7 @@ This repository contains an initial implementation aligned with `docs/design/ops
 - IAM schema + seeded roles/permissions (`admin`, `ops`, `viewer`).
 - OIDC login endpoints with user sync (profile only).
 - Platform bearer token auth + RBAC middleware + write-operation audit log.
+- Embedded frontend console for platform operations.
 - CMDB asset CRUD API.
 - AWS account onboarding API (multi-account model, assume-role/static modes).
 - Docker Compose stack with Postgres, Redis, MinIO, migration job, and API service.
@@ -49,7 +50,7 @@ Service endpoint:
 
 - API: `http://localhost:8080`
 - Health: `GET /healthz`
-- Validation UI: `http://localhost:8080/ui/`
+- Platform UI: `http://localhost:8080/ui/`
 
 ## Local development without Docker
 
@@ -90,12 +91,12 @@ go run ./cmd/ops-api
 All `/api/v1/*` endpoints require platform bearer token.
 Token is returned by `GET /auth/oidc/callback` after successful OIDC login.
 
-## Frontend validation flow
+## Frontend console flow
 
 1. Open `http://localhost:8080/ui/`.
-2. Click `Start OIDC Login` and complete IdP login (if OIDC is configured).
+2. Click `OIDC Login` and complete IdP login (if OIDC is configured).
 3. Browser callback auto-saves token to `localStorage` and redirects back to `/ui/`.
-4. Click `Check /auth/me`, then validate CMDB/AWS list/create operations.
+4. Use left navigation to operate `Overview`, `CMDB`, and `AWS Accounts`.
 
 ## Next planned additions
 
