@@ -13,17 +13,23 @@ func mountUIRoutes(router interface {
 	Get(pattern string, handlerFn http.HandlerFunc)
 	Handle(pattern string, handler http.Handler)
 }) {
-	subFS, err := fs.Sub(uiAssets, "ui")
+	portalFS, err := fs.Sub(uiAssets, "ui/portal")
 	if err != nil {
 		panic(err)
 	}
-	fileServer := http.FileServer(http.FS(subFS))
+	portalFileServer := http.FileServer(http.FS(portalFS))
 
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/ui/", http.StatusFound)
+		http.Redirect(w, r, "/portal/", http.StatusFound)
 	})
 	router.Get("/ui", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/ui/", http.StatusFound)
+		http.Redirect(w, r, "/portal/", http.StatusFound)
 	})
-	router.Handle("/ui/*", http.StripPrefix("/ui/", fileServer))
+	router.Get("/portal", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/portal/", http.StatusFound)
+	})
+	router.Handle("/ui/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/portal/", http.StatusFound)
+	}))
+	router.Handle("/portal/*", http.StripPrefix("/portal/", portalFileServer))
 }

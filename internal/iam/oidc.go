@@ -19,8 +19,9 @@ import (
 )
 
 type oidcStateData struct {
-	CodeVerifier string
-	ExpiresAt    time.Time
+	CodeVerifier  string
+	RedirectAfter string
+	ExpiresAt     time.Time
 }
 
 type OIDCStateStore struct {

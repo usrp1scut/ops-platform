@@ -123,9 +123,15 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to generate code verifier")
 		return
 	}
+	redirectAfter := sanitizeRedirectPath(r.URL.Query().Get("next"))
+	if redirectAfter == "" {
+		redirectAfter = "/portal/"
+	}
+
 	h.stateStore.Save(state, oidcStateData{
-		CodeVerifier: codeVerifier,
-		ExpiresAt:    time.Now().Add(5 * time.Minute),
+		CodeVerifier:  codeVerifier,
+		RedirectAfter: redirectAfter,
+		ExpiresAt:     time.Now().Add(5 * time.Minute),
 	})
 
 	authURL, err := oidcClient.BuildAuthorizationURL(state, BuildCodeChallenge(codeVerifier))
@@ -220,17 +226,18 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	accept := strings.ToLower(r.Header.Get("Accept"))
 	if strings.Contains(accept, "text/html") {
 		tokenJSON, _ := json.Marshal(token)
+		redirectJSON, _ := json.Marshal(stateData.RedirectAfter)
 		html := fmt.Sprintf(`<!doctype html>
 <html>
   <head><meta charset="utf-8"><title>OIDC Login Complete</title></head>
   <body>
     <script>
       localStorage.setItem("ops_platform_access_token", %s);
-      window.location.href = "/ui/";
+      window.location.href = %s;
     </script>
     <p>Login complete. Redirecting...</p>
   </body>
-</html>`, string(tokenJSON))
+</html>`, string(tokenJSON), string(redirectJSON))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(html))
@@ -238,6 +245,17 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func sanitizeRedirectPath(raw string) string {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return ""
+	}
+	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return ""
+	}
+	return path
 }
 
 func (h *Handler) oidcClient(ctx context.Context) (*OIDCClient, config.Config, error) {
