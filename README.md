@@ -85,7 +85,8 @@ Service endpoint:
 
 - API: `http://localhost:8080`
 - Health: `GET /healthz`
-- Platform UI: `http://localhost:8080/ui/`
+- User Portal: `http://localhost:8080/portal/`
+- Legacy `/ui/*` route is redirected to `/portal/`
 
 ## Local development without Docker
 
@@ -120,6 +121,7 @@ go run ./cmd/ops-worker
 ## API endpoints (initial)
 
 - `GET /auth/oidc/login`
+- `GET /auth/oidc/login?next=/portal/`
 - `GET /auth/oidc/callback`
 - `POST /auth/local/login`
 - `GET /auth/me` (requires `Authorization: Bearer <token>`)
@@ -150,11 +152,16 @@ Token is returned by `POST /auth/local/login` or `GET /auth/oidc/callback`.
 
 ## Frontend console flow
 
-1. Open `http://localhost:8080/ui/`.
+1. Open unified portal `http://localhost:8080/portal/`.
 2. Use `Local Login` (default admin) or click `OIDC Login`.
 3. Browser callback/local login saves token to `localStorage`.
-4. Use IAM page `OIDC Settings` panel to view/update OIDC runtime config.
-5. Use left navigation to operate `Overview`, `CMDB`, `AWS Accounts`, and `IAM`.
+4. Use portal内导航完成 `Overview / CMDB / AWS / IAM / My Access` 全部操作。
+5. OIDC runtime config is managed from portal IAM module.
+
+Design references:
+
+- Core platform architecture: `docs/design/ops-platform-v0.3.md`
+- Frontend portal design: `docs/design/frontend-portal-v1.md`
 
 ## Next planned additions
 
