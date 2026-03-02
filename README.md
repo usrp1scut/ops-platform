@@ -15,7 +15,8 @@ This repository contains an initial implementation aligned with `docs/design/ops
 - CMDB asset CRUD API.
 - AWS account onboarding API (multi-account model, assume-role/static modes).
 - AWS sync worker v1 (`ops-worker`) for EC2/VPC/SG/RDS asset ingestion.
-- Docker Compose stack with Postgres, Redis, MinIO, migration job, API service, and worker.
+- Bastion probe worker v1 (`bastion-probe`) for SSH-based host facts collection.
+- Docker Compose stack with Postgres, Redis, MinIO, migration job, API service, and workers.
 
 ## Quick start
 
@@ -63,6 +64,17 @@ AWS sync worker controls (optional):
 ```bash
 export OPS_SYNC_INTERVAL='15m'
 export OPS_SYNC_RUN_ON_START='true'
+docker compose up --build
+```
+
+Bastion probe worker controls (optional):
+
+```bash
+export OPS_PROBE_INTERVAL='30m'
+export OPS_PROBE_RUN_ON_START='true'
+export OPS_PROBE_TIMEOUT='20s'
+export OPS_PROBE_CONCURRENCY='4'
+export OPS_PROBE_BATCH_SIZE='200'
 docker compose up --build
 ```
 
@@ -118,6 +130,12 @@ go run ./cmd/ops-api
 go run ./cmd/ops-worker
 ```
 
+5. Run bastion probe worker:
+
+```bash
+go run ./cmd/bastion-probe
+```
+
 ## API endpoints (initial)
 
 - `GET /auth/oidc/login`
@@ -130,6 +148,11 @@ go run ./cmd/ops-worker
 - `GET /api/v1/cmdb/assets/{assetID}`
 - `PATCH /api/v1/cmdb/assets/{assetID}`
 - `DELETE /api/v1/cmdb/assets/{assetID}`
+- `GET /api/v1/cmdb/assets/{assetID}/connection` (masked)
+- `GET /api/v1/cmdb/assets/{assetID}/connection/resolve` (includes secrets)
+- `PUT /api/v1/cmdb/assets/{assetID}/connection`
+- `GET /api/v1/cmdb/assets/{assetID}/probe/latest`
+- `POST /api/v1/cmdb/assets/{assetID}/probe`
 - `GET /api/v1/aws/accounts`
 - `POST /api/v1/aws/accounts`
 - `GET /api/v1/aws/accounts/{accountID}`
@@ -162,6 +185,21 @@ Design references:
 
 - Core platform architecture: `docs/design/ops-platform-v0.3.md`
 - Frontend portal design: `docs/design/frontend-portal-v1.md`
+
+## CMDB x Bastion integration (v1)
+
+- Bastion reads per-asset connect profile from CMDB:
+  - `GET /api/v1/cmdb/assets/{assetID}/connection/resolve`
+- CMDB stores bastion-managed credentials (encrypted at rest with `OPS_MASTER_KEY`):
+  - `PUT /api/v1/cmdb/assets/{assetID}/connection`
+- Bastion writes discovered software/hardware facts back to CMDB:
+  - `POST /api/v1/cmdb/assets/{assetID}/probe`
+- Latest probe snapshot query:
+  - `GET /api/v1/cmdb/assets/{assetID}/probe/latest`
+- `bastion-probe` worker reads enabled connection profiles and probes via SSH:
+  - auth type `password` or `key`
+  - writes snapshots into `cmdb_asset_probe_snapshot`
+  - updates CMDB asset tags with probe summary
 
 ## Next planned additions
 

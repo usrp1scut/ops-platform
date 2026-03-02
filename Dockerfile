@@ -17,6 +17,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/ops-api ./cmd/ops-api
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/migrate ./cmd/migrate
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/ops-worker ./cmd/ops-worker
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/bastion-probe ./cmd/bastion-probe
 
 FROM alpine:3.20
 WORKDIR /app
@@ -32,6 +33,7 @@ ENV https_proxy=${HTTPS_PROXY}
 COPY --from=builder /bin/ops-api /bin/ops-api
 COPY --from=builder /bin/migrate /bin/migrate
 COPY --from=builder /bin/ops-worker /bin/ops-worker
+COPY --from=builder /bin/bastion-probe /bin/bastion-probe
 COPY migrations /app/migrations
 
 USER ops

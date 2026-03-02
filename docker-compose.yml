@@ -107,6 +107,29 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  bastion-probe:
+    build:
+      context: .
+      args:
+        GOPROXY: ${GOPROXY-https://goproxy.cn,direct}
+        HTTP_PROXY: ${HTTP_PROXY-}
+        HTTPS_PROXY: ${HTTPS_PROXY-}
+    environment:
+      OPS_DATABASE_URL: postgres://ops:ops@postgres:5432/ops_platform?sslmode=disable
+      OPS_MASTER_KEY: "${OPS_MASTER_KEY:-01234567890123456789012345678901}"
+      OPS_PROBE_INTERVAL: ${OPS_PROBE_INTERVAL-30m}
+      OPS_PROBE_RUN_ON_START: ${OPS_PROBE_RUN_ON_START-true}
+      OPS_PROBE_TIMEOUT: ${OPS_PROBE_TIMEOUT-20s}
+      OPS_PROBE_CONCURRENCY: ${OPS_PROBE_CONCURRENCY-4}
+      OPS_PROBE_BATCH_SIZE: ${OPS_PROBE_BATCH_SIZE-200}
+      GOPROXY: ${GOPROXY-https://goproxy.cn,direct}
+      HTTP_PROXY: ${HTTP_PROXY-}
+      HTTPS_PROXY: ${HTTPS_PROXY-}
+    entrypoint: ["/bin/bastion-probe"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   pgdata:
   miniodata:
