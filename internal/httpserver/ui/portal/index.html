@@ -1,121 +1,293 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ops Platform Portal</title>
+    <title>Ops Platform</title>
     <link rel="stylesheet" href="/portal/styles.css" />
+    <link rel="stylesheet" href="/portal/vendor/xterm/xterm.css" />
   </head>
   <body>
-    <div class="ambient">
-      <span class="orb orb-a"></span>
-      <span class="orb orb-b"></span>
-      <span class="grid"></span>
-    </div>
+    <!-- ===== Auth gate ===== -->
+    <section id="auth-gate" class="auth-gate active">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <div class="logo-mark">O</div>
+          <div class="brand-text">Ops Platform</div>
+        </div>
+        <h1>Sign in</h1>
+        <p class="subtitle">Access your operations workspace.</p>
 
-    <header class="shell-header">
-      <div>
-        <p class="eyebrow">OPS PLATFORM</p>
-        <h1>Operations Portal</h1>
+        <form id="local-login-form" class="auth-form" autocomplete="on">
+          <label>
+            Username
+            <input id="local-username" name="username" value="admin" autocomplete="username" required />
+          </label>
+          <label>
+            Password
+            <input id="local-password" name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit" class="btn primary" style="width: 100%; justify-content: center; padding: 10px;">
+            Sign in
+          </button>
+        </form>
+
+        <div class="auth-divider">or</div>
+
+        <button id="oidc-login-btn" class="btn" style="width: 100%; justify-content: center; padding: 10px;">
+          Continue with SSO
+        </button>
+
+        <div id="auth-error" class="auth-error"></div>
       </div>
-      <div class="header-actions">
-        <span id="user-badge" class="user-badge">Guest</span>
-        <button id="logout-btn" class="btn subtle" disabled>Sign Out</button>
-      </div>
-    </header>
+    </section>
 
-    <main class="shell-main">
-      <section id="auth-gate" class="gate active">
-        <article class="panel gate-panel">
-          <header class="panel-header">
-            <h2>开始使用</h2>
-            <p>登录后进入统一运维门户，所有运维操作统一在本门户完成。</p>
-          </header>
-          <div class="gate-grid">
-            <form id="local-login-form" class="card login-card">
-              <h3>Local Admin Login</h3>
-              <p class="muted">适合本地环境快速接入。</p>
-              <label>
-                Username
-                <input id="local-username" name="username" value="admin" required />
-              </label>
-              <label>
-                Password
-                <input id="local-password" name="password" type="password" placeholder="admin123456" required />
-              </label>
-              <button type="submit" class="btn primary">Sign In</button>
-            </form>
+    <!-- ===== Workspace ===== -->
+    <div id="workspace" class="workspace">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="logo-mark">O</div>
+          <div class="brand-text">Ops Platform</div>
+        </div>
 
-            <article class="card login-card">
-              <h3>OIDC Single Sign-On</h3>
-              <p class="muted">企业用户请通过统一身份源登录。</p>
-              <ul class="plain-list">
-                <li>支持 Authorization Code + PKCE</li>
-                <li>登录后自动写入本地访问令牌</li>
-                <li>回跳路径固定到门户首页</li>
-              </ul>
-              <button id="oidc-login-btn" class="btn">Continue With OIDC</button>
-            </article>
+        <nav class="sidebar-nav">
+          <button class="nav-item active" data-view="overview">
+            <svg viewBox="0 0 24 24"><path d="M3 12l9-9 9 9M5 10v10h14V10" /></svg>
+            Overview
+          </button>
+          <button class="nav-item" data-view="cmdb">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/><circle cx="7" cy="7" r="0.5"/><circle cx="7" cy="17" r="0.5"/></svg>
+            Assets
+          </button>
+          <button class="nav-item" data-view="proxies">
+            <svg viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M10 17l6-6-6-6M16 17l4-4-4-4"/></svg>
+            SSH proxies
+          </button>
+          <button class="nav-item" data-view="hostkeys">
+            <svg viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/></svg>
+            Host keys
+          </button>
+          <button class="nav-item" data-view="keypairs">
+            <svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M17 12v4M21 12v4"/></svg>
+            SSH keypairs
+          </button>
+          <button class="nav-item" data-view="sessions">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 20h10M8 8l3 3-3 3M13 14h4"/></svg>
+            Sessions
+          </button>
+          <button class="nav-item" data-view="aws">
+            <svg viewBox="0 0 24 24"><path d="M6 18a4 4 0 01-1-7.9 6 6 0 0111.7-1.7 5 5 0 01-1.7 9.6H6z"/></svg>
+            AWS
+          </button>
+          <button class="nav-item" data-view="iam">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M4 20c0-3.5 3.5-6 8-6s8 2.5 8 6"/></svg>
+            Access
+          </button>
+          <button class="nav-item" data-view="profile">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            My profile
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="user-chip">
+            <div id="user-avatar" class="avatar">?</div>
+            <div class="user-meta">
+              <span id="user-badge" class="user-name">Guest</span>
+              <span id="user-role-text" class="user-role">Not signed in</span>
+            </div>
           </div>
-          <pre id="auth-output" class="log">Ready.</pre>
-        </article>
-      </section>
+          <button id="logout-btn" class="icon-btn" title="Sign out" disabled>
+            <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          </button>
+        </div>
+      </aside>
 
-      <section id="workspace" class="workspace">
-        <aside class="workspace-nav">
-          <button class="nav-item active" data-view="overview">Overview</button>
-          <button class="nav-item" data-view="cmdb">CMDB</button>
-          <button class="nav-item" data-view="aws">AWS</button>
-          <button class="nav-item" data-view="iam">IAM</button>
-          <button class="nav-item" data-view="profile">My Access</button>
-        </aside>
-
-        <section class="workspace-content">
-          <article id="view-overview" class="view active">
-            <div class="cards">
-              <div class="metric">
-                <span>Total Assets</span>
-                <strong id="metric-assets">0</strong>
-              </div>
-              <div class="metric">
-                <span>AWS Accounts</span>
-                <strong id="metric-accounts">0</strong>
-              </div>
-              <div class="metric">
-                <span>My Roles</span>
-                <strong id="metric-roles">0</strong>
-              </div>
-              <div class="metric">
-                <span>Write Access</span>
-                <strong id="metric-write">No</strong>
-              </div>
+      <main class="main">
+        <!-- ===== Overview ===== -->
+        <article id="view-overview" class="view active">
+          <div class="page-header">
+            <div>
+              <h1>Overview</h1>
+              <p class="subtitle">Platform status and recent activity.</p>
             </div>
-            <div class="grid-two">
-              <section class="panel">
-                <header class="panel-header row">
-                  <h2>Platform Health</h2>
-                  <button id="refresh-overview-btn" class="btn subtle">Refresh</button>
-                </header>
-                <pre id="health-output" class="log">Waiting for check...</pre>
-              </section>
-              <section class="panel">
-                <header class="panel-header row">
-                  <h2>Activity Stream</h2>
-                </header>
-                <pre id="activity-output" class="log">No activity yet.</pre>
-              </section>
+            <div class="page-actions">
+              <button id="refresh-overview-btn" class="btn ghost">
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>
+                Refresh
+              </button>
             </div>
-          </article>
+          </div>
 
-          <article id="view-cmdb" class="view">
+          <div class="kpi-grid">
+            <div class="kpi">
+              <div class="kpi-label">Total assets</div>
+              <div id="metric-assets" class="kpi-value">0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">AWS accounts</div>
+              <div id="metric-accounts" class="kpi-value">0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">My roles</div>
+              <div id="metric-roles" class="kpi-value">0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Write access</div>
+              <div id="metric-write" class="kpi-value">—</div>
+            </div>
+          </div>
+
+          <div class="grid-cols-2">
             <section class="panel">
-              <header class="panel-header row">
-                <h2>Asset Inventory</h2>
-                <div class="row">
-                  <input id="asset-search" placeholder="Search name / external id" />
-                  <button id="refresh-assets-btn" class="btn subtle">Refresh</button>
+              <div class="panel-head">
+                <div>
+                  <h2>Platform health</h2>
+                  <div class="panel-hint">Service-level checks.</div>
                 </div>
-              </header>
+              </div>
+              <div class="panel-body">
+                <ul id="health-list" class="status-list">
+                  <li class="timeline-empty">Waiting for check...</li>
+                </ul>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Recent activity</h2>
+                  <div class="panel-hint">Actions from this session.</div>
+                </div>
+              </div>
+              <div class="panel-body">
+                <ul id="activity-list" class="timeline">
+                  <li class="timeline-empty">No activity yet.</li>
+                </ul>
+              </div>
+            </section>
+          </div>
+        </article>
+
+        <!-- ===== CMDB ===== -->
+        <article id="view-cmdb" class="view">
+          <div class="page-header">
+            <div>
+              <h1>Assets</h1>
+              <p class="subtitle">Unified inventory of cloud and manual assets.</p>
+            </div>
+            <div class="page-actions">
+              <div class="search-input">
+                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                <input id="asset-search" placeholder="Search name, ID, IP, DNS..." />
+              </div>
+              <button id="refresh-assets-btn" class="btn ghost" title="Refresh">
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>
+              </button>
+              <button id="toggle-asset-form-btn" class="btn primary">
+                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                New asset
+              </button>
+            </div>
+          </div>
+
+          <section id="asset-form-panel" class="panel" style="display: none;">
+            <div class="panel-head">
+              <div>
+                <h2>Create asset</h2>
+                <div class="panel-hint">Manually register an asset. AWS resources are imported automatically.</div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <form id="asset-form">
+                <div class="form-grid">
+                  <div class="field">
+                    <label>Name</label>
+                    <input name="name" required />
+                  </div>
+                  <div class="field">
+                    <label>Type</label>
+                    <input name="type" placeholder="e.g. server, database" required />
+                  </div>
+                  <div class="field">
+                    <label>Environment</label>
+                    <input name="env" placeholder="default" />
+                  </div>
+                  <div class="field">
+                    <label>Status</label>
+                    <input name="status" placeholder="active" />
+                  </div>
+                  <div class="field">
+                    <label>Criticality</label>
+                    <select name="criticality">
+                      <option value="">—</option>
+                      <option value="low">low</option>
+                      <option value="medium">medium</option>
+                      <option value="high">high</option>
+                      <option value="critical">critical</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>Owner</label>
+                    <input name="owner" placeholder="team or individual" />
+                  </div>
+                  <div class="field">
+                    <label>Business unit</label>
+                    <input name="business_unit" />
+                  </div>
+                  <div class="field">
+                    <label>Region</label>
+                    <input name="region" />
+                  </div>
+                  <div class="field">
+                    <label>Account ID</label>
+                    <input name="account_id" />
+                  </div>
+                  <div class="field">
+                    <label>Instance type</label>
+                    <input name="instance_type" />
+                  </div>
+                  <div class="field">
+                    <label>External ID</label>
+                    <input name="external_id" />
+                  </div>
+                  <div class="field">
+                    <label>Public IP</label>
+                    <input name="public_ip" />
+                  </div>
+                  <div class="field">
+                    <label>Private IP</label>
+                    <input name="private_ip" />
+                  </div>
+                  <div class="field">
+                    <label>Private DNS</label>
+                    <input name="private_dns" />
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="btn ghost" id="cancel-asset-form">Cancel</button>
+                  <button type="submit" class="btn primary">Create asset</button>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Inventory</h2>
+                <div class="panel-hint" id="assets-count-hint">—</div>
+              </div>
+              <div class="filter-bar" id="assets-filter-bar">
+                <select id="filter-env"><option value="">All envs</option></select>
+                <select id="filter-type"><option value="">All types</option></select>
+                <select id="filter-status"><option value="">All statuses</option></select>
+                <select id="filter-source"><option value="">All sources</option></select>
+                <select id="filter-region"><option value="">All regions</option></select>
+                <button id="filter-reset-btn" class="btn ghost" type="button">Reset</button>
+              </div>
+            </div>
+            <div class="panel-body flush">
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -124,83 +296,162 @@
                       <th>Type</th>
                       <th>Env</th>
                       <th>Status</th>
+                      <th>Owner</th>
+                      <th>Region</th>
+                      <th>Network</th>
                       <th>Source</th>
-                      <th>External ID</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody id="assets-table-body"></tbody>
                 </table>
               </div>
-            </section>
+              <div class="pagination" id="assets-pagination"></div>
+            </div>
+          </section>
+        </article>
 
-            <section class="panel">
-              <header class="panel-header row">
-                <h2>Create Asset</h2>
-              </header>
-              <form id="asset-form" class="form-grid">
-                <input name="name" placeholder="asset name" required />
-                <input name="type" placeholder="asset type (aws_ec2_instance)" required />
-                <input name="env" placeholder="env (default/prod)" />
-                <input name="status" placeholder="status (active/terminated)" />
-                <input name="source" placeholder="source (manual/aws)" />
-                <input name="external_id" placeholder="external_id (optional)" />
-                <button type="submit" class="btn">Create Asset</button>
+        <!-- ===== SSH Proxies ===== -->
+        <article id="view-proxies" class="view"></article>
+
+        <article id="view-hostkeys" class="view"></article>
+
+        <article id="view-keypairs" class="view"></article>
+
+        <article id="view-sessions" class="view"></article>
+
+        <!-- ===== AWS ===== -->
+        <article id="view-aws" class="view">
+          <div class="page-header">
+            <div>
+              <h1>AWS</h1>
+              <p class="subtitle">Connected accounts and sync activity.</p>
+            </div>
+            <div class="page-actions">
+              <button id="refresh-aws-btn" class="btn ghost" title="Refresh">
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>
+              </button>
+              <button id="toggle-aws-form-btn" class="btn primary">
+                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                Add account
+              </button>
+            </div>
+          </div>
+
+          <section id="aws-form-panel" class="panel" style="display: none;">
+            <div class="panel-head">
+              <div>
+                <h2>Connect AWS account</h2>
+                <div class="panel-hint">Credentials are encrypted at rest with AES-256-GCM.</div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <form id="aws-form">
+                <div class="form-grid">
+                  <div class="field">
+                    <label>Account ID</label>
+                    <input name="account_id" placeholder="12-digit AWS account ID" required />
+                  </div>
+                  <div class="field">
+                    <label>Display name</label>
+                    <input name="display_name" required />
+                  </div>
+                  <div class="field">
+                    <label>Auth mode</label>
+                    <select name="auth_mode">
+                      <option value="assume_role">Assume role</option>
+                      <option value="static">Static keys</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>Role ARN</label>
+                    <input name="role_arn" placeholder="arn:aws:iam::..." />
+                    <span class="hint">Required for assume_role mode.</span>
+                  </div>
+                  <div class="field">
+                    <label>External ID</label>
+                    <input name="external_id" />
+                    <span class="hint">Optional trust-policy external ID.</span>
+                  </div>
+                  <div class="field">
+                    <label>Access key ID</label>
+                    <input name="access_key_id" />
+                  </div>
+                  <div class="field">
+                    <label>Secret access key</label>
+                    <input name="secret_access_key" type="password" />
+                  </div>
+                  <div class="field full">
+                    <label>Regions</label>
+                    <input name="region_allowlist" placeholder="us-east-1, ap-southeast-1" />
+                    <span class="hint">Comma-separated. Only these regions will be synced.</span>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="button" class="btn ghost" id="cancel-aws-form">Cancel</button>
+                  <button type="submit" class="btn primary">Add account</button>
+                </div>
               </form>
-            </section>
-          </article>
+            </div>
+          </section>
 
-          <article id="view-aws" class="view">
-            <section class="panel">
-              <header class="panel-header row">
-                <h2>AWS Accounts</h2>
-                <button id="refresh-aws-btn" class="btn subtle">Refresh</button>
-              </header>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Accounts</h2>
+              </div>
+            </div>
+            <div class="panel-body flush">
               <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Account ID</th>
-                      <th>Name</th>
+                      <th>Account</th>
                       <th>Mode</th>
-                      <th>Role ARN</th>
+                      <th>Role / Key</th>
                       <th>Regions</th>
-                      <th>Enabled</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody id="cloud-accounts-body"></tbody>
                 </table>
               </div>
-            </section>
+            </div>
+          </section>
 
-            <section class="panel">
-              <header class="panel-header row">
-                <h2>Add AWS Account</h2>
-              </header>
-              <form id="aws-form" class="form-grid">
-                <input name="account_id" placeholder="12-digit account_id" required />
-                <input name="display_name" placeholder="display name" required />
-                <select name="auth_mode">
-                  <option value="assume_role">assume_role</option>
-                  <option value="static">static</option>
-                </select>
-                <input name="role_arn" placeholder="role_arn for assume_role mode" />
-                <input name="access_key_id" placeholder="access_key_id for static mode" />
-                <input name="secret_access_key" placeholder="secret_access_key for static mode" />
-                <input name="external_id" placeholder="optional external_id for assume_role" />
-                <input name="region_allowlist" placeholder="regions csv: us-east-1,ap-southeast-1" />
-                <button type="submit" class="btn">Create AWS Account</button>
-              </form>
-            </section>
-
-            <section class="panel">
-              <header class="panel-header row">
-                <h2>AWS Sync</h2>
-                <div class="row">
-                  <button id="trigger-aws-sync-btn" class="btn">Run Sync Now</button>
-                  <button id="refresh-sync-btn" class="btn subtle">Refresh</button>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Sync</h2>
+                <div class="panel-hint">Scheduled every 15 minutes. Trigger manually to refresh now.</div>
+              </div>
+              <div class="panel-head-actions">
+                <button id="refresh-sync-btn" class="btn ghost" title="Refresh">
+                  <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>
+                </button>
+                <button id="trigger-aws-sync-btn" class="btn">
+                  <svg viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20" fill="currentColor" stroke="none"/></svg>
+                  Run sync
+                </button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div id="sync-status-card" class="summary-grid">
+                <div class="summary-cell">
+                  <div class="label">Status</div>
+                  <div class="value">Not run yet</div>
                 </div>
-              </header>
-              <pre id="sync-status-output" class="log">No sync status yet.</pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Sync history</h2>
+              </div>
+            </div>
+            <div class="panel-body flush">
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -210,119 +461,259 @@
                       <th>Region</th>
                       <th>Resource</th>
                       <th>Status</th>
-                      <th>Processed</th>
+                      <th style="text-align: right;">Processed</th>
                     </tr>
                   </thead>
                   <tbody id="sync-runs-body"></tbody>
                 </table>
               </div>
-            </section>
-          </article>
+            </div>
+          </section>
+        </article>
 
-          <article id="view-iam" class="view">
+        <!-- ===== IAM ===== -->
+        <article id="view-iam" class="view">
+          <div class="page-header">
+            <div>
+              <h1>Access</h1>
+              <p class="subtitle">Users, roles, and SSO configuration.</p>
+            </div>
+            <div class="page-actions">
+              <div class="search-input">
+                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                <input id="iam-user-search" placeholder="Search users..." />
+              </div>
+              <button id="refresh-iam-users-btn" class="btn ghost" title="Refresh">
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid-cols-2">
             <section class="panel">
-              <header class="panel-header row">
-                <h2>Users</h2>
-                <div class="row">
-                  <input id="iam-user-search" placeholder="Search user email/name/subject" />
-                  <button id="refresh-iam-users-btn" class="btn subtle">Refresh</button>
+              <div class="panel-head">
+                <div>
+                  <h2>Users</h2>
                 </div>
-              </header>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>User</th>
-                      <th>Email</th>
-                      <th>Subject</th>
-                      <th>Roles</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody id="iam-users-table-body"></tbody>
-                </table>
               </div>
-            </section>
-
-            <section class="panel">
-              <header class="panel-header row">
-                <h2>Selected User Access</h2>
-                <button id="refresh-iam-selection-btn" class="btn subtle">Reload</button>
-              </header>
-              <pre id="iam-selected-user" class="log">No user selected.</pre>
-              <div class="split-row">
-                <select id="iam-role-select"></select>
-                <button id="iam-bind-role-btn" class="btn">Bind Role</button>
-              </div>
-              <div id="iam-user-roles" class="chips"></div>
-            </section>
-
-            <section class="panel">
-              <header class="panel-header row">
-                <h2>Role Permissions</h2>
-                <button id="refresh-iam-roles-btn" class="btn subtle">Refresh Roles</button>
-              </header>
-              <div class="grid-two">
+              <div class="panel-body flush">
                 <div class="table-wrap">
                   <table>
                     <thead>
                       <tr>
-                        <th>Role</th>
-                        <th>Description</th>
-                        <th>Permissions</th>
-                        <th>Action</th>
+                        <th>User</th>
+                        <th>Roles</th>
+                        <th></th>
                       </tr>
                     </thead>
-                    <tbody id="iam-roles-table-body"></tbody>
+                    <tbody id="iam-users-table-body"></tbody>
                   </table>
                 </div>
-                <pre id="iam-role-permissions-output" class="log">Select a role to view permissions.</pre>
               </div>
             </section>
 
             <section class="panel">
-              <header class="panel-header row">
-                <h2>OIDC Settings</h2>
-                <button id="refresh-oidc-settings-btn" class="btn subtle">Refresh Config</button>
-              </header>
-              <form id="oidc-settings-form" class="form-grid">
-                <label class="inline">
-                  <input id="oidc-enabled-input" type="checkbox" />
-                  Enabled
-                </label>
-                <input id="oidc-issuer-url-input" placeholder="issuer_url (optional if explicit endpoints filled)" />
-                <input id="oidc-client-id-input" placeholder="client_id" />
-                <input id="oidc-client-secret-input" type="password" placeholder="client_secret (leave empty to keep)" />
-                <input id="oidc-redirect-url-input" placeholder="redirect_url (http://localhost:8080/auth/oidc/callback)" />
-                <input id="oidc-authorize-url-input" placeholder="authorize_url (optional if issuer_url set)" />
-                <input id="oidc-token-url-input" placeholder="token_url (optional if issuer_url set)" />
-                <input id="oidc-userinfo-url-input" placeholder="userinfo_url (optional if issuer_url set)" />
-                <input id="oidc-scopes-input" placeholder="scopes csv: openid,profile,email" />
-                <button id="save-oidc-settings-btn" type="submit" class="btn">Save OIDC Config</button>
+              <div class="panel-head">
+                <div>
+                  <h2>Selected user</h2>
+                </div>
+                <div class="panel-head-actions">
+                  <button id="refresh-iam-selection-btn" class="btn ghost" title="Refresh">
+                    <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="panel-body" id="iam-selected-user">
+                <div class="timeline-empty">Select a user to view their access.</div>
+              </div>
+              <div class="panel-body" style="border-top: 1px solid var(--border); display: grid; gap: 10px;">
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px;">
+                  <select id="iam-role-select" class="field" style="padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);"></select>
+                  <button id="iam-bind-role-btn" class="btn primary">Bind role</button>
+                </div>
+                <div id="iam-user-roles" class="chips"></div>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Roles</h2>
+              </div>
+              <div class="panel-head-actions">
+                <button id="refresh-iam-roles-btn" class="btn ghost" title="Refresh">
+                  <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="panel-body split">
+              <div class="table-wrap" style="padding: 0;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Role</th>
+                      <th>Description</th>
+                      <th style="text-align: right;">Permissions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="iam-roles-table-body"></tbody>
+                </table>
+              </div>
+              <div id="iam-role-permissions-output">
+                <div class="timeline-empty">Select a role to view permissions.</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>OIDC / SSO</h2>
+                <div class="panel-hint">Configure Single Sign-On with an OpenID Connect provider.</div>
+              </div>
+              <div class="panel-head-actions">
+                <button id="refresh-oidc-settings-btn" class="btn ghost" title="Refresh">
+                  <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <form id="oidc-settings-form">
+                <div class="form-grid">
+                  <div class="field check full">
+                    <input id="oidc-enabled-input" type="checkbox" />
+                    <span class="label" style="margin: 0;">Enable SSO login</span>
+                  </div>
+                  <div class="field full">
+                    <label>Issuer URL</label>
+                    <input id="oidc-issuer-url-input" placeholder="https://auth.example.com" />
+                    <span class="hint">If set, endpoints are auto-derived.</span>
+                  </div>
+                  <div class="field">
+                    <label>Client ID</label>
+                    <input id="oidc-client-id-input" />
+                  </div>
+                  <div class="field">
+                    <label>Client secret</label>
+                    <input id="oidc-client-secret-input" type="password" placeholder="Leave empty to keep current" />
+                  </div>
+                  <div class="field full">
+                    <label>Redirect URL</label>
+                    <input id="oidc-redirect-url-input" placeholder="http://localhost:8080/auth/oidc/callback" />
+                  </div>
+                  <div class="field">
+                    <label>Authorize URL</label>
+                    <input id="oidc-authorize-url-input" />
+                  </div>
+                  <div class="field">
+                    <label>Token URL</label>
+                    <input id="oidc-token-url-input" />
+                  </div>
+                  <div class="field">
+                    <label>Userinfo URL</label>
+                    <input id="oidc-userinfo-url-input" />
+                  </div>
+                  <div class="field">
+                    <label>Scopes</label>
+                    <input id="oidc-scopes-input" placeholder="openid, profile, email" />
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button id="save-oidc-settings-btn" type="submit" class="btn primary">Save configuration</button>
+                </div>
               </form>
-              <pre id="oidc-settings-output" class="log">OIDC config not loaded.</pre>
-            </section>
-          </article>
+            </div>
+          </section>
+        </article>
 
-          <article id="view-profile" class="view">
-            <section class="panel">
-              <header class="panel-header row">
-                <h2>My Identity</h2>
-                <button id="refresh-profile-btn" class="btn subtle">Refresh</button>
-              </header>
-              <pre id="identity-output" class="log">No session.</pre>
-            </section>
-            <section class="panel">
-              <header class="panel-header row">
+        <!-- ===== Profile ===== -->
+        <article id="view-profile" class="view">
+          <div class="page-header">
+            <div>
+              <h1>My profile</h1>
+              <p class="subtitle">Your identity and granted permissions.</p>
+            </div>
+            <div class="page-actions">
+              <button id="refresh-profile-btn" class="btn ghost">
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5"/></svg>
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Identity</h2>
+              </div>
+            </div>
+            <div class="panel-body" id="identity-output">
+              <div class="timeline-empty">No session.</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
                 <h2>Permissions</h2>
-              </header>
-              <div id="permission-chips" class="chips"></div>
-            </section>
-          </article>
-        </section>
-      </section>
-    </main>
+                <div class="panel-hint">Effective permissions from your assigned roles.</div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div id="permission-chips">
+                <div class="timeline-empty">No permissions.</div>
+              </div>
+            </div>
+          </section>
+        </article>
+      </main>
+    </div>
 
+    <!-- ===== Toast host ===== -->
+    <!-- ===== Asset detail drawer ===== -->
+    <aside id="asset-drawer" class="drawer" aria-hidden="true">
+      <div class="drawer-backdrop" data-drawer-close="1"></div>
+      <div class="drawer-panel">
+        <header class="drawer-head">
+          <div>
+            <div class="drawer-eyebrow" id="asset-drawer-eyebrow">Asset</div>
+            <h2 id="asset-drawer-title">—</h2>
+            <div class="muted" id="asset-drawer-sub">—</div>
+          </div>
+          <button class="icon-btn" data-drawer-close="1" aria-label="Close">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </header>
+        <div class="drawer-body" id="asset-drawer-body"></div>
+      </div>
+    </aside>
+
+    <!-- Terminal modal -->
+    <div id="terminal-modal" class="terminal-modal" aria-hidden="true">
+      <div class="terminal-modal-backdrop" data-terminal-close></div>
+      <div class="terminal-modal-panel">
+        <div class="terminal-modal-head">
+          <div>
+            <div class="drawer-eyebrow" id="terminal-eyebrow">Terminal</div>
+            <h2 id="terminal-title">—</h2>
+          </div>
+          <div class="terminal-modal-actions">
+            <span id="terminal-status" class="pill neutral">idle</span>
+            <button class="btn ghost" id="terminal-close-btn" data-terminal-close>Close</button>
+          </div>
+        </div>
+        <div id="terminal-mount" class="terminal-mount"></div>
+      </div>
+    </div>
+
+    <div id="toast-host" class="toast-host"></div>
+
+    <!-- Legacy element kept for app.js compatibility; reused as auth-error -->
+    <span id="auth-output" style="display: none;"></span>
+
+    <script src="/portal/vendor/xterm/xterm.js"></script>
+    <script src="/portal/vendor/xterm/xterm-addon-fit.js"></script>
     <script src="/portal/app.js"></script>
   </body>
 </html>
