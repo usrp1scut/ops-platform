@@ -10,6 +10,8 @@ import (
 	"ops-platform/internal/bastionprobe"
 	"ops-platform/internal/cmdb"
 	"ops-platform/internal/config"
+	"ops-platform/internal/hostkey"
+	"ops-platform/internal/keypair"
 	"ops-platform/internal/store"
 )
 
@@ -26,7 +28,9 @@ func main() {
 	defer db.Close()
 
 	repo := cmdb.NewRepository(db)
-	service := bastionprobe.NewService(cfg, repo)
+	hostkeyVerifier := hostkey.NewVerifier(hostkey.NewRepository(db))
+	keypairRepo := keypair.NewRepository(db, cfg.MasterKey)
+	service := bastionprobe.NewService(cfg, repo, hostkeyVerifier, keypairRepo)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
