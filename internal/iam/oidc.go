@@ -38,6 +38,13 @@ func NewOIDCStateStore() *OIDCStateStore {
 func (s *OIDCStateStore) Save(state string, data oidcStateData) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Prune expired entries on every write to prevent unbounded growth.
+	now := time.Now()
+	for k, v := range s.items {
+		if now.After(v.ExpiresAt) {
+			delete(s.items, k)
+		}
+	}
 	s.items[state] = data
 }
 

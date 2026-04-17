@@ -1,7 +1,7 @@
 FROM golang:1.23.2-alpine AS builder
 WORKDIR /app
 
-ARG GOPROXY=https://goproxy.cn,direct
+ARG GOPROXY=https://proxy.golang.org,direct
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ENV GOPROXY=${GOPROXY}

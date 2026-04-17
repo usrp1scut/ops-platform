@@ -3,6 +3,7 @@ package httpserver
 import (
 	"embed"
 	"io/fs"
+	"log"
 	"net/http"
 )
 
@@ -15,7 +16,7 @@ func mountUIRoutes(router interface {
 }) {
 	portalFS, err := fs.Sub(uiAssets, "ui/portal")
 	if err != nil {
-		panic(err)
+		log.Fatalf("failed to mount UI assets: %v", err)
 	}
 	portalFileServer := http.FileServer(http.FS(portalFS))
 
