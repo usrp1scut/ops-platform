@@ -80,6 +80,12 @@ func (s *Service) RunOnce(ctx context.Context) error {
 
 	var syncErr error
 	for _, account := range accounts {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if len(account.RegionAllowlist) == 0 {
 			s.logger.Printf("skip account %s: no regions configured", account.AccountID)
 			continue
@@ -101,6 +107,10 @@ func (s *Service) RunOnce(ctx context.Context) error {
 				syncErr = errors.Join(syncErr, err)
 			}
 		}
+	}
+
+	if err := s.syncRelations(ctx); err != nil {
+		syncErr = errors.Join(syncErr, fmt.Errorf("sync relations: %w", err))
 	}
 
 	return syncErr
@@ -157,6 +167,85 @@ func (s *Service) syncAccountRegion(ctx context.Context, account awsrepo.SyncAcc
 	return runErr
 }
 
+func (s *Service) syncRelations(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id::text, vpc_id, subnet_id
+FROM cmdb_asset
+WHERE source = 'aws' AND deleted_at IS NULL
+  AND (vpc_id != '' OR subnet_id != '')
+`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type pending struct {
+		assetID  string
+		vpcID    string
+		subnetID string
+	}
+	var items []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.assetID, &p.vpcID, &p.subnetID); err != nil {
+			return err
+		}
+		items = append(items, p)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	lookup := make(map[string]string)
+	resolveID := func(externalID string) string {
+		if externalID == "" {
+			return ""
+		}
+		if cached, ok := lookup[externalID]; ok {
+			return cached
+		}
+		var id string
+		err := s.db.QueryRowContext(ctx, `
+SELECT id::text FROM cmdb_asset WHERE source = 'aws' AND external_id = $1 AND deleted_at IS NULL LIMIT 1
+`, externalID).Scan(&id)
+		if err != nil {
+			lookup[externalID] = ""
+			return ""
+		}
+		lookup[externalID] = id
+		return id
+	}
+
+	var relErr error
+	for _, item := range items {
+		if item.vpcID != "" {
+			if targetID := resolveID(item.vpcID); targetID != "" && targetID != item.assetID {
+				_, err := s.db.ExecContext(ctx, `
+INSERT INTO cmdb_asset_relation (from_asset_id, to_asset_id, relation_type, source)
+VALUES ($1::uuid, $2::uuid, 'in_vpc', 'aws')
+ON CONFLICT (from_asset_id, to_asset_id, relation_type) DO UPDATE SET updated_at = now()
+`, item.assetID, targetID)
+				if err != nil {
+					relErr = errors.Join(relErr, err)
+				}
+			}
+		}
+		if item.subnetID != "" {
+			if targetID := resolveID(item.subnetID); targetID != "" && targetID != item.assetID {
+				_, err := s.db.ExecContext(ctx, `
+INSERT INTO cmdb_asset_relation (from_asset_id, to_asset_id, relation_type, source)
+VALUES ($1::uuid, $2::uuid, 'in_subnet', 'aws')
+ON CONFLICT (from_asset_id, to_asset_id, relation_type) DO UPDATE SET updated_at = now()
+`, item.assetID, targetID)
+				if err != nil {
+					relErr = errors.Join(relErr, err)
+				}
+			}
+		}
+	}
+	return relErr
+}
+
 func (s *Service) buildSession(account awsrepo.SyncAccount, region string) (*session.Session, error) {
 	baseConfig := awssdk.NewConfig().WithRegion(region)
 	if account.AccessKeyID != "" && account.SecretAccessKey != "" {
@@ -208,22 +297,46 @@ func (s *Service) syncEC2Instances(ctx context.Context, sess *session.Session, a
 				if externalID == "" {
 					continue
 				}
-				tags := ec2TagsToMap(instance.Tags)
-				tags["aws_account_id"] = account.AccountID
-				tags["aws_region"] = region
-				tags["aws_resource_type"] = resourceEC2
-				tags["instance_type"] = awssdk.StringValue(instance.InstanceType)
-				tags["private_ip"] = awssdk.StringValue(instance.PrivateIpAddress)
-				tags["public_ip"] = awssdk.StringValue(instance.PublicIpAddress)
-
+				userTags := ec2TagsToMap(instance.Tags)
+				zone := ""
+				if instance.Placement != nil {
+					zone = awssdk.StringValue(instance.Placement.AvailabilityZone)
+				}
+				subnetID := awssdk.StringValue(instance.SubnetId)
+				vpcID := awssdk.StringValue(instance.VpcId)
+				imageID := awssdk.StringValue(instance.ImageId)
+				sysTags := map[string]any{
+					"aws_account_id":    account.AccountID,
+					"aws_region":        region,
+					"aws_resource_type": resourceEC2,
+					"instance_type":     awssdk.StringValue(instance.InstanceType),
+					"availability_zone": zone,
+					"vpc_id":            vpcID,
+					"subnet_id":         subnetID,
+					"image_id":          imageID,
+				}
 				asset := awsAsset{
-					AssetType:   "aws_ec2_instance",
-					Name:        coalesce(tagValue(tags, "Name"), externalID),
-					Status:      strings.ToLower(awssdk.StringValue(instance.State.Name)),
-					Env:         inferEnv(tags),
-					ExternalID:  externalID,
-					ExternalARN: fmt.Sprintf("arn:aws:ec2:%s:%s:instance/%s", region, account.AccountID, externalID),
-					Tags:        tags,
+					AssetType:    "aws_ec2_instance",
+					Name:         coalesce(tagValue(userTags, "Name"), externalID),
+					Status:       strings.ToLower(awssdk.StringValue(instance.State.Name)),
+					Env:          inferEnv(userTags),
+					ExternalID:   externalID,
+					ExternalARN:  fmt.Sprintf("arn:aws:ec2:%s:%s:instance/%s", region, account.AccountID, externalID),
+					PublicIP:     awssdk.StringValue(instance.PublicIpAddress),
+					PrivateIP:    awssdk.StringValue(instance.PrivateIpAddress),
+					PrivateDNS:   awssdk.StringValue(instance.PrivateDnsName),
+					Region:       region,
+					Zone:         zone,
+					AccountID:    account.AccountID,
+					InstanceType: awssdk.StringValue(instance.InstanceType),
+					OSImage:      imageID,
+					VPCID:        vpcID,
+					SubnetID:     subnetID,
+					KeyName:      awssdk.StringValue(instance.KeyName),
+					Owner:        tagValue(userTags, "Owner"),
+					BusinessUnit: tagValue(userTags, "BusinessUnit"),
+					SystemTags:   sysTags,
+					Labels:       userTags,
 				}
 				if err := s.upsertAWSAsset(ctx, asset); err != nil {
 					syncErr = errors.Join(syncErr, err)
@@ -251,21 +364,26 @@ func (s *Service) syncVPCs(ctx context.Context, sess *session.Session, account a
 			if externalID == "" {
 				continue
 			}
-			tags := ec2TagsToMap(vpc.Tags)
-			tags["aws_account_id"] = account.AccountID
-			tags["aws_region"] = region
-			tags["aws_resource_type"] = resourceVPC
-			tags["cidr"] = awssdk.StringValue(vpc.CidrBlock)
-			tags["is_default"] = awssdk.BoolValue(vpc.IsDefault)
-
+			userTags := ec2TagsToMap(vpc.Tags)
+			sysTags := map[string]any{
+				"aws_account_id":    account.AccountID,
+				"aws_region":        region,
+				"aws_resource_type": resourceVPC,
+				"cidr":              awssdk.StringValue(vpc.CidrBlock),
+				"is_default":        awssdk.BoolValue(vpc.IsDefault),
+			}
 			asset := awsAsset{
 				AssetType:   "aws_vpc",
-				Name:        coalesce(tagValue(tags, "Name"), externalID),
+				Name:        coalesce(tagValue(userTags, "Name"), externalID),
 				Status:      strings.ToLower(awssdk.StringValue(vpc.State)),
-				Env:         inferEnv(tags),
+				Env:         inferEnv(userTags),
 				ExternalID:  externalID,
 				ExternalARN: fmt.Sprintf("arn:aws:ec2:%s:%s:vpc/%s", region, account.AccountID, externalID),
-				Tags:        tags,
+				Region:      region,
+				AccountID:   account.AccountID,
+				VPCID:       externalID,
+				SystemTags:  sysTags,
+				Labels:      userTags,
 			}
 			if err := s.upsertAWSAsset(ctx, asset); err != nil {
 				syncErr = errors.Join(syncErr, err)
@@ -292,22 +410,28 @@ func (s *Service) syncSecurityGroups(ctx context.Context, sess *session.Session,
 			if externalID == "" {
 				continue
 			}
-			tags := ec2TagsToMap(group.Tags)
-			tags["aws_account_id"] = account.AccountID
-			tags["aws_region"] = region
-			tags["aws_resource_type"] = resourceSG
-			tags["vpc_id"] = awssdk.StringValue(group.VpcId)
-			tags["group_name"] = awssdk.StringValue(group.GroupName)
-			tags["description"] = awssdk.StringValue(group.Description)
-
+			userTags := ec2TagsToMap(group.Tags)
+			vpcID := awssdk.StringValue(group.VpcId)
+			sysTags := map[string]any{
+				"aws_account_id":    account.AccountID,
+				"aws_region":        region,
+				"aws_resource_type": resourceSG,
+				"vpc_id":            vpcID,
+				"group_name":        awssdk.StringValue(group.GroupName),
+				"description":       awssdk.StringValue(group.Description),
+			}
 			asset := awsAsset{
 				AssetType:   "aws_security_group",
 				Name:        coalesce(awssdk.StringValue(group.GroupName), externalID),
 				Status:      "active",
-				Env:         inferEnv(tags),
+				Env:         inferEnv(userTags),
 				ExternalID:  externalID,
 				ExternalARN: fmt.Sprintf("arn:aws:ec2:%s:%s:security-group/%s", region, account.AccountID, externalID),
-				Tags:        tags,
+				Region:      region,
+				AccountID:   account.AccountID,
+				VPCID:       vpcID,
+				SystemTags:  sysTags,
+				Labels:      userTags,
 			}
 			if err := s.upsertAWSAsset(ctx, asset); err != nil {
 				syncErr = errors.Join(syncErr, err)
@@ -335,7 +459,11 @@ func (s *Service) syncRDSInstances(ctx context.Context, sess *session.Session, a
 				continue
 			}
 
-			tags := map[string]any{
+			endpoint := ""
+			if instance.Endpoint != nil {
+				endpoint = awssdk.StringValue(instance.Endpoint.Address)
+			}
+			sysTags := map[string]any{
 				"aws_account_id":    account.AccountID,
 				"aws_region":        region,
 				"aws_resource_type": resourceRDS,
@@ -343,11 +471,9 @@ func (s *Service) syncRDSInstances(ctx context.Context, sess *session.Session, a
 				"engine_version":    awssdk.StringValue(instance.EngineVersion),
 				"instance_class":    awssdk.StringValue(instance.DBInstanceClass),
 				"multi_az":          awssdk.BoolValue(instance.MultiAZ),
-				"endpoint":          "",
+				"endpoint":          endpoint,
 			}
-			if instance.Endpoint != nil {
-				tags["endpoint"] = awssdk.StringValue(instance.Endpoint.Address)
-			}
+			userTags := map[string]any{}
 			if instance.DBInstanceArn != nil {
 				tagOutput, err := client.ListTagsForResourceWithContext(ctx, &rds.ListTagsForResourceInput{
 					ResourceName: instance.DBInstanceArn,
@@ -357,19 +483,26 @@ func (s *Service) syncRDSInstances(ctx context.Context, sess *session.Session, a
 						if tag.Key == nil || tag.Value == nil {
 							continue
 						}
-						tags[*tag.Key] = *tag.Value
+						userTags[*tag.Key] = *tag.Value
 					}
 				}
 			}
 
 			asset := awsAsset{
-				AssetType:   "aws_rds_instance",
-				Name:        coalesce(tagValue(tags, "Name"), externalID),
-				Status:      strings.ToLower(awssdk.StringValue(instance.DBInstanceStatus)),
-				Env:         inferEnv(tags),
-				ExternalID:  externalID,
-				ExternalARN: awssdk.StringValue(instance.DBInstanceArn),
-				Tags:        tags,
+				AssetType:    "aws_rds_instance",
+				Name:         coalesce(tagValue(userTags, "Name"), externalID),
+				Status:       strings.ToLower(awssdk.StringValue(instance.DBInstanceStatus)),
+				Env:          inferEnv(userTags),
+				ExternalID:   externalID,
+				ExternalARN:  awssdk.StringValue(instance.DBInstanceArn),
+				PrivateDNS:   endpoint,
+				Region:       region,
+				AccountID:    account.AccountID,
+				InstanceType: awssdk.StringValue(instance.DBInstanceClass),
+				Owner:        tagValue(userTags, "Owner"),
+				BusinessUnit: tagValue(userTags, "BusinessUnit"),
+				SystemTags:   sysTags,
+				Labels:       userTags,
 			}
 			if err := s.upsertAWSAsset(ctx, asset); err != nil {
 				syncErr = errors.Join(syncErr, err)
@@ -386,13 +519,27 @@ func (s *Service) syncRDSInstances(ctx context.Context, sess *session.Session, a
 }
 
 type awsAsset struct {
-	AssetType   string
-	Name        string
-	Status      string
-	Env         string
-	ExternalID  string
-	ExternalARN string
-	Tags        map[string]any
+	AssetType    string
+	Name         string
+	Status       string
+	Env          string
+	ExternalID   string
+	ExternalARN  string
+	PublicIP     string
+	PrivateIP    string
+	PrivateDNS   string
+	Region       string
+	Zone         string
+	AccountID    string
+	InstanceType string
+	OSImage      string
+	VPCID        string
+	SubnetID     string
+	KeyName      string
+	Owner        string
+	BusinessUnit string
+	SystemTags   map[string]any
+	Labels       map[string]any
 }
 
 func (s *Service) upsertAWSAsset(ctx context.Context, item awsAsset) error {
@@ -412,13 +559,24 @@ func (s *Service) upsertAWSAsset(ctx context.Context, item awsAsset) error {
 	item.Status = strings.ToLower(strings.TrimSpace(item.Status))
 
 	if item.Env == "" {
-		item.Env = inferEnv(item.Tags)
+		item.Env = inferEnv(item.Labels)
 	}
 	if item.Env == "" {
 		item.Env = "default"
 	}
 
-	rawTags, err := json.Marshal(item.Tags)
+	if item.SystemTags == nil {
+		item.SystemTags = map[string]any{}
+	}
+	if item.Labels == nil {
+		item.Labels = map[string]any{}
+	}
+
+	rawSystem, err := json.Marshal(item.SystemTags)
+	if err != nil {
+		return err
+	}
+	rawLabels, err := json.Marshal(item.Labels)
 	if err != nil {
 		return err
 	}
@@ -436,13 +594,55 @@ LIMIT 1
 	}
 
 	if errors.Is(err, sql.ErrNoRows) {
+		// First observation: system_tags fully authoritative, labels seeded with
+		// AWS-origin user tags. After this, we only overwrite system_tags on sync
+		// so user edits to labels are preserved.
 		_, err = s.db.ExecContext(ctx, `
-INSERT INTO cmdb_asset (id, type, name, status, env, source, external_id, external_arn, tags)
-VALUES ($1, $2, $3, $4, $5, 'aws', $6, NULLIF($7, ''), $8)
-`, uuid.NewString(), item.AssetType, item.Name, item.Status, item.Env, item.ExternalID, item.ExternalARN, rawTags)
+INSERT INTO cmdb_asset (
+    id, type, name, status, env, source,
+    external_id, external_arn,
+    public_ip, private_ip, private_dns,
+    region, zone, account_id, instance_type, os_image, vpc_id, subnet_id, key_name,
+    owner, business_unit,
+    system_tags, labels
+) VALUES (
+    $1, $2, $3, $4, $5, 'aws',
+    $6, NULLIF($7, ''),
+    $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18,
+    $19, $20,
+    $21, $22
+)
+`,
+			uuid.NewString(),
+			item.AssetType,
+			item.Name,
+			item.Status,
+			item.Env,
+			item.ExternalID,
+			item.ExternalARN,
+			strings.TrimSpace(item.PublicIP),
+			strings.TrimSpace(item.PrivateIP),
+			strings.TrimSpace(item.PrivateDNS),
+			strings.TrimSpace(item.Region),
+			strings.TrimSpace(item.Zone),
+			strings.TrimSpace(item.AccountID),
+			strings.TrimSpace(item.InstanceType),
+			strings.TrimSpace(item.OSImage),
+			strings.TrimSpace(item.VPCID),
+			strings.TrimSpace(item.SubnetID),
+			strings.TrimSpace(item.KeyName),
+			strings.TrimSpace(item.Owner),
+			strings.TrimSpace(item.BusinessUnit),
+			rawSystem,
+			rawLabels,
+		)
 		return err
 	}
 
+	// Subsequent syncs: update observed infra attributes and system_tags, but
+	// leave user labels, owner, business_unit, criticality, expires_at alone so
+	// human curation isn't clobbered.
 	_, err = s.db.ExecContext(ctx, `
 UPDATE cmdb_asset
 SET type = $2,
@@ -451,11 +651,41 @@ SET type = $2,
     env = $5,
     source = 'aws',
     external_arn = NULLIF($6, ''),
-    tags = $7,
+    public_ip = $7,
+    private_ip = $8,
+    private_dns = $9,
+    region = $10,
+    zone = $11,
+    account_id = $12,
+    instance_type = $13,
+    os_image = $14,
+    vpc_id = $15,
+    subnet_id = $16,
+    key_name = $17,
+    system_tags = $18,
     deleted_at = NULL,
     updated_at = now()
 WHERE id::text = $1
-`, existingID, item.AssetType, item.Name, item.Status, item.Env, item.ExternalARN, rawTags)
+`,
+		existingID,
+		item.AssetType,
+		item.Name,
+		item.Status,
+		item.Env,
+		item.ExternalARN,
+		strings.TrimSpace(item.PublicIP),
+		strings.TrimSpace(item.PrivateIP),
+		strings.TrimSpace(item.PrivateDNS),
+		strings.TrimSpace(item.Region),
+		strings.TrimSpace(item.Zone),
+		strings.TrimSpace(item.AccountID),
+		strings.TrimSpace(item.InstanceType),
+		strings.TrimSpace(item.OSImage),
+		strings.TrimSpace(item.VPCID),
+		strings.TrimSpace(item.SubnetID),
+		strings.TrimSpace(item.KeyName),
+		rawSystem,
+	)
 	return err
 }
 
