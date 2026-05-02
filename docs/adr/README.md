@@ -5,6 +5,8 @@ Short notes documenting the load-bearing structural decisions made during the
 intentionally terse: context → decision → consequences. Append, do not edit
 once accepted; supersede with a new ADR if the call changes.
 
+Use `0000-template.md` when drafting a new ADR.
+
 | ID  | Title                                                | Status   |
 | --- | ---------------------------------------------------- | -------- |
 | 0001 | Layered packages and dependency rules                | Accepted |
