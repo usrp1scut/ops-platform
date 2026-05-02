@@ -10,29 +10,21 @@ import (
 )
 
 type Config struct {
-	HTTPAddr               string
-	DatabaseURL            string
-	MasterKey              string
-	LocalAdminUsername     string
-	LocalAdminPassword     string
-	OIDCIssuerURL          string
-	OIDCClientID           string
-	OIDCClientSecret       string
-	OIDCRedirectURL        string
-	OIDCAuthorizeURL       string
-	OIDCTokenURL           string
-	OIDCUserInfoURL        string
-	OIDCScopes             []string
-	OIDCBootstrapAdminSubs []string
-	SyncInterval           time.Duration
-	SyncRunOnStart         bool
-	ProbeInterval          time.Duration
-	ProbeRunOnStart        bool
-	ProbeTimeout           time.Duration
-	ProbeConcurrency       int
-	ProbeBatchSize         int
-	GuacdAddr              string
-	GuacTunnelHost         string
+	HTTPAddr           string
+	DatabaseURL        string
+	MasterKey          string
+	LocalAdminUsername string
+	LocalAdminPassword string
+	OIDCSeed           OIDCSeedConfig
+	SyncInterval       time.Duration
+	SyncRunOnStart     bool
+	ProbeInterval      time.Duration
+	ProbeRunOnStart    bool
+	ProbeTimeout       time.Duration
+	ProbeConcurrency   int
+	ProbeBatchSize     int
+	GuacdAddr          string
+	GuacTunnelHost     string
 
 	// Recording storage. When RecordingEnabled is false (no endpoint configured)
 	// terminal sessions run normally but no asciinema cast is captured. The
@@ -46,32 +38,60 @@ type Config struct {
 	RecordingUseSSL   bool
 }
 
+// OIDCSeedConfig is a bootstrap-only compatibility path. Runtime OIDC
+// configuration is persisted in iam_oidc_config and managed from the portal.
+// When these env vars are present and the DB row does not exist yet, startup
+// seeds the row once; later changes should go through the IAM/OIDC UI.
+type OIDCSeedConfig struct {
+	IssuerURL              string
+	ClientID               string
+	ClientSecret           string
+	RedirectURL            string
+	AuthorizeURL           string
+	TokenURL               string
+	UserInfoURL            string
+	Scopes                 []string
+	BootstrapAdminSubjects []string
+}
+
+func (s OIDCSeedConfig) HasSettings() bool {
+	return s.IssuerURL != "" ||
+		s.ClientID != "" ||
+		s.ClientSecret != "" ||
+		s.RedirectURL != "" ||
+		s.AuthorizeURL != "" ||
+		s.TokenURL != "" ||
+		s.UserInfoURL != ""
+}
+
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:               getenv("OPS_HTTP_ADDR", ":8080"),
-		DatabaseURL:            os.Getenv("OPS_DATABASE_URL"),
-		MasterKey:              strings.TrimSpace(os.Getenv("OPS_MASTER_KEY")),
-		LocalAdminUsername:     strings.TrimSpace(getenv("OPS_LOCAL_ADMIN_USERNAME", "admin")),
-		LocalAdminPassword:     getenv("OPS_LOCAL_ADMIN_PASSWORD", "admin123456"),
-		OIDCIssuerURL:          strings.TrimSpace(os.Getenv("OPS_OIDC_ISSUER_URL")),
-		OIDCClientID:           strings.TrimSpace(os.Getenv("OPS_OIDC_CLIENT_ID")),
-		OIDCClientSecret:       strings.TrimSpace(os.Getenv("OPS_OIDC_CLIENT_SECRET")),
-		OIDCRedirectURL:        strings.TrimSpace(os.Getenv("OPS_OIDC_REDIRECT_URL")),
-		OIDCAuthorizeURL:       strings.TrimSpace(os.Getenv("OPS_OIDC_AUTHORIZE_URL")),
-		OIDCTokenURL:           strings.TrimSpace(os.Getenv("OPS_OIDC_TOKEN_URL")),
-		OIDCUserInfoURL:        strings.TrimSpace(os.Getenv("OPS_OIDC_USERINFO_URL")),
-		OIDCScopes:             parseCSV(getenv("OPS_OIDC_SCOPES", "openid,profile,email")),
-		OIDCBootstrapAdminSubs: parseCSV(strings.TrimSpace(os.Getenv("OPS_OIDC_BOOTSTRAP_ADMIN_SUBS"))),
-		SyncRunOnStart:         !strings.EqualFold(strings.TrimSpace(getenv("OPS_SYNC_RUN_ON_START", "true")), "false"),
-		ProbeRunOnStart:        !strings.EqualFold(strings.TrimSpace(getenv("OPS_PROBE_RUN_ON_START", "true")), "false"),
-		GuacdAddr:              strings.TrimSpace(getenv("OPS_GUACD_ADDR", "127.0.0.1:4822")),
-		GuacTunnelHost:         strings.TrimSpace(os.Getenv("OPS_GUAC_TUNNEL_HOST")),
-		RecordingEndpoint:      strings.TrimSpace(os.Getenv("OPS_RECORDING_ENDPOINT")),
-		RecordingAccessID:      strings.TrimSpace(os.Getenv("OPS_RECORDING_ACCESS_KEY")),
-		RecordingSecret:        os.Getenv("OPS_RECORDING_SECRET_KEY"),
-		RecordingBucket:        strings.TrimSpace(getenv("OPS_RECORDING_BUCKET", "ops-platform-recordings")),
-		RecordingRegion:        strings.TrimSpace(getenv("OPS_RECORDING_REGION", "us-east-1")),
-		RecordingUseSSL:        strings.EqualFold(strings.TrimSpace(getenv("OPS_RECORDING_USE_SSL", "false")), "true"),
+		HTTPAddr:           getenv("OPS_HTTP_ADDR", ":8080"),
+		DatabaseURL:        os.Getenv("OPS_DATABASE_URL"),
+		MasterKey:          strings.TrimSpace(os.Getenv("OPS_MASTER_KEY")),
+		LocalAdminUsername: strings.TrimSpace(getenv("OPS_LOCAL_ADMIN_USERNAME", "admin")),
+		LocalAdminPassword: getenv("OPS_LOCAL_ADMIN_PASSWORD", "admin123456"),
+		OIDCSeed: OIDCSeedConfig{
+			IssuerURL:              strings.TrimSpace(os.Getenv("OPS_OIDC_ISSUER_URL")),
+			ClientID:               strings.TrimSpace(os.Getenv("OPS_OIDC_CLIENT_ID")),
+			ClientSecret:           strings.TrimSpace(os.Getenv("OPS_OIDC_CLIENT_SECRET")),
+			RedirectURL:            strings.TrimSpace(os.Getenv("OPS_OIDC_REDIRECT_URL")),
+			AuthorizeURL:           strings.TrimSpace(os.Getenv("OPS_OIDC_AUTHORIZE_URL")),
+			TokenURL:               strings.TrimSpace(os.Getenv("OPS_OIDC_TOKEN_URL")),
+			UserInfoURL:            strings.TrimSpace(os.Getenv("OPS_OIDC_USERINFO_URL")),
+			Scopes:                 parseCSV(strings.TrimSpace(os.Getenv("OPS_OIDC_SCOPES"))),
+			BootstrapAdminSubjects: parseCSV(strings.TrimSpace(os.Getenv("OPS_OIDC_BOOTSTRAP_ADMIN_SUBS"))),
+		},
+		SyncRunOnStart:    !strings.EqualFold(strings.TrimSpace(getenv("OPS_SYNC_RUN_ON_START", "true")), "false"),
+		ProbeRunOnStart:   !strings.EqualFold(strings.TrimSpace(getenv("OPS_PROBE_RUN_ON_START", "true")), "false"),
+		GuacdAddr:         strings.TrimSpace(getenv("OPS_GUACD_ADDR", "127.0.0.1:4822")),
+		GuacTunnelHost:    strings.TrimSpace(os.Getenv("OPS_GUAC_TUNNEL_HOST")),
+		RecordingEndpoint: strings.TrimSpace(os.Getenv("OPS_RECORDING_ENDPOINT")),
+		RecordingAccessID: strings.TrimSpace(os.Getenv("OPS_RECORDING_ACCESS_KEY")),
+		RecordingSecret:   os.Getenv("OPS_RECORDING_SECRET_KEY"),
+		RecordingBucket:   strings.TrimSpace(getenv("OPS_RECORDING_BUCKET", "ops-platform-recordings")),
+		RecordingRegion:   strings.TrimSpace(getenv("OPS_RECORDING_REGION", "us-east-1")),
+		RecordingUseSSL:   strings.EqualFold(strings.TrimSpace(getenv("OPS_RECORDING_USE_SSL", "false")), "true"),
 	}
 	cfg.RecordingEnabled = cfg.RecordingEndpoint != "" && cfg.RecordingAccessID != "" && cfg.RecordingSecret != ""
 
@@ -140,27 +160,6 @@ func Load() (Config, error) {
 	if strings.TrimSpace(cfg.LocalAdminPassword) == "" {
 		return Config{}, errors.New("OPS_LOCAL_ADMIN_PASSWORD is required")
 	}
-	if cfg.OIDCClientID != "" || cfg.OIDCRedirectURL != "" {
-		if cfg.OIDCClientID == "" || cfg.OIDCRedirectURL == "" {
-			return Config{}, errors.New("OPS_OIDC_CLIENT_ID and OPS_OIDC_REDIRECT_URL must be set together")
-		}
-		if cfg.OIDCAuthorizeURL == "" {
-			if cfg.OIDCIssuerURL == "" {
-				return Config{}, errors.New("set OPS_OIDC_AUTHORIZE_URL or OPS_OIDC_ISSUER_URL")
-			}
-			cfg.OIDCAuthorizeURL = strings.TrimRight(cfg.OIDCIssuerURL, "/") + "/authorize"
-		}
-		if cfg.OIDCTokenURL == "" {
-			if cfg.OIDCIssuerURL == "" {
-				return Config{}, errors.New("set OPS_OIDC_TOKEN_URL or OPS_OIDC_ISSUER_URL")
-			}
-			cfg.OIDCTokenURL = strings.TrimRight(cfg.OIDCIssuerURL, "/") + "/token"
-		}
-		if cfg.OIDCUserInfoURL == "" && cfg.OIDCIssuerURL != "" {
-			cfg.OIDCUserInfoURL = strings.TrimRight(cfg.OIDCIssuerURL, "/") + "/userinfo"
-		}
-	}
-
 	return cfg, nil
 }
 

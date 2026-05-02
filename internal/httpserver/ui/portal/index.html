@@ -388,6 +388,7 @@
                       <th>Regions</th>
                       <th>Last sync</th>
                       <th>Status</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody id="cloud-accounts-body"></tbody>
@@ -570,7 +571,7 @@
             <div class="panel-head">
               <div>
                 <h2>Provider configuration</h2>
-                <div class="panel-hint">If you set the Issuer URL, the authorize / token / userinfo endpoints are derived automatically.</div>
+                <div class="panel-hint">Saved here as runtime configuration. OPS_OIDC_* env values only seed an empty database on startup.</div>
               </div>
             </div>
             <div class="panel-body">
@@ -615,6 +616,7 @@
                   </div>
                 </div>
                 <div class="form-actions">
+                  <button id="test-oidc-settings-btn" type="button" class="btn ghost">Test connection</button>
                   <button id="save-oidc-settings-btn" type="submit" class="btn primary">Save configuration</button>
                 </div>
               </form>

@@ -63,3 +63,12 @@ type SyncRun struct {
 	StartedAt          time.Time  `json:"started_at"`
 	FinishedAt         *time.Time `json:"finished_at,omitempty"`
 }
+
+type ConnectionTestResult struct {
+	Status    string    `json:"status"`
+	Region    string    `json:"region"`
+	AccountID string    `json:"account_id"`
+	Arn       string    `json:"arn"`
+	UserID    string    `json:"user_id"`
+	CheckedAt time.Time `json:"checked_at"`
+}

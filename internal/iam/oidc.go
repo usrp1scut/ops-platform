@@ -14,8 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"ops-platform/internal/config"
 )
 
 type oidcStateData struct {
@@ -63,11 +61,30 @@ func (s *OIDCStateStore) Consume(state string) (oidcStateData, bool) {
 }
 
 type OIDCClient struct {
-	cfg        config.Config
+	cfg        OIDCClientConfig
 	httpClient *http.Client
 }
 
-func NewOIDCClient(cfg config.Config) *OIDCClient {
+type OIDCClientConfig struct {
+	IssuerURL    string
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
+	AuthorizeURL string
+	TokenURL     string
+	UserInfoURL  string
+	Scopes       []string
+}
+
+type OIDCConnectionTestResult struct {
+	Status         string    `json:"status"`
+	AuthorizeURL   string    `json:"authorize_url"`
+	HTTPStatusCode int       `json:"http_status_code"`
+	HTTPStatus     string    `json:"http_status"`
+	CheckedAt      time.Time `json:"checked_at"`
+}
+
+func NewOIDCClient(cfg OIDCClientConfig) *OIDCClient {
 	return &OIDCClient{
 		cfg: cfg,
 		httpClient: &http.Client{
@@ -77,22 +94,22 @@ func NewOIDCClient(cfg config.Config) *OIDCClient {
 }
 
 func (c *OIDCClient) Enabled() bool {
-	return c.cfg.OIDCClientID != "" && c.cfg.OIDCRedirectURL != ""
+	return c.cfg.ClientID != "" && c.cfg.RedirectURL != ""
 }
 
 func (c *OIDCClient) BuildAuthorizationURL(state string, codeChallenge string) (string, error) {
 	if !c.Enabled() {
 		return "", errors.New("oidc is not configured")
 	}
-	u, err := url.Parse(c.cfg.OIDCAuthorizeURL)
+	u, err := url.Parse(c.cfg.AuthorizeURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid authorize url: %w", err)
 	}
 	q := u.Query()
-	q.Set("client_id", c.cfg.OIDCClientID)
-	q.Set("redirect_uri", c.cfg.OIDCRedirectURL)
+	q.Set("client_id", c.cfg.ClientID)
+	q.Set("redirect_uri", c.cfg.RedirectURL)
 	q.Set("response_type", "code")
-	q.Set("scope", strings.Join(c.cfg.OIDCScopes, " "))
+	q.Set("scope", strings.Join(c.cfg.Scopes, " "))
 	q.Set("state", state)
 	q.Set("code_challenge", codeChallenge)
 	q.Set("code_challenge_method", "S256")
@@ -104,14 +121,14 @@ func (c *OIDCClient) ExchangeCode(ctx context.Context, code string, codeVerifier
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
-	form.Set("redirect_uri", c.cfg.OIDCRedirectURL)
-	form.Set("client_id", c.cfg.OIDCClientID)
-	if c.cfg.OIDCClientSecret != "" {
-		form.Set("client_secret", c.cfg.OIDCClientSecret)
+	form.Set("redirect_uri", c.cfg.RedirectURL)
+	form.Set("client_id", c.cfg.ClientID)
+	if c.cfg.ClientSecret != "" {
+		form.Set("client_secret", c.cfg.ClientSecret)
 	}
 	form.Set("code_verifier", codeVerifier)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.OIDCTokenURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -140,11 +157,11 @@ func (c *OIDCClient) ExchangeCode(ctx context.Context, code string, codeVerifier
 }
 
 func (c *OIDCClient) UserInfo(ctx context.Context, accessToken string) (UserProfile, error) {
-	if c.cfg.OIDCUserInfoURL == "" {
-		return UserProfile{}, errors.New("OPS_OIDC_USERINFO_URL is required for user sync")
+	if c.cfg.UserInfoURL == "" {
+		return UserProfile{}, errors.New("oidc userinfo_url is required for user sync")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.OIDCUserInfoURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.UserInfoURL, nil)
 	if err != nil {
 		return UserProfile{}, err
 	}
@@ -168,6 +185,48 @@ func (c *OIDCClient) UserInfo(ctx context.Context, accessToken string) (UserProf
 		return UserProfile{}, errors.New("userinfo missing sub")
 	}
 	return profile, nil
+}
+
+func (c *OIDCClient) TestConnection(ctx context.Context) (OIDCConnectionTestResult, error) {
+	state, err := GenerateState()
+	if err != nil {
+		return OIDCConnectionTestResult{}, err
+	}
+	verifier, err := GenerateCodeVerifier()
+	if err != nil {
+		return OIDCConnectionTestResult{}, err
+	}
+	authURL, err := c.BuildAuthorizationURL(state, BuildCodeChallenge(verifier))
+	if err != nil {
+		return OIDCConnectionTestResult{}, err
+	}
+
+	client := *c.httpClient
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, authURL, nil)
+	if err != nil {
+		return OIDCConnectionTestResult{}, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return OIDCConnectionTestResult{}, err
+	}
+	defer resp.Body.Close()
+
+	result := OIDCConnectionTestResult{
+		Status:         "ok",
+		AuthorizeURL:   c.cfg.AuthorizeURL,
+		HTTPStatusCode: resp.StatusCode,
+		HTTPStatus:     resp.Status,
+		CheckedAt:      time.Now(),
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return result, fmt.Errorf("authorize endpoint returned %s", resp.Status)
+	}
+	return result, nil
 }
 
 func GenerateState() (string, error) {

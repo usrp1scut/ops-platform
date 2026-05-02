@@ -378,6 +378,49 @@ ON CONFLICT (id) DO UPDATE SET
 	return settings, nil
 }
 
+func (r *Repository) SeedOIDCSettings(ctx context.Context, req UpdateOIDCSettingsRequest, masterKey string) (bool, error) {
+	current, err := r.GetOIDCSettings(ctx, masterKey)
+	if err != nil {
+		return false, err
+	}
+	if current.Exists {
+		return false, nil
+	}
+
+	req.IssuerURL = strings.TrimSpace(req.IssuerURL)
+	req.ClientID = strings.TrimSpace(req.ClientID)
+	req.RedirectURL = strings.TrimSpace(req.RedirectURL)
+	req.AuthorizeURL = strings.TrimSpace(req.AuthorizeURL)
+	req.TokenURL = strings.TrimSpace(req.TokenURL)
+	req.UserInfoURL = strings.TrimSpace(req.UserInfoURL)
+	req.Scopes = normalizeScopes(req.Scopes)
+
+	hasSettings := req.IssuerURL != "" ||
+		req.ClientID != "" ||
+		req.RedirectURL != "" ||
+		req.AuthorizeURL != "" ||
+		req.TokenURL != "" ||
+		req.UserInfoURL != "" ||
+		req.ClientSecret != nil ||
+		len(req.Scopes) > 0
+	if !hasSettings {
+		return false, nil
+	}
+
+	enabledReq := req
+	enabledReq.Enabled = true
+	if normalized, normErr := normalizeOIDCSettingsRequest(enabledReq); normErr == nil {
+		req = normalized
+	} else {
+		req.Enabled = false
+	}
+
+	if _, err := r.SaveOIDCSettings(ctx, req, masterKey); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (r *Repository) ListUsers(ctx context.Context, query string) ([]UserWithRoles, error) {
 	sqlText := `
 SELECT

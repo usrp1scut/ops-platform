@@ -106,6 +106,7 @@ const TOKEN_KEY = "ops_platform_access_token";
     iamRolePermissionsOutput: $("iam-role-permissions-output"),
 
     refreshOIDCSettingsBtn: $("refresh-oidc-settings-btn"),
+    testOIDCSettingsBtn: $("test-oidc-settings-btn"),
     oidcSettingsForm: $("oidc-settings-form"),
     oidcEnabledInput: $("oidc-enabled-input"),
     oidcIssuerURLInput: $("oidc-issuer-url-input"),
@@ -3094,17 +3095,18 @@ const TOKEN_KEY = "ops_platform_access_token";
   function renderAwsAccounts() {
     if (!hasPermission("aws.account:read")) {
       elements.cloudAccountsBody.innerHTML =
-        '<tr class="empty-row"><td colspan="6">Permission required: aws.account:read</td></tr>';
+        '<tr class="empty-row"><td colspan="7">Permission required: aws.account:read</td></tr>';
       return;
     }
 
     if (state.awsAccounts.length === 0) {
       elements.cloudAccountsBody.innerHTML =
-        '<tr class="empty-row"><td colspan="6">No AWS accounts connected yet.</td></tr>';
+        '<tr class="empty-row"><td colspan="7">No AWS accounts connected yet.</td></tr>';
       return;
     }
 
     const summary = summarizeAwsSyncByAccount();
+    const canWriteAws = hasPermission("aws.account:write");
 
     elements.cloudAccountsBody.innerHTML = state.awsAccounts
       .map((item) => {
@@ -3119,6 +3121,9 @@ const TOKEN_KEY = "ops_platform_access_token";
         const enabled = item.enabled
           ? '<span class="pill success"><span class="dot"></span>enabled</span>'
           : '<span class="pill neutral"><span class="dot"></span>disabled</span>';
+        const actions = canWriteAws
+          ? '<button class="btn ghost small" data-test-aws-account="' + safe(item.id) + '">Test</button>'
+          : "";
 
         // Last-sync column: prefer the most recent attempt; show a danger pill
         // and a "see history" link if the latest run failed, so a broken
@@ -3155,6 +3160,7 @@ const TOKEN_KEY = "ops_platform_access_token";
           '<td><div class="chips">' + regions + "</div></td>" +
           "<td>" + lastSyncCell + "</td>" +
           "<td>" + enabled + "</td>" +
+          '<td style="text-align:right">' + actions + "</td>" +
           "</tr>"
         );
       })
@@ -3170,6 +3176,9 @@ const TOKEN_KEY = "ops_platform_access_token";
         const target = $("sync-runs-body");
         if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
       });
+    });
+    elements.cloudAccountsBody.querySelectorAll("button[data-test-aws-account]").forEach((btn) => {
+      btn.addEventListener("click", () => testAwsAccount(btn.dataset.testAwsAccount));
     });
   }
 
@@ -3654,6 +3663,25 @@ const TOKEN_KEY = "ops_platform_access_token";
     }
   }
 
+  async function testAwsAccount(accountID) {
+    if (!hasPermission("aws.account:write")) {
+      toast("Permission required: aws.account:write", "error");
+      return;
+    }
+    if (!accountID) return;
+    try {
+      const result = await api("/api/v1/aws/accounts/" + encodeURIComponent(accountID) + "/test", {
+        method: "POST",
+        body: "{}",
+      });
+      toast("AWS connection OK: " + (result.arn || result.account_id || result.region), "success");
+      logActivity("AWS account test succeeded", "success");
+    } catch (error) {
+      toast("AWS test failed: " + error.message, "error");
+      logActivity("AWS account test failed: " + error.message, "error");
+    }
+  }
+
   async function refreshIAMUsers() {
     if (!canReadIAM()) {
       state.iamUsers = [];
@@ -3796,18 +3824,7 @@ const TOKEN_KEY = "ops_platform_access_token";
       toast("Permission required: iam.user:write", "error");
       return;
     }
-    const body = {
-      enabled: !!elements.oidcEnabledInput.checked,
-      issuer_url: (elements.oidcIssuerURLInput.value || "").trim(),
-      client_id: (elements.oidcClientIDInput.value || "").trim(),
-      client_secret: elements.oidcClientSecretInput.value || "",
-      redirect_url: (elements.oidcRedirectURLInput.value || "").trim(),
-      authorize_url: (elements.oidcAuthorizeURLInput.value || "").trim(),
-      token_url: (elements.oidcTokenURLInput.value || "").trim(),
-      userinfo_url: (elements.oidcUserInfoURLInput.value || "").trim(),
-      scopes: parseScopes(elements.oidcScopesInput.value || ""),
-    };
-    if (!body.client_secret) delete body.client_secret;
+    const body = oidcSettingsPayload();
 
     try {
       const settings = await api("/api/v1/iam/oidc-config", {
@@ -3820,6 +3837,40 @@ const TOKEN_KEY = "ops_platform_access_token";
       logActivity("OIDC settings updated", "success");
     } catch (error) {
       toast("Save failed: " + error.message, "error");
+    }
+  }
+
+  function oidcSettingsPayload() {
+    const body = {
+      enabled: !!elements.oidcEnabledInput.checked,
+      issuer_url: (elements.oidcIssuerURLInput.value || "").trim(),
+      client_id: (elements.oidcClientIDInput.value || "").trim(),
+      client_secret: elements.oidcClientSecretInput.value || "",
+      redirect_url: (elements.oidcRedirectURLInput.value || "").trim(),
+      authorize_url: (elements.oidcAuthorizeURLInput.value || "").trim(),
+      token_url: (elements.oidcTokenURLInput.value || "").trim(),
+      userinfo_url: (elements.oidcUserInfoURLInput.value || "").trim(),
+      scopes: parseScopes(elements.oidcScopesInput.value || ""),
+    };
+    if (!body.client_secret) delete body.client_secret;
+    return body;
+  }
+
+  async function testOIDCSettings() {
+    if (!canWriteIAM()) {
+      toast("Permission required: iam.user:write", "error");
+      return;
+    }
+    try {
+      const result = await api("/api/v1/iam/oidc-config/test", {
+        method: "POST",
+        body: JSON.stringify(oidcSettingsPayload()),
+      });
+      toast("OIDC connection OK: " + (result.http_status || result.status), "success");
+      logActivity("OIDC connection test succeeded", "success");
+    } catch (error) {
+      toast("OIDC test failed: " + error.message, "error");
+      logActivity("OIDC connection test failed: " + error.message, "error");
     }
   }
 
@@ -4171,6 +4222,7 @@ const TOKEN_KEY = "ops_platform_access_token";
     elements.refreshIamSelectionBtn.addEventListener("click", refreshSelectedUserIdentity);
     elements.iamBindRoleBtn.addEventListener("click", bindRoleToSelectedUser);
     elements.refreshOIDCSettingsBtn.addEventListener("click", refreshOIDCSettings);
+    elements.testOIDCSettingsBtn.addEventListener("click", testOIDCSettings);
     elements.oidcSettingsForm.addEventListener("submit", saveOIDCSettings);
 
     elements.iamUserSearch.addEventListener("keydown", (event) => {

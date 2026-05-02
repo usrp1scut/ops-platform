@@ -286,6 +286,55 @@ ORDER BY created_at ASC`)
 	return items, nil
 }
 
+func (r *Repository) GetSyncAccount(ctx context.Context, id string) (SyncAccount, error) {
+	var item SyncAccount
+	var regionsRaw []byte
+	var encryptedSecret string
+	err := r.db.QueryRowContext(ctx, `
+SELECT
+    id,
+    account_id,
+    display_name,
+    auth_mode,
+    COALESCE(role_arn, ''),
+    COALESCE(external_id, ''),
+    COALESCE(access_key_id, ''),
+    COALESCE(secret_access_key_encrypted, ''),
+    region_allowlist,
+    enabled
+FROM aws_account
+WHERE id = $1
+`, id).Scan(
+		&item.ID,
+		&item.AccountID,
+		&item.DisplayName,
+		&item.AuthMode,
+		&item.RoleARN,
+		&item.ExternalID,
+		&item.AccessKeyID,
+		&encryptedSecret,
+		&regionsRaw,
+		&item.Enabled,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return SyncAccount{}, ErrAccountNotFound
+		}
+		return SyncAccount{}, err
+	}
+	if err := json.Unmarshal(regionsRaw, &item.RegionAllowlist); err != nil {
+		return SyncAccount{}, err
+	}
+	if encryptedSecret != "" {
+		decrypted, err := security.Decrypt(encryptedSecret, r.masterKey)
+		if err != nil {
+			return SyncAccount{}, fmt.Errorf("decrypt account secret for %s: %w", item.AccountID, err)
+		}
+		item.SecretAccessKey = decrypted
+	}
+	return item, nil
+}
+
 func (r *Repository) StartSyncRun(ctx context.Context, accountUUID, region, resourceType string) (string, error) {
 	var id string
 	err := r.db.QueryRowContext(ctx, `

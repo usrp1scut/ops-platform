@@ -40,7 +40,7 @@ Snapshot post-Phase 5 (2026-04-28). Regenerate with the script at the bottom.
 | internal/sshproxy          | platform/httpx, security                                                                                                                                           |
 | internal/bastion           | iam, platform/httpx                                                                                                                                                |
 | internal/awssync           | aws, config                                                                                                                                                        |
-| internal/aws               | platform/httpx, security                                                                                                                                           |
+| internal/aws               | iam, platform/httpx, security                                                                                                                                      |
 | internal/bastionprobe      | cmdb, config, hostkey, sshproxy                                                                                                                                    |
 | internal/terminal          | connectivity, iam, platform/httpx, sessions                                                                                                                        |
 | internal/guacproxy         | bastionprobe, connectivity, iam, platform/httpx, sessions                                                                                                          |

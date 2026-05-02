@@ -9,8 +9,6 @@ import (
 	"time"
 
 	awssdk "github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/rds"
@@ -129,7 +127,7 @@ func (s *Service) RunOnce(ctx context.Context) error {
 }
 
 func (s *Service) syncAccountRegion(ctx context.Context, account awsrepo.SyncAccount, region string) error {
-	sess, err := s.buildSession(account, region)
+	sess, err := awsrepo.NewSessionForAccount(account, region)
 	if err != nil {
 		return fmt.Errorf("account %s region %s session: %w", account.AccountID, region, err)
 	}
@@ -177,44 +175,6 @@ func (s *Service) syncAccountRegion(ctx context.Context, account awsrepo.SyncAcc
 	}
 
 	return runErr
-}
-
-func (s *Service) buildSession(account awsrepo.SyncAccount, region string) (*session.Session, error) {
-	baseConfig := awssdk.NewConfig().WithRegion(region)
-	if account.AccessKeyID != "" && account.SecretAccessKey != "" {
-		baseConfig = baseConfig.WithCredentials(credentials.NewStaticCredentials(account.AccessKeyID, account.SecretAccessKey, ""))
-	}
-	baseSession, err := session.NewSession(baseConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	switch account.AuthMode {
-	case "static":
-		if account.AccessKeyID == "" || account.SecretAccessKey == "" {
-			return nil, errors.New("static mode requires access_key_id and secret_access_key")
-		}
-		return baseSession, nil
-	case "", "assume_role":
-		if strings.TrimSpace(account.RoleARN) == "" {
-			if account.AccessKeyID != "" && account.SecretAccessKey != "" {
-				return baseSession, nil
-			}
-			return nil, errors.New("assume_role mode requires role_arn")
-		}
-		assumeCreds := stscreds.NewCredentials(baseSession, account.RoleARN, func(options *stscreds.AssumeRoleProvider) {
-			if account.ExternalID != "" {
-				options.ExternalID = awssdk.String(account.ExternalID)
-			}
-		})
-		return session.NewSession(
-			awssdk.NewConfig().
-				WithRegion(region).
-				WithCredentials(assumeCreds),
-		)
-	default:
-		return nil, fmt.Errorf("unsupported auth_mode: %s", account.AuthMode)
-	}
 }
 
 func (s *Service) syncEC2Instances(ctx context.Context, sess *session.Session, account awsrepo.SyncAccount, region string) (int, error) {

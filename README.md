@@ -48,7 +48,16 @@ export OPS_LOCAL_ADMIN_PASSWORD='admin123456'
 docker compose up --build
 ```
 
-OIDC is optional in local startup. To enable:
+OIDC is runtime configuration. The supported operational path is:
+
+1. Start the stack.
+2. Sign in with the local bootstrap admin.
+3. Open Portal -> Platform -> OIDC.
+4. Save and test the provider configuration there.
+
+The `OPS_OIDC_*` environment variables are retained only as a first-start
+seed/fallback for empty databases and are not the recommended long-term
+configuration path:
 
 ```bash
 export OPS_OIDC_ISSUER_URL='https://your-idp.example.com/oauth2'
@@ -157,6 +166,7 @@ go run ./cmd/bastion-probe
 - `POST /api/v1/aws/accounts`
 - `GET /api/v1/aws/accounts/{accountID}`
 - `PATCH /api/v1/aws/accounts/{accountID}`
+- `POST /api/v1/aws/accounts/{accountID}/test`
 - `POST /api/v1/aws/sync/run`
 - `GET /api/v1/aws/sync/status`
 - `GET /api/v1/aws/sync/runs?limit=120`
@@ -167,6 +177,7 @@ go run ./cmd/bastion-probe
 - `GET /api/v1/iam/roles/{roleName}/permissions`
 - `GET /api/v1/iam/oidc-config`
 - `PUT /api/v1/iam/oidc-config`
+- `POST /api/v1/iam/oidc-config/test`
 - `POST /api/v1/iam/users/{userID}/roles` (body: `{"role_name":"ops"}`)
 - `DELETE /api/v1/iam/users/{userID}/roles/{roleName}`
 

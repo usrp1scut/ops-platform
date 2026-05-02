@@ -46,6 +46,24 @@ func (s *Server) Router() http.Handler {
 	mountUIRoutes(router)
 
 	iamRepo := iam.NewRepository(s.db)
+	if s.cfg.OIDCSeed.HasSettings() {
+		seedSecret := s.cfg.OIDCSeed.ClientSecret
+		seeded, err := iamRepo.SeedOIDCSettings(context.Background(), iam.UpdateOIDCSettingsRequest{
+			IssuerURL:    s.cfg.OIDCSeed.IssuerURL,
+			ClientID:     s.cfg.OIDCSeed.ClientID,
+			ClientSecret: &seedSecret,
+			RedirectURL:  s.cfg.OIDCSeed.RedirectURL,
+			AuthorizeURL: s.cfg.OIDCSeed.AuthorizeURL,
+			TokenURL:     s.cfg.OIDCSeed.TokenURL,
+			UserInfoURL:  s.cfg.OIDCSeed.UserInfoURL,
+			Scopes:       s.cfg.OIDCSeed.Scopes,
+		}, s.cfg.MasterKey)
+		if err != nil {
+			log.Printf("seed oidc settings skipped: %v", err)
+		} else if seeded {
+			log.Printf("seeded oidc settings from OPS_OIDC_* bootstrap environment")
+		}
+	}
 	iamHandler := iam.NewHandler(s.cfg, iamRepo)
 	iamAdminHandler := iam.NewAdminHandler(
 		s.cfg,
@@ -109,6 +127,7 @@ func (s *Server) Router() http.Handler {
 	guacHandler := guacproxy.NewHandler(guacSvc, ticketService, cmdbRepo, sessionsRepo)
 	awsHandler := aws.NewHandler(
 		awsRepo,
+		iamRepo,
 		iam.RequirePermission("aws.account", "read"),
 		iam.RequirePermission("aws.account", "write"),
 	)

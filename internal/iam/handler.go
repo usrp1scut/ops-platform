@@ -185,7 +185,7 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := h.repo.EnsureAdminBinding(r.Context(), user.ID, h.cfg.OIDCBootstrapAdminSubs, user.OIDCSubject); err != nil {
+	if err := h.repo.EnsureAdminBinding(r.Context(), user.ID, h.cfg.OIDCSeed.BootstrapAdminSubjects, user.OIDCSubject); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -212,7 +212,7 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		r.RemoteAddr,
 		r.UserAgent(),
 		requestID(r),
-		map[string]any{"provider": oidcCfg.OIDCIssuerURL},
+		map[string]any{"provider": oidcCfg.IssuerURL},
 	)
 
 	response := map[string]any{
@@ -259,41 +259,44 @@ func sanitizeRedirectPath(raw string) string {
 	return path
 }
 
-func (h *Handler) oidcClient(ctx context.Context) (*OIDCClient, config.Config, error) {
+func (h *Handler) oidcClient(ctx context.Context) (*OIDCClient, OIDCClientConfig, error) {
 	settings, err := h.repo.GetOIDCSettings(ctx, h.cfg.MasterKey)
 	if err != nil {
-		return nil, config.Config{}, err
+		return nil, OIDCClientConfig{}, err
 	}
 
-	effective := h.cfg
-	if settings.Exists {
-		effective.OIDCIssuerURL = strings.TrimSpace(settings.IssuerURL)
-		effective.OIDCClientID = strings.TrimSpace(settings.ClientID)
-		effective.OIDCClientSecret = settings.ClientSecret
-		effective.OIDCRedirectURL = strings.TrimSpace(settings.RedirectURL)
-		effective.OIDCAuthorizeURL = strings.TrimSpace(settings.AuthorizeURL)
-		effective.OIDCTokenURL = strings.TrimSpace(settings.TokenURL)
-		effective.OIDCUserInfoURL = strings.TrimSpace(settings.UserInfoURL)
-		effective.OIDCScopes = normalizeScopes(settings.Scopes)
-		if !settings.Enabled {
-			effective.OIDCClientID = ""
-			effective.OIDCRedirectURL = ""
-		}
+	if !settings.Exists || !settings.Enabled {
+		return NewOIDCClient(OIDCClientConfig{}), OIDCClientConfig{}, nil
 	}
 
-	if effective.OIDCClientID != "" && effective.OIDCRedirectURL != "" {
-		if effective.OIDCAuthorizeURL == "" && effective.OIDCIssuerURL != "" {
-			effective.OIDCAuthorizeURL = strings.TrimRight(effective.OIDCIssuerURL, "/") + "/authorize"
-		}
-		if effective.OIDCTokenURL == "" && effective.OIDCIssuerURL != "" {
-			effective.OIDCTokenURL = strings.TrimRight(effective.OIDCIssuerURL, "/") + "/token"
-		}
-		if effective.OIDCUserInfoURL == "" && effective.OIDCIssuerURL != "" {
-			effective.OIDCUserInfoURL = strings.TrimRight(effective.OIDCIssuerURL, "/") + "/userinfo"
-		}
+	effective := OIDCClientConfig{
+		IssuerURL:    strings.TrimSpace(settings.IssuerURL),
+		ClientID:     strings.TrimSpace(settings.ClientID),
+		ClientSecret: settings.ClientSecret,
+		RedirectURL:  strings.TrimSpace(settings.RedirectURL),
+		AuthorizeURL: strings.TrimSpace(settings.AuthorizeURL),
+		TokenURL:     strings.TrimSpace(settings.TokenURL),
+		UserInfoURL:  strings.TrimSpace(settings.UserInfoURL),
+		Scopes:       normalizeScopes(settings.Scopes),
 	}
+	effective = completeOIDCClientConfig(effective)
 
 	return NewOIDCClient(effective), effective, nil
+}
+
+func completeOIDCClientConfig(cfg OIDCClientConfig) OIDCClientConfig {
+	if cfg.ClientID != "" && cfg.RedirectURL != "" {
+		if cfg.AuthorizeURL == "" && cfg.IssuerURL != "" {
+			cfg.AuthorizeURL = strings.TrimRight(cfg.IssuerURL, "/") + "/authorize"
+		}
+		if cfg.TokenURL == "" && cfg.IssuerURL != "" {
+			cfg.TokenURL = strings.TrimRight(cfg.IssuerURL, "/") + "/token"
+		}
+		if cfg.UserInfoURL == "" && cfg.IssuerURL != "" {
+			cfg.UserInfoURL = strings.TrimRight(cfg.IssuerURL, "/") + "/userinfo"
+		}
+	}
+	return cfg
 }
 
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {

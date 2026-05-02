@@ -3,6 +3,7 @@ package iam
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -42,6 +43,7 @@ func (h *AdminHandler) Routes() chi.Router {
 	r.With(h.withReadAuth).Get("/roles/{roleName}/permissions", h.GetRolePermissions)
 	r.With(h.withReadAuth).Get("/oidc-config", h.GetOIDCSettings)
 	r.With(h.withWriteAuth).Put("/oidc-config", h.UpdateOIDCSettings)
+	r.With(h.withWriteAuth).Post("/oidc-config/test", h.TestOIDCSettings)
 	r.With(h.withWriteAuth).Post("/users/{userID}/roles", h.BindRole)
 	r.With(h.withWriteAuth).Delete("/users/{userID}/roles/{roleName}", h.UnbindRole)
 
@@ -178,20 +180,6 @@ func (h *AdminHandler) GetOIDCSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !settings.Exists {
-		settings = OIDCSettings{
-			Enabled:         h.cfg.OIDCClientID != "" && h.cfg.OIDCRedirectURL != "",
-			IssuerURL:       h.cfg.OIDCIssuerURL,
-			ClientID:        h.cfg.OIDCClientID,
-			HasClientSecret: strings.TrimSpace(h.cfg.OIDCClientSecret) != "",
-			RedirectURL:     h.cfg.OIDCRedirectURL,
-			AuthorizeURL:    h.cfg.OIDCAuthorizeURL,
-			TokenURL:        h.cfg.OIDCTokenURL,
-			UserInfoURL:     h.cfg.OIDCUserInfoURL,
-			Scopes:          normalizeScopes(h.cfg.OIDCScopes),
-		}
-	}
-
 	httpx.WriteJSON(w, http.StatusOK, settings)
 }
 
@@ -202,6 +190,112 @@ func (h *AdminHandler) UpdateOIDCSettings(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	req, err := normalizeOIDCSettingsRequest(req)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	settings, err := h.repo.SaveOIDCSettings(r.Context(), req, h.cfg.MasterKey)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.writeConfigAudit(r, "oidc_config.update", "iam.oidc_config", "1", map[string]any{
+		"enabled":       settings.Enabled,
+		"issuer_url":    settings.IssuerURL,
+		"client_id":     settings.ClientID,
+		"redirect_url":  settings.RedirectURL,
+		"authorize_url": settings.AuthorizeURL,
+		"token_url":     settings.TokenURL,
+		"userinfo_url":  settings.UserInfoURL,
+		"scopes":        settings.Scopes,
+	})
+
+	httpx.WriteJSON(w, http.StatusOK, settings)
+}
+
+func (h *AdminHandler) TestOIDCSettings(w http.ResponseWriter, r *http.Request) {
+	req, err := h.decodeOIDCTestRequest(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	cfg, err := h.oidcClientConfigForRequest(r, req)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := NewOIDCClient(cfg).TestConnection(r.Context())
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandler) decodeOIDCTestRequest(r *http.Request) (UpdateOIDCSettingsRequest, error) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return UpdateOIDCSettingsRequest{}, err
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		settings, err := h.repo.GetOIDCSettings(r.Context(), h.cfg.MasterKey)
+		if err != nil {
+			return UpdateOIDCSettingsRequest{}, err
+		}
+		return UpdateOIDCSettingsRequest{
+			Enabled:      settings.Enabled,
+			IssuerURL:    settings.IssuerURL,
+			ClientID:     settings.ClientID,
+			RedirectURL:  settings.RedirectURL,
+			AuthorizeURL: settings.AuthorizeURL,
+			TokenURL:     settings.TokenURL,
+			UserInfoURL:  settings.UserInfoURL,
+			Scopes:       settings.Scopes,
+		}, nil
+	}
+	var req UpdateOIDCSettingsRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return UpdateOIDCSettingsRequest{}, errors.New("invalid json body")
+	}
+	return req, nil
+}
+
+func (h *AdminHandler) oidcClientConfigForRequest(r *http.Request, req UpdateOIDCSettingsRequest) (OIDCClientConfig, error) {
+	req, err := normalizeOIDCSettingsRequest(req)
+	if err != nil {
+		return OIDCClientConfig{}, err
+	}
+	if !req.Enabled {
+		return OIDCClientConfig{}, errors.New("oidc must be enabled before testing")
+	}
+
+	current, err := h.repo.GetOIDCSettings(r.Context(), h.cfg.MasterKey)
+	if err != nil {
+		return OIDCClientConfig{}, err
+	}
+	clientSecret := current.ClientSecret
+	if req.ClientSecret != nil {
+		clientSecret = strings.TrimSpace(*req.ClientSecret)
+	}
+
+	cfg := OIDCClientConfig{
+		IssuerURL:    req.IssuerURL,
+		ClientID:     req.ClientID,
+		ClientSecret: clientSecret,
+		RedirectURL:  req.RedirectURL,
+		AuthorizeURL: req.AuthorizeURL,
+		TokenURL:     req.TokenURL,
+		UserInfoURL:  req.UserInfoURL,
+		Scopes:       normalizeScopes(req.Scopes),
+	}
+	return completeOIDCClientConfig(cfg), nil
+}
+
+func normalizeOIDCSettingsRequest(req UpdateOIDCSettingsRequest) (UpdateOIDCSettingsRequest, error) {
 	req.IssuerURL = strings.TrimSpace(req.IssuerURL)
 	req.ClientID = strings.TrimSpace(req.ClientID)
 	req.RedirectURL = strings.TrimSpace(req.RedirectURL)
@@ -212,39 +306,46 @@ func (h *AdminHandler) UpdateOIDCSettings(w http.ResponseWriter, r *http.Request
 
 	if req.Enabled {
 		if req.ClientID == "" || req.RedirectURL == "" {
-			httpx.WriteError(w, http.StatusBadRequest, "client_id and redirect_url are required when enabled")
-			return
+			return req, errors.New("client_id and redirect_url are required when enabled")
 		}
 		if req.AuthorizeURL == "" {
 			if req.IssuerURL == "" {
-				httpx.WriteError(w, http.StatusBadRequest, "authorize_url or issuer_url is required when enabled")
-				return
+				return req, errors.New("authorize_url or issuer_url is required when enabled")
 			}
 			req.AuthorizeURL = strings.TrimRight(req.IssuerURL, "/") + "/authorize"
 		}
 		if req.TokenURL == "" {
 			if req.IssuerURL == "" {
-				httpx.WriteError(w, http.StatusBadRequest, "token_url or issuer_url is required when enabled")
-				return
+				return req, errors.New("token_url or issuer_url is required when enabled")
 			}
 			req.TokenURL = strings.TrimRight(req.IssuerURL, "/") + "/token"
 		}
 		if req.UserInfoURL == "" {
 			if req.IssuerURL == "" {
-				httpx.WriteError(w, http.StatusBadRequest, "userinfo_url or issuer_url is required when enabled")
-				return
+				return req, errors.New("userinfo_url or issuer_url is required when enabled")
 			}
 			req.UserInfoURL = strings.TrimRight(req.IssuerURL, "/") + "/userinfo"
 		}
 	}
 
-	settings, err := h.repo.SaveOIDCSettings(r.Context(), req, h.cfg.MasterKey)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	return req, nil
+}
 
-	httpx.WriteJSON(w, http.StatusOK, settings)
+func (h *AdminHandler) writeConfigAudit(r *http.Request, action, resourceType, resourceID string, details map[string]any) {
+	identity, _ := IdentityFromContext(r.Context())
+	_ = h.repo.WriteAuditLog(
+		r.Context(),
+		identity.User.ID,
+		identity.User.OIDCSubject,
+		action,
+		resourceType,
+		resourceID,
+		"success",
+		r.RemoteAddr,
+		r.UserAgent(),
+		requestID(r),
+		details,
+	)
 }
 
 func (h *AdminHandler) withReadAuth(next http.Handler) http.Handler {
