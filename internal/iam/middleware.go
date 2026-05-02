@@ -1,12 +1,13 @@
 package iam
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"ops-platform/internal/platform/httpx"
 )
 
 func AuthMiddleware(tokens *TokenService, repo *Repository) func(http.Handler) http.Handler {
@@ -14,19 +15,19 @@ func AuthMiddleware(tokens *TokenService, repo *Repository) func(http.Handler) h
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
 			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-				writeError(w, http.StatusUnauthorized, "missing bearer token")
+				httpx.WriteError(w, http.StatusUnauthorized, "missing bearer token")
 				return
 			}
 			token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 			claims, err := tokens.Parse(token)
 			if err != nil {
-				writeError(w, http.StatusUnauthorized, "invalid token")
+				httpx.WriteError(w, http.StatusUnauthorized, "invalid token")
 				return
 			}
 
 			identity, err := repo.IdentityForUser(r.Context(), claims.UserID)
 			if err != nil {
-				writeError(w, http.StatusUnauthorized, "user session not found")
+				httpx.WriteError(w, http.StatusUnauthorized, "user session not found")
 				return
 			}
 			ctx := WithIdentity(r.Context(), identity)
@@ -35,22 +36,43 @@ func AuthMiddleware(tokens *TokenService, repo *Repository) func(http.Handler) h
 	}
 }
 
+// AdminPermission is the permission string that bypasses every other
+// authorization check. Defined here so callers (notably bastion grant gate)
+// agree on what "admin" means without re-hardcoding the literal.
+const AdminPermission = "system:admin"
+
+// IsAdmin reports whether the identity carries the admin bypass permission.
+// Centralized so changing the bypass policy (e.g. adding "AND not_terminated")
+// is a one-line change across all auth gates.
+func IsAdmin(identity UserIdentity) bool {
+	for _, p := range identity.Permissions {
+		if p == AdminPermission {
+			return true
+		}
+	}
+	return false
+}
+
 func RequirePermission(resource string, action string) func(http.Handler) http.Handler {
 	required := resource + ":" + action
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			identity, ok := IdentityFromContext(r.Context())
 			if !ok {
-				writeError(w, http.StatusUnauthorized, "missing identity context")
+				httpx.WriteError(w, http.StatusUnauthorized, "missing identity context")
+				return
+			}
+			if IsAdmin(identity) {
+				next.ServeHTTP(w, r)
 				return
 			}
 			for _, permission := range identity.Permissions {
-				if permission == required || permission == "system:admin" {
+				if permission == required {
 					next.ServeHTTP(w, r)
 					return
 				}
 			}
-			writeError(w, http.StatusForbidden, "permission denied")
+			httpx.WriteError(w, http.StatusForbidden, "permission denied")
 		})
 	}
 }
@@ -98,12 +120,3 @@ func requestID(r *http.Request) string {
 	return strings.TrimSpace(middleware.GetReqID(r.Context()))
 }
 
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}

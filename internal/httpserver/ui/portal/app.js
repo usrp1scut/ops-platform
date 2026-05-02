@@ -1,5 +1,4 @@
-(function () {
-  const TOKEN_KEY = "ops_platform_access_token";
+const TOKEN_KEY = "ops_platform_access_token";
 
   const state = {
     token: localStorage.getItem(TOKEN_KEY) || "",
@@ -8,7 +7,9 @@
     permissions: [],
     assets: [],
     assetTotal: 0,
-    assetQuery: { env: "", type: "", status: "", source: "", region: "", criticality: "", q: "", limit: 25, offset: 0 },
+    assetQuery: { env: "", type: "", status: "", source: "", region: "", criticality: "", q: "", limit: 25, offset: 0, includeBastions: false },
+    assetViewMode: localStorage.getItem("ops_platform_asset_view_mode") === "tree" ? "tree" : "list",
+    treeExpanded: {},
     assetDrawer: { open: false, asset: null, labels: [], connection: null, probe: null, relations: [], connEdit: null, busy: "" },
     sshProxies: [],
     proxyForm: null,
@@ -17,6 +18,11 @@
     keypairs: [],
     keypairForm: { open: false, busy: false },
     sessions: [],
+    sidebarAssets: [],
+    sidebarSearch: "",
+    bastions: [],
+    bastionQuery: { env: "", region: "", status: "", q: "" },
+    connectivityTab: localStorage.getItem("ops_platform_connectivity_tab") || "bastions",
     awsAccounts: [],
     awsSyncRuns: [],
     awsSyncStatus: null,
@@ -40,6 +46,7 @@
     userRoleText: $("user-role-text"),
     userAvatar: $("user-avatar"),
     logoutBtn: $("logout-btn"),
+    themeToggleBtn: $("theme-toggle-btn"),
     localLoginForm: $("local-login-form"),
     localUsername: $("local-username"),
     localPassword: $("local-password"),
@@ -62,10 +69,10 @@
     assetsTableBody: $("assets-table-body"),
     assetsCountHint: $("assets-count-hint"),
     assetsPagination: $("assets-pagination"),
+    assetsListWrap: $("assets-list-wrap"),
+    assetsTree: $("assets-tree"),
+    assetsViewToggle: $("assets-view-toggle"),
     toggleAssetFormBtn: $("toggle-asset-form-btn"),
-    assetFormPanel: $("asset-form-panel"),
-    assetForm: $("asset-form"),
-    cancelAssetForm: $("cancel-asset-form"),
     filterEnv: $("filter-env"),
     filterType: $("filter-type"),
     filterStatus: $("filter-status"),
@@ -81,9 +88,6 @@
     refreshAwsBtn: $("refresh-aws-btn"),
     cloudAccountsBody: $("cloud-accounts-body"),
     toggleAwsFormBtn: $("toggle-aws-form-btn"),
-    awsFormPanel: $("aws-form-panel"),
-    awsForm: $("aws-form"),
-    cancelAwsForm: $("cancel-aws-form"),
     triggerAwsSyncBtn: $("trigger-aws-sync-btn"),
     refreshSyncBtn: $("refresh-sync-btn"),
     syncStatusCard: $("sync-status-card"),
@@ -232,30 +236,46 @@
   }
 
   // ===== View routing =====
+  // The router (setView, SUB_NAV, LEGACY_ROUTES, renderSubNav,
+  // parseHashRoute) lives in modules/router.js. Per-pane side effects
+  // (applyConnectivityTab below, setSessionsPane in the live-session
+  // section, refreshGrantsView in modules/grants.js) are still defined
+  // here / in their feature modules; the router just orchestrates them.
 
-  function setView(view) {
-    state.view = view;
-    elements.navItems.forEach((item) => {
-      item.classList.toggle("active", item.dataset.view === view);
+  const CONNECTIVITY_TABS = ["bastions", "proxies", "hostkeys", "keypairs"];
+
+  function applyConnectivityTab(tab) {
+    if (!CONNECTIVITY_TABS.includes(tab)) tab = "bastions";
+    state.connectivityTab = tab;
+    try { localStorage.setItem("ops_platform_connectivity_tab", tab); } catch (_) {}
+    document.querySelectorAll(".connectivity-tab").forEach((btn) => {
+      const active = btn.dataset.connTab === tab;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-selected", active ? "true" : "false");
     });
-    elements.views.forEach((node) => {
-      node.classList.toggle("active", node.id === "view-" + view);
+    document.querySelectorAll(".connectivity-pane").forEach((pane) => {
+      pane.hidden = pane.id !== "view-" + tab;
     });
-    if (view === "proxies") {
+    if (tab === "bastions") {
+      refreshBastions();
+    } else if (tab === "proxies") {
       loadSSHProxies().then(renderProxiesView);
-    }
-    if (view === "hostkeys") {
+    } else if (tab === "hostkeys") {
       loadHostKeys().then(renderHostKeysView);
-    }
-    if (view === "keypairs") {
+    } else if (tab === "keypairs") {
       loadKeypairs().then(renderKeypairsView);
     }
-    if (view === "sessions") {
-      loadSessions().then(renderSessionsView);
-      startSessionsAutoRefresh();
-    } else {
-      stopSessionsAutoRefresh();
-    }
+  }
+
+  function bindConnectivityTabs() {
+    const switcher = document.getElementById("connectivity-tab-switcher");
+    if (!switcher || switcher.dataset.bound) return;
+    switcher.dataset.bound = "1";
+    switcher.addEventListener("click", (e) => {
+      const btn = e.target.closest(".connectivity-tab[data-conn-tab]");
+      if (!btn) return;
+      applyConnectivityTab(btn.dataset.connTab);
+    });
   }
 
   // ===== Time + format helpers =====
@@ -306,318 +326,12 @@
     document.body.removeChild(ta);
   }
 
-  // ===== Host keys =====
-
-  const hostkeysFilter = { scope: "all", q: "" };
-
-  async function loadHostKeys() {
-    try {
-      const res = await api("/api/v1/cmdb/hostkeys/");
-      state.hostkeys = Array.isArray(res.items) ? res.items : [];
-    } catch (err) {
-      state.hostkeys = [];
-      logActivity("Load host keys failed: " + err.message, "error");
-    }
-  }
-
-  function filteredHostKeys() {
-    const q = hostkeysFilter.q.trim().toLowerCase();
-    return (state.hostkeys || []).filter((k) => {
-      if (hostkeysFilter.scope !== "all" && k.scope !== hostkeysFilter.scope) return false;
-      if (!q) return true;
-      return [k.target_name, k.target_id, k.host, k.fingerprint_sha256]
-        .some((v) => (v || "").toLowerCase().includes(q));
-    });
-  }
-
-  function renderHostKeysView() {
-    const view = document.getElementById("view-hostkeys");
-    if (!view) return;
-    const items = filteredHostKeys();
-    const canWrite = writeAccess();
-    const pendingCount = (state.hostkeys || []).filter((k) => k.status === "override_pending").length;
-    const mismatchCount = (state.hostkeys || []).filter((k) => k.last_mismatch_at && k.status === "active").length;
-
-    const rows = items.map((k) => {
-      const overrideBadge = k.status === "override_pending"
-        ? '<span class="badge warning" title="Expires ' + safe(k.override_expires_at || "") + '">override pending</span>'
-        : '';
-      const mismatchBadge = k.last_mismatch_at && k.status === "active"
-        ? '<span class="badge error" title="' + safe(k.last_mismatch_fingerprint) + '">mismatch ' + safe(relativeTime(k.last_mismatch_at)) + '</span>'
-        : '';
-      const statusCell = k.status === "override_pending"
-        ? overrideBadge
-        : (mismatchBadge || '<span class="badge success">active</span>');
-
-      const overrideBtn = canWrite && k.status !== "override_pending"
-        ? '<button class="btn ghost" data-action="override" data-scope="' + safe(k.scope) + '" data-id="' + safe(k.target_id) + '">Approve override</button>'
-        : '';
-      const cancelBtn = canWrite && k.status === "override_pending"
-        ? '<button class="btn ghost" data-action="delete" data-scope="' + safe(k.scope) + '" data-id="' + safe(k.target_id) + '" title="Cancels the override by forgetting the pin">Cancel</button>'
-        : '';
-      const deleteBtn = canWrite
-        ? '<button class="btn ghost danger" data-action="delete" data-scope="' + safe(k.scope) + '" data-id="' + safe(k.target_id) + '">Forget</button>'
-        : '';
-
-      const overrideInfo = k.status === "override_pending"
-        ? '<div class="sub muted">by ' + safe(k.override_by || "admin") + ' · expires ' + safe(relativeTime(k.override_expires_at)) + '</div>'
-        : '';
-      const mismatchInfo = k.last_mismatch_at && k.status === "active"
-        ? '<div class="sub muted">offered <code>' + safe(k.last_mismatch_fingerprint) + '</code></div>'
-        : '';
-
-      return '<tr>' +
-        '<td><span class="badge neutral">' + safe(k.scope) + '</span></td>' +
-        '<td><div>' + safe(k.target_name || k.target_id) + '</div><div class="sub muted">' + safe(k.target_id) + '</div></td>' +
-        '<td>' + safe(k.host) + ':' + safe(k.port) + '</td>' +
-        '<td>' +
-          '<div class="fingerprint-row">' +
-            '<code>' + safe(k.fingerprint_sha256) + '</code>' +
-            '<button class="icon-btn" data-action="copy" data-fp="' + safe(k.fingerprint_sha256) + '" title="Copy fingerprint">' +
-              '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>' +
-            '</button>' +
-          '</div>' +
-          '<div class="sub muted">' + safe(k.key_type) + '</div>' +
-          mismatchInfo + overrideInfo +
-        '</td>' +
-        '<td>' + statusCell + '</td>' +
-        '<td title="' + safe(k.last_seen_at) + '">' + safe(relativeTime(k.last_seen_at)) + '</td>' +
-        '<td class="row-actions">' + (cancelBtn || overrideBtn) + ' ' + deleteBtn + '</td>' +
-      '</tr>';
-    }).join("");
-
-    const scopeBtn = (val, label) =>
-      '<button class="chip' + (hostkeysFilter.scope === val ? ' active' : '') + '" data-scope-filter="' + val + '">' + label + '</button>';
-
-    view.innerHTML =
-      '<div class="page-header"><div><h1>SSH host keys</h1>' +
-      '<p class="subtitle">Pinned server fingerprints (TOFU). Approve an override when a server is legitimately re-keyed.</p></div>' +
-      '<div class="page-actions"><button id="hostkeys-refresh" class="btn ghost">Refresh</button></div></div>' +
-      '<div class="kpi-grid"><div class="kpi"><div class="kpi-label">Pinned</div><div class="kpi-value">' + (state.hostkeys || []).length + '</div></div>' +
-      '<div class="kpi"><div class="kpi-label">Override pending</div><div class="kpi-value">' + pendingCount + '</div></div>' +
-      '<div class="kpi"><div class="kpi-label">Recent mismatch</div><div class="kpi-value">' + mismatchCount + '</div></div></div>' +
-      '<div class="toolbar">' +
-        '<div class="chip-group">' + scopeBtn("all", "All") + scopeBtn("asset", "Assets") + scopeBtn("proxy", "Proxies") + '</div>' +
-        '<input id="hostkeys-q" class="input" placeholder="Search target / host / fingerprint" value="' + safe(hostkeysFilter.q) + '" />' +
-      '</div>' +
-      (items.length === 0
-        ? '<div class="empty-state">No matching host keys.</div>'
-        : '<table class="table"><thead><tr><th>Scope</th><th>Target</th><th>Host</th><th>Fingerprint</th><th>Status</th><th>Last seen</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>');
-
-    const refresh = document.getElementById("hostkeys-refresh");
-    if (refresh) refresh.addEventListener("click", () => loadHostKeys().then(renderHostKeysView));
-    view.querySelectorAll("[data-scope-filter]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        hostkeysFilter.scope = btn.dataset.scopeFilter;
-        renderHostKeysView();
-      });
-    });
-    const q = document.getElementById("hostkeys-q");
-    if (q) {
-      q.addEventListener("input", () => {
-        hostkeysFilter.q = q.value;
-        renderHostKeysView();
-        const refocus = document.getElementById("hostkeys-q");
-        if (refocus) { refocus.focus(); refocus.setSelectionRange(q.value.length, q.value.length); }
-      });
-    }
-    view.querySelectorAll("button[data-action]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        if (btn.dataset.action === "copy") return copyToClipboard(btn.dataset.fp || "");
-        onHostKeyAction(btn.dataset.action, btn.dataset.scope, btn.dataset.id);
-      });
-    });
-  }
-
-  async function onHostKeyAction(action, scope, id) {
-    try {
-      if (action === "override") {
-        if (!confirm("Approve one-time override for " + scope + "/" + id + "?\nNext connection will replace the pinned fingerprint.")) return;
-        const resp = await api("/api/v1/cmdb/hostkeys/" + encodeURIComponent(scope) + "/" + encodeURIComponent(id) + "/override", { method: "POST", body: "{}" });
-        toast("Override approved · " + (resp.ttl_minute || 10) + " min window", "success");
-        logActivity("Host key override approved: " + scope + "/" + id, "success");
-      } else if (action === "delete") {
-        if (!confirm("Forget pinned host key for " + scope + "/" + id + "? Next connect will TOFU-record fresh.")) return;
-        await api("/api/v1/cmdb/hostkeys/" + encodeURIComponent(scope) + "/" + encodeURIComponent(id), { method: "DELETE" });
-        toast("Host key forgotten", "success");
-        logActivity("Host key forgotten: " + scope + "/" + id, "success");
-      }
-      await loadHostKeys();
-      renderHostKeysView();
-    } catch (err) {
-      toast("Host key action failed: " + err.message, "error");
-    }
-  }
-
-  // ===== SSH keypairs =====
-
-  async function loadKeypairs() {
-    try {
-      const res = await api("/api/v1/ssh-keypairs/");
-      state.keypairs = Array.isArray(res) ? res : [];
-    } catch (err) {
-      state.keypairs = [];
-      logActivity("Load keypairs failed: " + err.message, "error");
-    }
-  }
-
-  function renderKeypairsView() {
-    const view = document.getElementById("view-keypairs");
-    if (!view) return;
-    const canWrite = writeAccess();
-
-    const rows = (state.keypairs || []).map((k) => {
-      const passBadge = k.has_passphrase
-        ? '<span class="badge warning">passphrase</span>'
-        : '<span class="badge neutral">no passphrase</span>';
-      const deleteBtn = canWrite
-        ? '<button class="btn ghost danger" data-action="delete" data-id="' + safe(k.id) + '" data-name="' + safe(k.name) + '">Delete</button>'
-        : '';
-      return '<tr>' +
-        '<td><strong>' + safe(k.name) + '</strong><div class="sub muted">' + safe(k.description || '') + '</div></td>' +
-        '<td><code>' + safe(k.fingerprint) + '</code></td>' +
-        '<td>' + passBadge + '</td>' +
-        '<td>' + safe(k.uploaded_by || '—') + '</td>' +
-        '<td title="' + safe(k.updated_at) + '">' + safe(relativeTime(k.updated_at)) + '</td>' +
-        '<td class="row-actions">' + deleteBtn + '</td>' +
-      '</tr>';
-    }).join("");
-
-    const formOpen = state.keypairForm.open;
-    const formBusy = state.keypairForm.busy;
-    const newBtn = canWrite
-      ? '<button id="keypair-toggle-form" class="btn primary">' +
-        '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Upload .pem</button>'
-      : '';
-
-    const formPanel = canWrite && formOpen
-      ? '<section class="panel">' +
-          '<div class="panel-head"><div><h2>Upload private key</h2>' +
-            '<div class="panel-hint">Name must match the EC2 KeyPair name. Key is validated, fingerprinted, and encrypted at rest (AES-256-GCM).</div></div></div>' +
-          '<div class="panel-body">' +
-            '<form id="keypair-form">' +
-              '<div class="form-grid">' +
-                '<div class="field"><label>Key name</label>' +
-                  '<input name="name" placeholder="e.g. my-ec2-key" required />' +
-                  '<span class="hint">EC2 assets with this KeyName will auto-associate.</span></div>' +
-                '<div class="field"><label>Passphrase</label>' +
-                  '<input name="passphrase" type="password" placeholder="Leave blank for no passphrase" /></div>' +
-                '<div class="field full"><label>Description</label>' +
-                  '<input name="description" /></div>' +
-                '<div class="field full"><label>Private key (.pem)</label>' +
-                  '<input name="pemfile" type="file" accept=".pem,.key,.txt" />' +
-                  '<textarea name="private_key" rows="6" placeholder="Paste the contents or choose a .pem file above" style="margin-top: 8px; width: 100%; font-family: monospace; font-size: 12px; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);" required></textarea></div>' +
-              '</div>' +
-              '<div class="form-actions">' +
-                '<button type="button" class="btn ghost" id="keypair-cancel">Cancel</button>' +
-                '<button type="submit" class="btn primary"' + (formBusy ? ' disabled' : '') + '>' +
-                  (formBusy ? 'Uploading...' : 'Upload') +
-                '</button>' +
-              '</div>' +
-            '</form>' +
-          '</div>' +
-        '</section>'
-      : '';
-
-    view.innerHTML =
-      '<div class="page-header"><div><h1>SSH keypairs</h1>' +
-      '<p class="subtitle">Central store of private keys. EC2 assets with a matching KeyName will use these automatically.</p></div>' +
-      '<div class="page-actions"><button id="keypairs-refresh" class="btn ghost">Refresh</button>' + newBtn + '</div></div>' +
-      formPanel +
-      '<section class="panel"><div class="panel-head"><div><h2>Stored keys</h2>' +
-        '<div class="panel-hint">' + (state.keypairs || []).length + ' total</div></div></div>' +
-        '<div class="panel-body flush">' +
-          ((state.keypairs || []).length === 0
-            ? '<div class="timeline-empty" style="padding: 24px;">No keypairs uploaded.</div>'
-            : '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Fingerprint</th><th>Passphrase</th><th>Uploaded by</th><th>Updated</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
-        '</div>' +
-      '</section>';
-
-    const refresh = document.getElementById("keypairs-refresh");
-    if (refresh) refresh.addEventListener("click", () => loadKeypairs().then(renderKeypairsView));
-    const toggleBtn = document.getElementById("keypair-toggle-form");
-    if (toggleBtn) toggleBtn.addEventListener("click", () => {
-      state.keypairForm.open = !state.keypairForm.open;
-      renderKeypairsView();
-    });
-    const cancelBtn = document.getElementById("keypair-cancel");
-    if (cancelBtn) cancelBtn.addEventListener("click", () => {
-      state.keypairForm.open = false;
-      renderKeypairsView();
-    });
-    const form = document.getElementById("keypair-form");
-    if (form) {
-      const fileInput = form.querySelector('input[name="pemfile"]');
-      const pkInput = form.querySelector('textarea[name="private_key"]');
-      const nameInput = form.querySelector('input[name="name"]');
-      if (fileInput) fileInput.addEventListener("change", () => {
-        const file = fileInput.files && fileInput.files[0];
-        if (!file) return;
-        if (nameInput && !nameInput.value.trim()) {
-          nameInput.value = file.name.replace(/\.(pem|key|txt)$/i, "");
-        }
-        const reader = new FileReader();
-        reader.onload = () => { if (pkInput) pkInput.value = String(reader.result || ""); };
-        reader.readAsText(file);
-      });
-      form.addEventListener("submit", (ev) => {
-        ev.preventDefault();
-        onKeypairSubmit(form);
-      });
-    }
-    view.querySelectorAll("button[data-action]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        if (btn.dataset.action === "delete") onKeypairDelete(btn.dataset.id, btn.dataset.name);
-      });
-    });
-  }
-
-  async function onKeypairSubmit(form) {
-    const data = new FormData(form);
-    const payload = {
-      name: String(data.get("name") || "").trim(),
-      private_key: String(data.get("private_key") || ""),
-      description: String(data.get("description") || "").trim(),
-    };
-    const pass = String(data.get("passphrase") || "");
-    if (pass) payload.passphrase = pass;
-    if (!payload.name || !payload.private_key) {
-      toast("Name and private key are required", "error");
-      return;
-    }
-    state.keypairForm.busy = true;
-    renderKeypairsView();
-    try {
-      await api("/api/v1/ssh-keypairs/", { method: "POST", body: JSON.stringify(payload) });
-      toast("Keypair uploaded", "success");
-      logActivity("Keypair uploaded: " + payload.name, "success");
-      state.keypairForm.open = false;
-      await loadKeypairs();
-    } catch (err) {
-      toast("Upload failed: " + err.message, "error");
-    } finally {
-      state.keypairForm.busy = false;
-      renderKeypairsView();
-    }
-  }
-
-  async function onKeypairDelete(id, name) {
-    if (!id) return;
-    if (!confirm("Delete keypair \"" + (name || id) + "\"? Assets referencing this KeyName will lose SSH access until re-uploaded.")) return;
-    try {
-      await api("/api/v1/ssh-keypairs/" + encodeURIComponent(id), { method: "DELETE" });
-      toast("Keypair deleted", "success");
-      logActivity("Keypair deleted: " + (name || id), "success");
-      await loadKeypairs();
-      renderKeypairsView();
-    } catch (err) {
-      toast("Delete failed: " + err.message, "error");
-    }
-  }
-
   // ===== Sessions =====
 
-  const sessionsFilter = { user: "", asset: "", onlyActive: false };
+  // sessionsFilter state. status is one of: "", "active", "closed", "error".
+  // The legacy onlyActive boolean still exists so external code that toggles
+  // it directly keeps working — it maps to status === "active".
+  const sessionsFilter = { user: "", asset: "", onlyActive: false, status: "" };
   let sessionsRefreshHandle = null;
 
   async function loadSessions() {
@@ -649,15 +363,19 @@
   }
 
   function filteredSessions() {
+    const wantStatus = sessionsFilter.status || (sessionsFilter.onlyActive ? "active" : "");
     return (state.sessions || []).filter((s) => {
-      if (sessionsFilter.onlyActive && s.ended_at) return false;
+      if (!wantStatus) return true;
+      if (wantStatus === "active") return !s.ended_at;
+      if (wantStatus === "closed") return !!s.ended_at && !s.error;
+      if (wantStatus === "error")  return !!s.error;
       return true;
     });
   }
 
   function renderSessionsView() {
-    const view = document.getElementById("view-sessions");
-    if (!view) return;
+    const pane = document.getElementById("sessions-pane-audit");
+    if (!pane) return;
     const items = filteredSessions();
     const active = (state.sessions || []).filter((s) => !s.ended_at).length;
 
@@ -672,6 +390,26 @@
       const errCell = s.error
         ? '<td class="muted" title="' + safe(s.error) + '">' + safe(s.error.length > 60 ? s.error.slice(0, 60) + "…" : s.error) + '</td>'
         : '<td></td>';
+      const actions = [];
+      if (s.has_recording) {
+        actions.push(
+          '<button class="btn ghost small" data-replay-id="' + safe(s.id) +
+          '" data-replay-label="' + safe((s.user_name || s.user_id) + " @ " + (s.asset_name || s.asset_id)) +
+          '" title="Replay session">▶ Replay</button>'
+        );
+      }
+      if (s.asset_id) {
+        // "Open related asset" — drops the user on the inventory drawer
+        // for the asset the session ran against. Saves a tab-switch + UUID
+        // copy/paste round-trip during incident review.
+        actions.push(
+          '<button class="btn ghost small" data-open-asset="' + safe(s.asset_id) +
+          '" title="Open asset detail">Open asset</button>'
+        );
+      }
+      const actionsCell = actions.length
+        ? '<td class="row-actions">' + actions.join(" ") + '</td>'
+        : '<td class="muted">—</td>';
       return '<tr>' +
         '<td title="' + safe(s.started_at) + '">' + safe(relativeTime(s.started_at)) + '</td>' +
         '<td>' + safe(s.user_name || s.user_id) + '</td>' +
@@ -680,37 +418,78 @@
         '<td>' + dur + '</td>' +
         '<td>' + formatBytes(s.bytes_in) + ' / ' + formatBytes(s.bytes_out) + '</td>' +
         '<td>' + safe(s.client_ip) + '</td>' +
+        actionsCell +
         errCell +
       '</tr>';
     }).join("");
 
-    view.innerHTML =
-      '<div class="page-header"><div><h1>Terminal sessions</h1>' +
-      '<p class="subtitle">Audit log of WebSSH sessions. Auto-refresh every 10s while open.</p></div>' +
-      '<div class="page-actions"><button id="sessions-refresh" class="btn ghost">Refresh</button></div></div>' +
+    // Filter chips show the currently active filters and let the user
+    // clear individual fields with a click. Mirrors the inventory chip
+    // pattern (Phase 2).
+    const chipParts = [];
+    const pushChip = (field, label, value) => {
+      chipParts.push(
+        '<span class="filter-chip" data-session-chip="' + safe(field) + '">' +
+          '<span class="filter-chip-key">' + safe(label) + ':</span>' +
+          '<span class="filter-chip-value">' + safe(value) + '</span>' +
+          '<button type="button" class="filter-chip-clear" aria-label="Clear ' + safe(label) + '">×</button>' +
+        '</span>'
+      );
+    };
+    if (sessionsFilter.user)   pushChip("user", "user", sessionsFilter.user);
+    if (sessionsFilter.asset)  pushChip("asset", "asset", sessionsFilter.asset);
+    const effStatus = sessionsFilter.status || (sessionsFilter.onlyActive ? "active" : "");
+    if (effStatus) pushChip("status", "status", effStatus);
+    const chipBar = chipParts.length
+      ? '<div class="filter-chips">' + chipParts.join("") +
+        '<button type="button" class="filter-chip-reset">Clear all</button></div>'
+      : "";
+
+    pane.innerHTML =
       '<div class="kpi-grid"><div class="kpi"><div class="kpi-label">Shown</div><div class="kpi-value">' + items.length + '</div></div>' +
       '<div class="kpi"><div class="kpi-label">Active now</div><div class="kpi-value">' + active + '</div></div></div>' +
       '<div class="toolbar">' +
         '<input id="sessions-user" class="input" placeholder="Filter by user UUID" value="' + safe(sessionsFilter.user) + '" />' +
         '<input id="sessions-asset" class="input" placeholder="Filter by asset UUID" value="' + safe(sessionsFilter.asset) + '" />' +
-        '<label class="chip' + (sessionsFilter.onlyActive ? ' active' : '') + '"><input type="checkbox" id="sessions-only-active"' + (sessionsFilter.onlyActive ? ' checked' : '') + ' /> Active only</label>' +
+        '<select id="sessions-status">' +
+          '<option value=""' + (effStatus === "" ? " selected" : "") + '>All statuses</option>' +
+          '<option value="active"' + (effStatus === "active" ? " selected" : "") + '>Active</option>' +
+          '<option value="closed"' + (effStatus === "closed" ? " selected" : "") + '>Closed</option>' +
+          '<option value="error"' + (effStatus === "error" ? " selected" : "") + '>Error</option>' +
+        '</select>' +
         '<button id="sessions-apply" class="btn">Apply</button>' +
+        '<button id="sessions-refresh" class="btn ghost">Refresh</button>' +
       '</div>' +
+      chipBar +
       (items.length === 0
-        ? '<div class="empty-state">No sessions recorded yet.</div>'
-        : '<table class="table"><thead><tr><th>Started</th><th>User</th><th>Asset</th><th>Status</th><th>Duration</th><th>In / Out</th><th>Client IP</th><th>Error</th></tr></thead><tbody>' + rows + '</tbody></table>');
+        ? '<div class="empty-state">No sessions match the current filters.</div>'
+        : '<table class="table"><thead><tr><th>Started</th><th>User</th><th>Asset</th><th>Status</th><th>Duration</th><th>In / Out</th><th>Client IP</th><th>Actions</th><th>Error</th></tr></thead><tbody>' + rows + '</tbody></table>');
 
-    const refresh = document.getElementById("sessions-refresh");
+    pane.querySelectorAll("button[data-replay-id]").forEach((btn) => {
+      btn.addEventListener("click", () => openReplayModal(btn.dataset.replayId, btn.dataset.replayLabel));
+    });
+    pane.querySelectorAll("button[data-open-asset]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.openAsset;
+        if (!id) return;
+        setView("assets", "inventory");
+        // Defer the drawer open until the inventory view is in the DOM.
+        setTimeout(() => openAssetDrawer(id), 0);
+      });
+    });
+
+    const refresh = pane.querySelector("#sessions-refresh");
     if (refresh) refresh.addEventListener("click", () => loadSessions().then(renderSessionsView));
 
-    const userInput = document.getElementById("sessions-user");
-    const assetInput = document.getElementById("sessions-asset");
-    const onlyActive = document.getElementById("sessions-only-active");
-    const applyBtn = document.getElementById("sessions-apply");
+    const userInput = pane.querySelector("#sessions-user");
+    const assetInput = pane.querySelector("#sessions-asset");
+    const statusSel = pane.querySelector("#sessions-status");
+    const applyBtn = pane.querySelector("#sessions-apply");
     const apply = () => {
       sessionsFilter.user = (userInput && userInput.value) || "";
       sessionsFilter.asset = (assetInput && assetInput.value) || "";
-      sessionsFilter.onlyActive = !!(onlyActive && onlyActive.checked);
+      sessionsFilter.status = (statusSel && statusSel.value) || "";
+      sessionsFilter.onlyActive = sessionsFilter.status === "active";
       loadSessions().then(renderSessionsView);
     };
     if (applyBtn) applyBtn.addEventListener("click", apply);
@@ -718,7 +497,220 @@
       if (!el) return;
       el.addEventListener("keydown", (ev) => { if (ev.key === "Enter") apply(); });
     });
-    if (onlyActive) onlyActive.addEventListener("change", apply);
+    if (statusSel) statusSel.addEventListener("change", apply);
+
+    // Wire chip × buttons.
+    pane.querySelectorAll(".filter-chip").forEach((chip) => {
+      const clear = chip.querySelector(".filter-chip-clear");
+      if (!clear) return;
+      clear.addEventListener("click", () => {
+        const field = chip.dataset.sessionChip;
+        if (field === "user") sessionsFilter.user = "";
+        else if (field === "asset") sessionsFilter.asset = "";
+        else if (field === "status") { sessionsFilter.status = ""; sessionsFilter.onlyActive = false; }
+        loadSessions().then(renderSessionsView);
+      });
+    });
+    const chipReset = pane.querySelector(".filter-chips .filter-chip-reset");
+    if (chipReset) chipReset.addEventListener("click", () => {
+      sessionsFilter.user = "";
+      sessionsFilter.asset = "";
+      sessionsFilter.status = "";
+      sessionsFilter.onlyActive = false;
+      loadSessions().then(renderSessionsView);
+    });
+  }
+
+  // Sidebar on the Sessions page — lists connectable assets grouped by env/vpc/bastion.
+  async function loadSidebarAssets() {
+    if (!hasPermission("cmdb.asset:read")) {
+      state.sidebarAssets = [];
+      renderSessionsSidebar();
+      return;
+    }
+    try {
+      const data = await api("/api/v1/cmdb/assets?limit=500&offset=0");
+      state.sidebarAssets = (data.items || []).filter(isConnectableAsset);
+    } catch (_) {
+      state.sidebarAssets = [];
+    }
+    renderSessionsSidebar();
+  }
+
+  function renderSessionsSidebar() {
+    const tree = $("sessions-sidebar-tree");
+    if (!tree) return;
+    const all = state.sidebarAssets || [];
+    if (all.length === 0) {
+      tree.innerHTML = '<div class="tree-empty">No connectable assets.</div>';
+      return;
+    }
+    const needle = String(state.sidebarSearch || "").toLowerCase().trim();
+    const matches = needle
+      ? all.filter((a) => {
+          const hay = [a.name, a.id, a.type, a.env, a.public_ip, a.private_ip, a.private_dns, a.vpc_id]
+            .filter(Boolean).join(" ").toLowerCase();
+          return hay.includes(needle);
+        })
+      : all;
+    if (matches.length === 0) {
+      tree.innerHTML = '<div class="tree-empty">No matches.</div>';
+      return;
+    }
+    const envs = new Map();
+    matches.forEach((asset) => {
+      const envKey = asset.env || "default";
+      if (!envs.has(envKey)) envs.set(envKey, new Map());
+      const vpcs = envs.get(envKey);
+      const vpcKey = asset.vpc_id || "__no_vpc__";
+      if (!vpcs.has(vpcKey)) vpcs.set(vpcKey, { bastions: [], members: [] });
+      const bucket = vpcs.get(vpcKey);
+      if (asset.is_vpc_proxy) bucket.bastions.push(asset);
+      else bucket.members.push(asset);
+    });
+    const parts = [];
+    [...envs.keys()].sort().forEach((envName) => {
+      const vpcs = envs.get(envName);
+      let total = 0;
+      vpcs.forEach((b) => { total += b.bastions.length + b.members.length; });
+      parts.push('<details class="sidebar-env" open><summary>env · ' + safe(envName) +
+        ' <span class="count">(' + total + ')</span></summary>');
+      const vpcKeys = [...vpcs.keys()].sort((a, b) => {
+        if (a === "__no_vpc__") return 1;
+        if (b === "__no_vpc__") return -1;
+        return a.localeCompare(b);
+      });
+      vpcKeys.forEach((vpcID) => {
+        const { bastions, members } = vpcs.get(vpcID);
+        const vpcLabel = vpcID === "__no_vpc__" ? "No VPC" : vpcID;
+        const count = bastions.length + members.length;
+        parts.push('<details class="sidebar-vpc" open><summary>vpc · <code>' + safe(vpcLabel) +
+          '</code> <span class="count">(' + count + ')</span></summary>' +
+          '<div class="sidebar-members">');
+        [...bastions, ...members].forEach((a) => parts.push(renderSidebarAsset(a)));
+        parts.push('</div></details>');
+      });
+      parts.push('</details>');
+    });
+    tree.innerHTML = parts.join("");
+  }
+
+  function renderSidebarAsset(asset) {
+    const addr = asset.public_ip || asset.private_ip || asset.private_dns || "";
+    const badge = asset.is_vpc_proxy ? '<span class="pill success tiny">bastion</span>' : '';
+    return '<div class="sidebar-asset" data-sidebar-asset="' + safe(asset.id) +
+      '" title="' + safe(asset.name + (addr ? " · " + addr : "")) + '">' +
+      badge +
+      '<span class="asset-name">' + safe(asset.name || asset.id) + '</span>' +
+      (addr ? '<span class="asset-addr">' + safe(addr) + '</span>' : '') +
+    '</div>';
+  }
+
+  function bindSessionsSidebarEvents() {
+    const tree = $("sessions-sidebar-tree");
+    if (tree) {
+      tree.addEventListener("click", (e) => {
+        const row = e.target.closest("[data-sidebar-asset]");
+        if (!row) return;
+        connectAssetFromList(row.dataset.sidebarAsset);
+      });
+    }
+    const search = $("sessions-sidebar-search");
+    if (search) {
+      let t;
+      search.addEventListener("input", () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          state.sidebarSearch = search.value;
+          renderSessionsSidebar();
+        }, 120);
+      });
+    }
+    const refresh = $("sessions-sidebar-refresh");
+    if (refresh) refresh.addEventListener("click", loadSidebarAssets);
+    bindSessionsRailControls();
+  }
+
+  // bindSessionsRailControls wires the collapse toggle and the drag-to-resize
+  // handle on the asset rail (Redesign Phase 3 §7.4). Width and collapsed
+  // state are persisted in localStorage so each operator's preferred layout
+  // survives reloads.
+  function bindSessionsRailControls() {
+    const sidebar = $("sessions-sidebar");
+    const collapseBtn = $("sessions-sidebar-collapse");
+    const resizer = $("sessions-sidebar-resizer");
+    if (!sidebar) return;
+
+    // Restore previously saved layout.
+    let storedCollapsed = false;
+    let storedWidth = 0;
+    try {
+      storedCollapsed = localStorage.getItem("ops_platform_sessions_rail_collapsed") === "1";
+      storedWidth = parseInt(localStorage.getItem("ops_platform_sessions_rail_width") || "0", 10) || 0;
+    } catch (_) {}
+    applyRailCollapsed(sidebar, storedCollapsed);
+    if (storedWidth >= 200 && storedWidth <= 600) applyRailWidth(sidebar, storedWidth);
+
+    if (collapseBtn && !collapseBtn.dataset.bound) {
+      collapseBtn.dataset.bound = "1";
+      collapseBtn.addEventListener("click", () => {
+        const next = !sidebar.classList.contains("collapsed");
+        applyRailCollapsed(sidebar, next);
+        try { localStorage.setItem("ops_platform_sessions_rail_collapsed", next ? "1" : "0"); } catch (_) {}
+      });
+    }
+
+    if (resizer && !resizer.dataset.bound) {
+      resizer.dataset.bound = "1";
+      let startX = 0;
+      let startWidth = 0;
+      const onMove = (ev) => {
+        const dx = ev.clientX - startX;
+        const next = Math.max(200, Math.min(600, startWidth + dx));
+        applyRailWidth(sidebar, next);
+      };
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        try { localStorage.setItem("ops_platform_sessions_rail_width", String(sidebar.offsetWidth)); } catch (_) {}
+      };
+      resizer.addEventListener("mousedown", (ev) => {
+        if (sidebar.classList.contains("collapsed")) return;
+        ev.preventDefault();
+        startX = ev.clientX;
+        startWidth = sidebar.offsetWidth;
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+    }
+  }
+
+  function applyRailCollapsed(sidebar, collapsed) {
+    sidebar.classList.toggle("collapsed", !!collapsed);
+    const btn = $("sessions-sidebar-collapse");
+    if (btn) {
+      btn.textContent = collapsed ? "›" : "‹";
+      btn.title = collapsed ? "Expand rail" : "Collapse rail";
+      btn.setAttribute("aria-label", btn.title);
+    }
+  }
+
+  function applyRailWidth(sidebar, px) {
+    sidebar.style.flex = "0 0 " + px + "px";
+    sidebar.style.width = px + "px";
+  }
+
+  // applySessionsLayout reflects the section's subsection (live vs audit)
+  // onto the layout: audit hides the rail entirely, since the rail only
+  // exists to launch new sessions.
+  function applySessionsLayout(subsection) {
+    const layout = $("sessions-layout");
+    if (!layout) return;
+    layout.classList.toggle("audit-mode", subsection === "audit");
   }
   // ===== Sessions end =====
 
@@ -815,6 +807,29 @@
     return '<span class="pill neutral">' + safe(s) + '</span>';
   }
 
+  // Asset types that represent network/metadata objects with no interactive session.
+  // Everything else (ec2_instance, rds_instance, manual hosts, etc.) is treated as
+  // potentially connectable so the Connect path stays available.
+  const NON_CONNECTABLE_TYPES = new Set([
+    "aws_vpc", "vpc",
+    "aws_subnet", "subnet",
+    "aws_security_group", "security_group",
+    "aws_route_table", "route_table",
+    "aws_internet_gateway", "internet_gateway",
+    "aws_nat_gateway", "nat_gateway",
+    "aws_ebs_volume", "ebs_volume",
+    "aws_elb", "elb", "alb", "nlb",
+    "aws_s3_bucket", "s3_bucket",
+    "aws_iam_role", "iam_role",
+    "aws_iam_user", "iam_user",
+    "aws_account", "aws_region",
+  ]);
+  function isConnectableAsset(asset) {
+    if (!asset) return false;
+    const t = String(asset.type || "").toLowerCase();
+    return !NON_CONNECTABLE_TYPES.has(t);
+  }
+
   function renderHealth() {
     const items = [
       {
@@ -880,6 +895,13 @@
   }
 
   function renderAssetTable() {
+    applyAssetViewMode();
+    renderAssetFilterChips();
+    if (state.assetViewMode === "tree") {
+      renderAssetTree();
+      renderAssetHint();
+      return;
+    }
     const cols = 9;
     if (!hasPermission("cmdb.asset:read")) {
       elements.assetsTableBody.innerHTML =
@@ -907,9 +929,12 @@
             ? '<code>' + safe(asset.region) + '</code>' +
               (asset.zone ? '<div class="muted">' + safe(asset.zone) + '</div>' : '')
             : '<span class="muted">—</span>';
+          const proxyTag = asset.is_vpc_proxy
+            ? ' <span class="pill success" style="margin-left:6px;vertical-align:middle">VPC proxy</span>'
+            : '';
           return (
             '<tr data-asset-id="' + safe(asset.id) + '">' +
-            '<td><div class="primary">' + safe(asset.name) + '</div>' +
+            '<td><div class="primary">' + safe(asset.name) + proxyTag + '</div>' +
             (asset.private_dns ? '<div class="muted">' + safe(asset.private_dns) + '</div>' : '') +
             '</td>' +
             "<td>" + safe(asset.type) + "</td>" +
@@ -920,7 +945,9 @@
             "<td>" + network + "</td>" +
             "<td>" + sourcePill(asset.source) + "</td>" +
             '<td class="row-actions-cell">' +
-            '<button class="btn ghost small" data-connect-asset="' + safe(asset.id) + '" title="Open terminal">Connect</button>' +
+            (isConnectableAsset(asset)
+              ? '<button class="btn ghost small" data-connect-asset="' + safe(asset.id) + '" title="Open terminal">Connect</button>'
+              : '<span class="muted" title="' + safe(asset.type) + ' assets are metadata only">—</span>') +
             "</td>" +
             "</tr>"
           );
@@ -945,6 +972,10 @@
   }
 
   function renderAssetPagination() {
+    if (state.assetViewMode === "tree") {
+      elements.assetsPagination.innerHTML = "";
+      return;
+    }
     const total = state.assetTotal;
     const { limit, offset } = state.assetQuery;
     if (total <= limit) {
@@ -961,9 +992,238 @@
       '</div>';
   }
 
+  function applyAssetViewMode() {
+    const mode = state.assetViewMode === "tree" ? "tree" : "list";
+    if (elements.assetsListWrap) {
+      elements.assetsListWrap.hidden = mode === "tree";
+    }
+    if (elements.assetsTree) {
+      elements.assetsTree.hidden = mode !== "tree";
+    }
+    if (elements.assetsViewToggle) {
+      elements.assetsViewToggle.querySelectorAll(".view-toggle-btn").forEach((btn) => {
+        const active = btn.dataset.viewMode === mode;
+        btn.classList.toggle("active", active);
+        btn.setAttribute("aria-selected", active ? "true" : "false");
+      });
+    }
+    if (mode === "tree") {
+      elements.assetsPagination.innerHTML = "";
+    }
+  }
+
+  function renderAssetTree() {
+    const tree = elements.assetsTree;
+    if (!tree) return;
+    if (!hasPermission("cmdb.asset:read")) {
+      tree.innerHTML = '<div class="tree-empty">Permission required: cmdb.asset:read</div>';
+      return;
+    }
+    if (state.assets.length === 0) {
+      tree.innerHTML = '<div class="tree-empty">' +
+        (isFilterActive() ? "No matches for the current filters." : "No assets yet.") +
+        '</div>';
+      return;
+    }
+
+    // Group by env → vpc_id → bastion (is_vpc_proxy) vs members.
+    const envs = new Map();
+    state.assets.forEach((asset) => {
+      const envKey = asset.env || "default";
+      if (!envs.has(envKey)) envs.set(envKey, new Map());
+      const vpcs = envs.get(envKey);
+      const vpcKey = asset.vpc_id || "__no_vpc__";
+      if (!vpcs.has(vpcKey)) vpcs.set(vpcKey, { bastions: [], members: [] });
+      const bucket = vpcs.get(vpcKey);
+      if (asset.is_vpc_proxy) bucket.bastions.push(asset);
+      else bucket.members.push(asset);
+    });
+
+    const envNames = [...envs.keys()].sort();
+    const isOpen = (key, defaultOpen) => {
+      const v = state.treeExpanded[key];
+      return v === undefined ? defaultOpen : !!v;
+    };
+
+    const parts = [];
+    envNames.forEach((envName) => {
+      const vpcs = envs.get(envName);
+      const envKey = "env:" + envName;
+      let envCount = 0;
+      vpcs.forEach((b) => { envCount += b.bastions.length + b.members.length; });
+      const vpcKeys = [...vpcs.keys()].sort((a, b) => {
+        if (a === "__no_vpc__") return 1;
+        if (b === "__no_vpc__") return -1;
+        return a.localeCompare(b);
+      });
+      parts.push(
+        '<details class="tree-env" data-tree-key="' + safe(envKey) + '"' +
+        (isOpen(envKey, true) ? ' open' : '') + '>' +
+        '<summary><span class="chev">▶</span>env · ' + safe(envName) +
+        ' <span class="count">(' + envCount + ')</span></summary>'
+      );
+      vpcKeys.forEach((vpcID) => {
+        const { bastions, members } = vpcs.get(vpcID);
+        const vpcLabel = vpcID === "__no_vpc__" ? "No VPC" : vpcID;
+        const vpcKey = envKey + "|vpc:" + vpcID;
+        const total = bastions.length + members.length;
+        parts.push(
+          '<details class="tree-vpc" data-tree-key="' + safe(vpcKey) + '"' +
+          (isOpen(vpcKey, true) ? ' open' : '') + '>' +
+          '<summary><span class="chev">▶</span>vpc · <code>' + safe(vpcLabel) + '</code>' +
+          ' <span class="count">(' + total + ')</span></summary>'
+        );
+        bastions.forEach((bastion, idx) => {
+          const bastionKey = vpcKey + "|bastion:" + bastion.id;
+          // Only the first bastion lists the VPC members as peers so each
+          // member appears once even if multiple bastions share a VPC.
+          const peers = idx === 0 ? members : [];
+          parts.push(
+            '<details class="tree-bastion" data-tree-key="' + safe(bastionKey) + '"' +
+            (isOpen(bastionKey, true) ? ' open' : '') + '>' +
+            '<summary><span class="chev">▶</span>' +
+            '<span class="pill success tiny">bastion</span> ' +
+            renderTreeNodeInline(bastion) +
+            ' <span class="count">(' + peers.length + ' peer' + (peers.length === 1 ? '' : 's') + ')</span>' +
+            '</summary>' +
+            '<div class="tree-members peer-members">' +
+            (peers.length === 0
+              ? '<div class="tree-empty">No peer assets in this VPC.</div>'
+              : peers.map((m) => renderTreeNode(m)).join("")) +
+            '</div>' +
+            '</details>'
+          );
+        });
+        if (bastions.length === 0 && members.length > 0) {
+          parts.push(
+            '<div class="tree-members">' +
+            members.map((m) => renderTreeNode(m)).join("") +
+            '</div>'
+          );
+        }
+        parts.push('</details>');
+      });
+      parts.push('</details>');
+    });
+
+    tree.innerHTML = parts.join("");
+  }
+
+  function renderTreeNodeInline(asset) {
+    const addr = asset.public_ip || asset.private_ip || "";
+    return (
+      '<span class="tree-node" data-asset-id="' + safe(asset.id) + '" role="button">' +
+      '<span class="name">' + safe(asset.name) + '</span>' +
+      (addr ? '<code>' + safe(addr) + '</code>' : '') +
+      '<span class="muted">' + safe(asset.type || "") + '</span>' +
+      (asset.status ? statusPill(asset.status) : '') +
+      '</span>'
+    );
+  }
+
+  function renderTreeNode(asset) {
+    const addr = asset.public_ip || asset.private_ip || "";
+    return (
+      '<div class="tree-node" data-asset-id="' + safe(asset.id) + '" role="button" tabindex="0">' +
+      '<span class="name">' + safe(asset.name) + '</span>' +
+      (addr ? '<code>' + safe(addr) + '</code>' : '') +
+      '<span class="muted">' + safe(asset.type || "") + '</span>' +
+      (asset.status ? statusPill(asset.status) : '') +
+      (asset.owner ? '<span class="muted">' + safe(asset.owner) + '</span>' : '') +
+      '</div>'
+    );
+  }
+
   function isFilterActive() {
     const q = state.assetQuery;
-    return !!(q.env || q.status || q.source || q.region || q.criticality || q.q);
+    return !!(q.env || q.type || q.status || q.source || q.region || q.criticality || q.q || q.includeBastions);
+  }
+
+  // ASSET_FILTER_CHIPS drives the chip strip above the inventory table. Each
+  // entry is [field, label, formatter]; formatter receives the raw query
+  // value and returns the display string (so booleans like includeBastions
+  // can show as "Including bastions").
+  const ASSET_FILTER_CHIPS = [
+    ["q",          "search",      (v) => v],
+    ["env",        "env",         (v) => v],
+    ["type",       "type",        (v) => v],
+    ["status",     "status",      (v) => v],
+    ["source",     "source",      (v) => v],
+    ["region",     "region",      (v) => v],
+    ["criticality","criticality", (v) => v],
+    ["includeBastions", "scope",  (v) => v ? "incl. bastions" : null],
+  ];
+
+  function renderAssetFilterChips() {
+    const host = document.getElementById("assets-filter-chips");
+    if (!host) return;
+    const q = state.assetQuery;
+    const chips = [];
+    ASSET_FILTER_CHIPS.forEach(([field, label, fmt]) => {
+      const raw = q[field];
+      if (raw === undefined || raw === null || raw === "" || raw === false) return;
+      const display = fmt(raw);
+      if (!display) return;
+      chips.push(
+        '<span class="filter-chip" data-chip-field="' + safe(field) + '">' +
+          '<span class="filter-chip-key">' + safe(label) + ':</span>' +
+          '<span class="filter-chip-value">' + safe(display) + '</span>' +
+          '<button type="button" class="filter-chip-clear" aria-label="Clear ' + safe(label) + '" title="Clear ' + safe(label) + '">×</button>' +
+        '</span>'
+      );
+    });
+    if (chips.length === 0) {
+      host.innerHTML = "";
+      return;
+    }
+    host.innerHTML = chips.join("") +
+      '<button type="button" class="filter-chip-reset">Clear all</button>';
+    host.querySelectorAll(".filter-chip").forEach((node) => {
+      const clearBtn = node.querySelector(".filter-chip-clear");
+      if (!clearBtn) return;
+      clearBtn.addEventListener("click", () => clearAssetFilter(node.dataset.chipField));
+    });
+    const resetBtn = host.querySelector(".filter-chip-reset");
+    if (resetBtn) resetBtn.addEventListener("click", clearAllAssetFilters);
+  }
+
+  function clearAssetFilter(field) {
+    if (!field) return;
+    if (field === "includeBastions") {
+      state.assetQuery.includeBastions = false;
+    } else {
+      state.assetQuery[field] = "";
+    }
+    state.assetQuery.offset = 0;
+    // Sync the matching toolbar control.
+    const inputs = {
+      q: elements.assetSearch,
+      env: $("filter-env"),
+      type: $("filter-type"),
+      status: $("filter-status"),
+      source: $("filter-source"),
+      region: $("filter-region"),
+    };
+    if (inputs[field]) inputs[field].value = "";
+    if (field === "includeBastions") {
+      const btn = $("filter-include-bastions");
+      if (btn) btn.dataset.on = "0";
+    }
+    refreshAssets();
+  }
+
+  function clearAllAssetFilters() {
+    state.assetQuery = {
+      env: "", type: "", status: "", source: "", region: "", criticality: "",
+      q: "", limit: state.assetQuery.limit, offset: 0, includeBastions: false,
+    };
+    if (elements.assetSearch) elements.assetSearch.value = "";
+    ["filter-env","filter-type","filter-status","filter-source","filter-region","filter-criticality"].forEach((id) => {
+      const el = $(id); if (el) el.value = "";
+    });
+    const btn = $("filter-include-bastions");
+    if (btn) btn.dataset.on = "0";
+    refreshAssets();
   }
 
   function populateFilterSelect(el, values, currentValue) {
@@ -1324,8 +1584,12 @@
     if (!asset) return;
     elements.assetDrawerEyebrow.textContent = (asset.type || "asset") + " · " + (asset.source || "manual");
     elements.assetDrawerTitle.textContent = asset.name || asset.id;
+    const proxyBadge = asset.is_vpc_proxy
+      ? ' <span class="pill success" title="This asset is the designated SSH bastion for its VPC">VPC proxy</span>'
+      : '';
     elements.assetDrawerSub.innerHTML =
-      (asset.external_id ? '<code>' + safe(asset.external_id) + '</code>' : '<span class="muted">—</span>');
+      (asset.external_id ? '<code>' + safe(asset.external_id) + '</code>' : '<span class="muted">—</span>') +
+      proxyBadge;
 
     const identity = kvList([
       ["Status", statusPill(asset.status)],
@@ -1337,12 +1601,17 @@
       ["Expires", asset.expires_at ? safe(formatDate(asset.expires_at)) : '<span class="muted">—</span>'],
     ]);
 
+    const osImageCell = asset.os_image
+      ? '<code>' + safe(asset.os_image) + '</code>' +
+        (asset.ami_name ? '<div class="muted">' + safe(asset.ami_name) + '</div>' : '') +
+        (asset.os_family ? '<div class="muted">family: ' + safe(asset.os_family) + '</div>' : '')
+      : dash();
     const infra = kvList([
       ["Region", asset.region ? '<code>' + safe(asset.region) + '</code>' : dash()],
       ["Zone", asset.zone ? '<code>' + safe(asset.zone) + '</code>' : dash()],
       ["Account", asset.account_id ? '<code>' + safe(asset.account_id) + '</code>' : dash()],
       ["Instance type", asset.instance_type ? '<code>' + safe(asset.instance_type) + '</code>' : dash()],
-      ["OS image", asset.os_image ? '<code>' + safe(asset.os_image) + '</code>' : dash()],
+      ["OS image", osImageCell],
       ["VPC", asset.vpc_id ? '<code>' + safe(asset.vpc_id) + '</code>' : dash()],
       ["Subnet", asset.subnet_id ? '<code>' + safe(asset.subnet_id) + '</code>' : dash()],
     ]);
@@ -1374,24 +1643,97 @@
     const canWrite = hasPermission("cmdb.asset:write");
     const labelsEditor = canWrite ? renderLabelsEditor() : renderLabelsReadOnly();
 
-    elements.assetDrawerBody.innerHTML =
+    const connectable = isConnectableAsset(asset);
+    const proxySection = connectable && asset.type === "aws_ec2_instance"
+      ? section("VPC SSH proxy role", renderVPCProxySection())
+      : "";
+
+    // Drawer tabs (Phase 2): five named panes over the same data the drawer
+    // already loaded. The previous layout stacked all sections vertically;
+    // splitting them keeps the drawer scannable on tall assets and matches
+    // the redesign doc §7.2 split (Summary / Connection / Probe / Relations /
+    // Metadata).
+    const tabs = [
+      { id: "summary",  label: "Summary",  enabled: true },
+      { id: "connection", label: "Connection", enabled: connectable },
+      { id: "probe",    label: "Probe",    enabled: connectable },
+      { id: "relations", label: "Relations", enabled: true },
+      { id: "metadata", label: "Metadata", enabled: true },
+    ];
+    const enabledTabs = tabs.filter((t) => t.enabled);
+    let activeTab = state.assetDrawer.tab || "summary";
+    if (!enabledTabs.find((t) => t.id === activeTab)) activeTab = enabledTabs[0].id;
+    state.assetDrawer.tab = activeTab;
+
+    const tabStrip =
+      '<div class="drawer-tabs" role="tablist">' +
+      enabledTabs.map((t) => (
+        '<button class="drawer-tab' + (t.id === activeTab ? " active" : "") +
+        '" data-drawer-tab="' + t.id + '" role="tab" aria-selected="' + (t.id === activeTab) + '">' +
+        safe(t.label) + "</button>"
+      )).join("") +
+      "</div>";
+
+    const labelsFooter = canWrite
+      ? '<div class="drawer-footer">' +
+          '<button type="button" class="btn ghost" id="drawer-cancel-btn">Reset</button>' +
+          '<button type="button" class="btn primary" id="drawer-save-btn">Save labels</button>' +
+        '</div>'
+      : '';
+
+    const summaryPane =
       section("Identity", identity) +
       section("Infrastructure", infra) +
       section("Network", network) +
-      section("Ownership", business) +
-      section("Bastion connection", renderConnectionSection()) +
-      section("Last probe", renderProbeSection()) +
-      section("Relations", renderRelationsSection()) +
+      section("Ownership", business);
+    const connectionPane = connectable
+      ? section("Bastion connection", renderConnectionSection()) + proxySection
+      : '<div class="muted" style="padding:12px">Connection editor is only available for connectable assets.</div>';
+    const probePane = connectable
+      ? section("Last probe", renderProbeSection())
+      : '<div class="muted" style="padding:12px">Probe history is only available for connectable assets.</div>';
+    const relationsPane = section("Relations", renderRelationsSection());
+    const metadataPane =
       section("System tags", systemSection + '<div class="muted" style="margin-top:6px;font-size:12px">Managed by sync. Read-only.</div>') +
-      section("Labels", labelsEditor + (canWrite
-        ? '<div class="drawer-footer">' +
-          '<button type="button" class="btn ghost" id="drawer-cancel-btn">Reset</button>' +
-          '<button type="button" class="btn primary" id="drawer-save-btn">Save labels</button>' +
-          '</div>'
-        : ''));
+      section("Labels", labelsEditor + labelsFooter);
+
+    const paneFor = {
+      summary: summaryPane,
+      connection: connectionPane,
+      probe: probePane,
+      relations: relationsPane,
+      metadata: metadataPane,
+    };
+
+    elements.assetDrawerBody.innerHTML = tabStrip +
+      enabledTabs.map((t) => (
+        '<div class="drawer-tab-pane" data-drawer-pane="' + t.id + '"' +
+        (t.id === activeTab ? '' : ' hidden') + '>' + paneFor[t.id] + '</div>'
+      )).join("");
+
+    // Tab switching: hide all panes, show the chosen one. We don't re-render
+    // the whole drawer because forms (connection editor, label drafts) carry
+    // unsaved local state we'd lose.
+    elements.assetDrawerBody.querySelectorAll(".drawer-tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.drawerTab;
+        state.assetDrawer.tab = target;
+        elements.assetDrawerBody.querySelectorAll(".drawer-tab").forEach((b) => {
+          const on = b.dataset.drawerTab === target;
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-selected", on);
+        });
+        elements.assetDrawerBody.querySelectorAll(".drawer-tab-pane").forEach((p) => {
+          p.hidden = p.dataset.drawerPane !== target;
+        });
+      });
+    });
 
     if (canWrite) bindLabelsEditorEvents();
-    bindConnectionSectionEvents();
+    if (connectable) {
+      bindConnectionSectionEvents();
+      bindVPCProxyEvents();
+    }
     bindRelationEvents();
 
     elements.assetDrawerBody.querySelectorAll("[data-hostkey-action]").forEach((btn) => {
@@ -1408,8 +1750,10 @@
 
   function renderRelationsSection() {
     const rels = state.assetDrawer.relations || [];
-    const assetID = state.assetDrawer.asset ? state.assetDrawer.asset.id : "";
+    const asset = state.assetDrawer.asset;
+    const assetID = asset ? asset.id : "";
     if (rels.length === 0) return '<div class="muted">No relations.</div>';
+    const graph = renderRelationMiniGraph(rels, asset);
     const rows = rels.map((rel) => {
       const isFrom = rel.from_asset_id === assetID;
       const peerName = isFrom ? (rel.to_name || rel.to_asset_id) : (rel.from_name || rel.from_asset_id);
@@ -1430,12 +1774,117 @@
         '</div>'
       );
     }).join("");
-    return rows;
+    return graph + rows;
+  }
+
+  function renderRelationMiniGraph(rels, asset) {
+    if (!asset || !rels || rels.length === 0) return "";
+    const assetID = asset.id;
+    // Group edges by peer so a neighbor with multiple relations shows once.
+    const peers = new Map();
+    rels.forEach((rel) => {
+      const isFrom = rel.from_asset_id === assetID;
+      const peerID = isFrom ? rel.to_asset_id : rel.from_asset_id;
+      if (!peerID) return;
+      const peerName = isFrom ? (rel.to_name || rel.to_asset_id) : (rel.from_name || rel.from_asset_id);
+      const peerType = isFrom ? (rel.to_type || "") : (rel.from_type || "");
+      if (!peers.has(peerID)) {
+        peers.set(peerID, { id: peerID, name: peerName, type: peerType, types: new Set(), out: false, in: false });
+      }
+      const p = peers.get(peerID);
+      p.types.add(rel.relation_type || "related");
+      if (isFrom) p.out = true; else p.in = true;
+    });
+
+    const peerList = [...peers.values()];
+    const n = peerList.length;
+    const W = 360;
+    const H = Math.max(200, Math.min(360, 160 + n * 14));
+    const cx = W / 2;
+    const cy = H / 2;
+    const cR = 28;
+    const pR = 20;
+    const radius = Math.min(W, H) / 2 - pR - 28;
+
+    const truncate = (s, max) => {
+      const str = String(s || "");
+      return str.length > max ? str.slice(0, max - 1) + "…" : str;
+    };
+
+    const pieces = [];
+    pieces.push(
+      '<svg class="relation-svg" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Asset relation graph">' +
+      '<defs>' +
+      '<marker id="rel-arrow-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
+      '<path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>' +
+      '<marker id="rel-arrow-in" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
+      '<path d="M0,0 L10,5 L0,10 z" fill="var(--text-muted)"/></marker>' +
+      '</defs>'
+    );
+
+    peerList.forEach((p, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(1, n) - Math.PI / 2;
+      const px = cx + radius * Math.cos(angle);
+      const py = cy + radius * Math.sin(angle);
+      // Shorten edge endpoints so arrowheads don't hide inside nodes.
+      const dx = px - cx;
+      const dy = py - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const x1 = cx + ux * cR;
+      const y1 = cy + uy * cR;
+      const x2 = px - ux * pR;
+      const y2 = py - uy * pR;
+      const marker = p.out && !p.in
+        ? ' marker-end="url(#rel-arrow-out)"'
+        : (!p.out && p.in
+            ? ' marker-start="url(#rel-arrow-in)"'
+            : ' marker-end="url(#rel-arrow-out)" marker-start="url(#rel-arrow-in)"');
+      const edgeClass = p.out && p.in ? "edge both" : (p.out ? "edge out" : "edge in");
+      pieces.push(
+        '<line class="' + edgeClass + '" x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) +
+        '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '"' + marker + '/>'
+      );
+      const label = [...p.types].join(", ");
+      const lx = (x1 + x2) / 2;
+      const ly = (y1 + y2) / 2 - 4;
+      pieces.push(
+        '<text class="edge-label" x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" text-anchor="middle">' +
+        safe(truncate(label, 22)) + '</text>'
+      );
+      pieces.push(
+        '<g class="peer-group" data-open-asset="' + safe(p.id) + '" tabindex="0" role="button" aria-label="Open ' + safe(p.name) + '">' +
+        '<circle class="node peer" cx="' + px.toFixed(1) + '" cy="' + py.toFixed(1) + '" r="' + pR + '"/>' +
+        '<text class="node-label" x="' + px.toFixed(1) + '" y="' + (py + 4).toFixed(1) + '" text-anchor="middle">' +
+        safe(truncate(p.name, 10)) + '</text>' +
+        '<title>' + safe(p.name) + (p.type ? " (" + safe(p.type) + ")" : "") + '</title>' +
+        '</g>'
+      );
+    });
+
+    // Center node last so it overlays edges.
+    pieces.push(
+      '<g class="center-group">' +
+      '<circle class="node center" cx="' + cx + '" cy="' + cy + '" r="' + cR + '"/>' +
+      '<text class="node-label center-label" x="' + cx + '" y="' + (cy + 4) + '" text-anchor="middle">' +
+      safe(truncate(asset.name || "", 12)) + '</text>' +
+      '<title>' + safe(asset.name || "") + '</title>' +
+      '</g>'
+    );
+
+    pieces.push('</svg>');
+    return '<div class="relation-graph">' + pieces.join("") + '</div>';
   }
 
   function bindRelationEvents() {
     elements.assetDrawerBody.querySelectorAll("[data-open-asset]").forEach((link) => {
       link.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        openAssetDrawer(link.dataset.openAsset);
+      });
+      link.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" && ev.key !== " ") return;
         ev.preventDefault();
         openAssetDrawer(link.dataset.openAsset);
       });
@@ -1577,7 +2026,8 @@
       (conn && conn.has_passphrase ? "(unchanged)" : "(optional)") + '" ' + (canWrite ? '' : 'disabled') + ' /></div>';
 
     const isPg = edit.protocol === "postgres";
-    const authFields = (!isPg && edit.auth_type === "key") ? keyField : passwordField;
+    const isRdp = edit.protocol === "rdp";
+    const authFields = (!isPg && !isRdp && edit.auth_type === "key") ? keyField : passwordField;
 
     const proxies = state.sshProxies || [];
     const proxyOptions = ['<option value="">(direct, no proxy)</option>']
@@ -1592,13 +2042,14 @@
       '<select data-conn="protocol" ' + (canWrite ? '' : 'disabled') + '>' +
       '<option value="ssh"' + (edit.protocol === "ssh" ? " selected" : "") + '>ssh</option>' +
       '<option value="postgres"' + (edit.protocol === "postgres" ? " selected" : "") + '>postgres</option>' +
+      '<option value="rdp"' + (edit.protocol === "rdp" ? " selected" : "") + '>rdp</option>' +
       '</select></div>';
 
     const databaseField = isPg
       ? '<div class="field"><label>Database</label><input data-conn="database" value="' + safe(edit.database) + '" placeholder="postgres" ' + (canWrite ? '' : 'disabled') + ' /></div>'
       : '';
 
-    const authTypeField = isPg
+    const authTypeField = (isPg || isRdp)
       ? ''
       : '<div class="field"><label>Auth type</label>' +
         '<select data-conn="auth_type" ' + (canWrite ? '' : 'disabled') + '>' +
@@ -1629,8 +2080,11 @@
           (busy === "test" ? "Testing..." : "Test connection") + '</button>' +
           '<button type="button" class="btn ghost" id="conn-probe-btn" ' + (busy ? "disabled" : "") + '>' +
           (busy === "probe" ? "Probing..." : "Probe now") + '</button>' +
-          (edit.protocol !== "postgres"
+          (edit.protocol === "ssh" || edit.protocol === "" || !edit.protocol
             ? '<button type="button" class="btn ghost" id="conn-terminal-btn" ' + (busy ? "disabled" : "") + '>Open terminal</button>'
+            : '') +
+          (edit.protocol === "rdp"
+            ? '<button type="button" class="btn ghost" id="conn-rdp-btn" ' + (busy ? "disabled" : "") + '>Open RDP</button>'
             : '') +
           '<button type="button" class="btn primary" id="conn-save-btn" ' + (busy ? "disabled" : "") + '>Save</button>' +
           '</div>'
@@ -1658,6 +2112,155 @@
       ? '<pre class="code-block">' + safe(probe.disk_summary) + '</pre>'
       : '';
     return rows + disk;
+  }
+
+  function renderVPCProxySection() {
+    const asset = state.assetDrawer.asset;
+    if (!asset) return "";
+    const canWrite = hasPermission("cmdb.asset:write");
+    const busy = state.assetDrawer.busy === "promote" || state.assetDrawer.busy === "demote";
+
+    const summary = asset.is_vpc_proxy
+      ? '<div class="muted" style="margin-bottom:10px">This asset is the designated SSH bastion for VPC <code>' +
+        safe(asset.vpc_id || "-") + '</code>. Other EC2 assets in the same VPC route through it using their private IPs.</div>'
+      : '<div class="muted" style="margin-bottom:10px">Promote this asset to serve as the SSH bastion for VPC <code>' +
+        safe(asset.vpc_id || "-") + '</code>. Peer assets with <code>auto_managed</code> connections will be repointed automatically.</div>';
+
+    const blockers = [];
+    if (!asset.public_ip) blockers.push("missing public_ip");
+    if (!asset.vpc_id) blockers.push("missing vpc_id");
+    const blockerHint = (!asset.is_vpc_proxy && blockers.length > 0)
+      ? '<div class="muted" style="color:var(--danger, #f87171);margin-bottom:8px">Cannot promote: ' + safe(blockers.join(", ")) + '.</div>'
+      : '';
+
+    if (!canWrite) {
+      return summary + '<div class="muted">Permission required: cmdb.asset:write</div>';
+    }
+
+    const inferredUsername = asset.is_vpc_proxy
+      ? ""
+      : (defaultUsernameForOSFamily(asset.os_family) || "");
+    const edit = state.assetDrawer.vpcProxyEdit || { username: inferredUsername, auth_type: asset.key_name ? "key" : "password" };
+    state.assetDrawer.vpcProxyEdit = edit;
+
+    const form = asset.is_vpc_proxy
+      ? ('<button type="button" class="btn ghost" id="vpc-proxy-demote-btn"' + (busy ? " disabled" : "") + '>' +
+         (state.assetDrawer.busy === "demote" ? "Demoting..." : "Demote (stop acting as VPC proxy)") + '</button>')
+      : ('<div class="form-grid">' +
+         '<div class="field"><label>SSH username</label>' +
+         '<input data-vpc-proxy="username" value="' + safe(edit.username) + '" placeholder="' +
+         safe(inferredUsername || "ec2-user / ubuntu / ...") + '" /></div>' +
+         '<div class="field"><label>Auth type</label>' +
+         '<select data-vpc-proxy="auth_type">' +
+         '<option value="key"' + (edit.auth_type === "key" ? " selected" : "") + '>key</option>' +
+         '<option value="password"' + (edit.auth_type === "password" ? " selected" : "") + '>password</option>' +
+         '</select></div>' +
+         '</div>' +
+         blockerHint +
+         '<div class="drawer-footer">' +
+         '<button type="button" class="btn primary" id="vpc-proxy-promote-btn"' +
+         ((busy || blockers.length > 0) ? " disabled" : "") + '>' +
+         (state.assetDrawer.busy === "promote" ? "Promoting..." : "Promote as VPC proxy") + '</button>' +
+         '</div>');
+
+    return summary + form;
+  }
+
+  function defaultUsernameForOSFamily(family) {
+    switch ((family || "").toLowerCase()) {
+      case "amzn":
+      case "rhel":
+      case "suse":
+        return "ec2-user";
+      case "ubuntu":
+        return "ubuntu";
+      case "debian":
+        return "admin";
+      case "centos":
+        return "centos";
+      case "windows":
+        return "Administrator";
+      default:
+        return "";
+    }
+  }
+
+  function bindVPCProxyEvents() {
+    const root = elements.assetDrawerBody;
+    if (!root) return;
+    root.querySelectorAll('[data-vpc-proxy]').forEach((el) => {
+      el.addEventListener("input", (ev) => {
+        const field = ev.target.dataset.vpcProxy;
+        state.assetDrawer.vpcProxyEdit[field] = ev.target.value;
+      });
+      el.addEventListener("change", (ev) => {
+        const field = ev.target.dataset.vpcProxy;
+        state.assetDrawer.vpcProxyEdit[field] = ev.target.value;
+      });
+    });
+    const promoteBtn = $("vpc-proxy-promote-btn");
+    if (promoteBtn) promoteBtn.addEventListener("click", promoteVPCProxy);
+    const demoteBtn = $("vpc-proxy-demote-btn");
+    if (demoteBtn) demoteBtn.addEventListener("click", demoteVPCProxy);
+  }
+
+  async function promoteVPCProxy() {
+    const asset = state.assetDrawer.asset;
+    if (!asset) return;
+    const edit = state.assetDrawer.vpcProxyEdit || {};
+    state.assetDrawer.busy = "promote";
+    renderAssetDrawer();
+    try {
+      const resp = await api("/api/v1/cmdb/assets/" + encodeURIComponent(asset.id) + "/promote-vpc-proxy", {
+        method: "POST",
+        body: JSON.stringify({ username: (edit.username || "").trim(), auth_type: edit.auth_type || "" }),
+      });
+      state.assetDrawer.asset = resp.asset || asset;
+      state.assetDrawer.vpcProxyEdit = null;
+      toast("Promoted to VPC proxy", "success");
+      logActivity("Promoted " + (asset.name || asset.id) + " as VPC proxy", "success");
+      await Promise.all([
+        loadAssetConnection(asset.id),
+        loadSSHProxies(),
+        refreshAssets(),
+      ]);
+    } catch (error) {
+      toast("Promote failed: " + error.message, "error");
+    } finally {
+      state.assetDrawer.busy = "";
+      renderAssetDrawer();
+    }
+  }
+
+  async function demoteVPCProxy() {
+    const asset = state.assetDrawer.asset;
+    if (!asset) return;
+    if (!confirm("Demote " + (asset.name || asset.id) + " as VPC proxy?\nPeer assets with auto-managed connections will have proxy_id cleared.")) {
+      return;
+    }
+    state.assetDrawer.busy = "demote";
+    renderAssetDrawer();
+    try {
+      await api("/api/v1/cmdb/assets/" + encodeURIComponent(asset.id) + "/demote-vpc-proxy", {
+        method: "POST",
+        body: "{}",
+      });
+      const refreshed = await api("/api/v1/cmdb/assets/" + encodeURIComponent(asset.id));
+      state.assetDrawer.asset = refreshed;
+      state.assetDrawer.vpcProxyEdit = null;
+      toast("Demoted", "success");
+      logActivity("Demoted " + (asset.name || asset.id) + " as VPC proxy", "info");
+      await Promise.all([
+        loadAssetConnection(asset.id),
+        loadSSHProxies(),
+        refreshAssets(),
+      ]);
+    } catch (error) {
+      toast("Demote failed: " + error.message, "error");
+    } finally {
+      state.assetDrawer.busy = "";
+      renderAssetDrawer();
+    }
   }
 
   function formatUptime(seconds) {
@@ -1718,6 +2321,8 @@
     if (probeBtn) probeBtn.addEventListener("click", runProbeNow);
     const terminalBtn = $("conn-terminal-btn");
     if (terminalBtn) terminalBtn.addEventListener("click", openTerminalForCurrentAsset);
+    const rdpBtn = $("conn-rdp-btn");
+    if (rdpBtn) rdpBtn.addEventListener("click", openRDPForCurrentAsset);
   }
 
   async function saveConnection() {
@@ -1725,13 +2330,13 @@
     const edit = state.assetDrawer.connEdit;
     if (!asset || !edit) return;
     const protocol = edit.protocol || "ssh";
-    const defaultPort = protocol === "postgres" ? 5432 : 22;
+    const defaultPort = protocol === "postgres" ? 5432 : (protocol === "rdp" ? 3389 : 22);
     const body = {
       protocol,
       host: (edit.host || "").trim(),
       port: Number(edit.port) || defaultPort,
       username: (edit.username || "").trim(),
-      auth_type: protocol === "postgres" ? "password" : (edit.auth_type || "password"),
+      auth_type: (protocol === "postgres" || protocol === "rdp") ? "password" : (edit.auth_type || "password"),
       bastion_enabled: !!edit.bastion_enabled,
       proxy_id: edit.proxy_id || "",
     };
@@ -1801,7 +2406,418 @@
     }
   }
 
-  const terminalState = { ws: null, term: null, fit: null, assetID: null, resizeObserver: null };
+  // ===== Sessions page: live-session manager =====
+  const liveSessions = [];
+  let nextLiveId = 1;
+  let activeSessionID = null;
+
+  function liveTabsEl() { return $("sessions-live-tabs"); }
+  function liveToolbarEl() { return $("sessions-live-toolbar"); }
+  function liveBodyEl() { return $("sessions-live-body"); }
+  function liveEmptyEl() { return $("sessions-live-empty"); }
+
+  function createLiveSession(opts) {
+    const id = "ls" + (nextLiveId++);
+    const asset = opts.asset || {};
+    const sess = {
+      id,
+      kind: opts.kind,
+      asset: { id: asset.id, name: asset.name, type: asset.type, env: asset.env },
+      status: "idle",
+      mount: null,
+      ws: null, term: null, fit: null, onResize: null,
+      client: null, tunnel: null, keyboard: null, mouse: null,
+    };
+    const body = liveBodyEl();
+    if (!body) return sess;
+    const mount = document.createElement("div");
+    mount.className = "session-mount kind-" + sess.kind;
+    mount.dataset.sessionId = id;
+    mount.tabIndex = 0;
+    body.appendChild(mount);
+    sess.mount = mount;
+    liveSessions.push(sess);
+    setView("sessions");
+    setSessionsPane("live");
+    setActiveSession(id);
+    renderLiveEmptyState();
+    return sess;
+  }
+
+  function setActiveSession(id) {
+    activeSessionID = id;
+    liveSessions.forEach((s) => {
+      if (s.mount) s.mount.hidden = s.id !== id;
+    });
+    renderLiveTabs();
+    renderLiveToolbar();
+    const sess = liveSessions.find((s) => s.id === id);
+    if (sess && sess.kind === "ssh" && sess.fit) {
+      setTimeout(() => {
+        try { sess.fit.fit(); } catch (_) {}
+        if (sess.ws && sess.ws.readyState === WebSocket.OPEN && sess.term) {
+          sess.ws.send(JSON.stringify({ type: "resize", cols: sess.term.cols, rows: sess.term.rows }));
+        }
+      }, 0);
+    }
+  }
+
+  function renderLiveTabs() {
+    const el = liveTabsEl();
+    if (!el) return;
+    if (liveSessions.length === 0) { el.innerHTML = ""; return; }
+    el.innerHTML = liveSessions
+      .map((s) => {
+        const label = s.asset.name || s.asset.id || "session";
+        const active = s.id === activeSessionID ? " active" : "";
+        return '<div class="live-tab' + active + '" data-ls-id="' + safe(s.id) + '" title="' + safe(label) + '">' +
+          '<span class="kind-tag">' + (s.kind === "rdp" ? "RDP" : "SSH") + '</span>' +
+          '<span class="label">' + safe(label) + '</span>' +
+          '<button type="button" class="close" data-ls-close="' + safe(s.id) + '" aria-label="Close">✕</button>' +
+        '</div>';
+      }).join("");
+  }
+
+  function renderLiveToolbar() {
+    const el = liveToolbarEl();
+    if (!el) return;
+    const sess = liveSessions.find((s) => s.id === activeSessionID);
+    if (!sess) { el.hidden = true; el.innerHTML = ""; return; }
+    el.hidden = false;
+    const kindLabel = sess.kind === "rdp" ? "RDP" : "SSH";
+    const eyebrow = kindLabel + " · " + safe(sess.asset.type || "asset") +
+      (sess.asset.env ? " · " + safe(sess.asset.env) : "");
+    const tone = toneForStatus(sess.status);
+    el.innerHTML =
+      '<span class="eyebrow">' + eyebrow + '</span>' +
+      '<span class="active-title">' + safe(sess.asset.name || sess.asset.id || "") + '</span>' +
+      '<span class="status-pill pill ' + tone + '">' + safe(sess.status) + '</span>' +
+      '<button type="button" class="btn ghost" data-ls-action="reconnect">⟳ Reconnect</button>' +
+      '<button type="button" class="btn ghost" data-ls-action="duplicate">⧉ Duplicate</button>' +
+      '<button type="button" class="btn ghost" data-ls-action="close">✕ Close</button>';
+  }
+
+  function renderLiveEmptyState() {
+    const empty = liveEmptyEl();
+    const body = liveBodyEl();
+    const tabs = liveTabsEl();
+    const toolbar = liveToolbarEl();
+    const hasSessions = liveSessions.length > 0;
+    if (empty) empty.hidden = hasSessions;
+    if (body) body.hidden = !hasSessions;
+    if (tabs) tabs.hidden = !hasSessions;
+    if (toolbar && !hasSessions) { toolbar.hidden = true; toolbar.innerHTML = ""; }
+  }
+
+  function toneForStatus(status) {
+    if (status === "connected") return "success";
+    if (status === "error") return "danger";
+    return "neutral";
+  }
+
+  function setSessionStatus(sess, status) {
+    sess.status = status;
+    if (sess.id === activeSessionID) renderLiveToolbar();
+  }
+
+  function closeLiveSession(sess) {
+    teardownSessionConnection(sess);
+    if (sess.mount && sess.mount.parentNode) sess.mount.parentNode.removeChild(sess.mount);
+    const idx = liveSessions.indexOf(sess);
+    if (idx >= 0) liveSessions.splice(idx, 1);
+    if (activeSessionID === sess.id) {
+      const next = liveSessions[Math.min(idx, liveSessions.length - 1)];
+      activeSessionID = next ? next.id : null;
+    }
+    if (activeSessionID) setActiveSession(activeSessionID);
+    else { renderLiveTabs(); renderLiveToolbar(); }
+    renderLiveEmptyState();
+  }
+
+  function teardownSessionConnection(sess) {
+    if (sess.kind === "ssh") {
+      if (sess.ws) { try { sess.ws.close(); } catch (_) {} sess.ws = null; }
+      if (sess.term) { try { sess.term.dispose(); } catch (_) {} sess.term = null; }
+      if (sess.onResize) { window.removeEventListener("resize", sess.onResize); sess.onResize = null; }
+      sess.fit = null;
+    } else if (sess.kind === "rdp") {
+      if (sess.client) { try { sess.client.disconnect(); } catch (_) {} sess.client = null; }
+      if (sess.keyboard) {
+        try { sess.keyboard.onkeydown = sess.keyboard.onkeyup = null; } catch (_) {}
+        sess.keyboard = null;
+      }
+      if (sess.mouse) {
+        try { sess.mouse.onmousedown = sess.mouse.onmouseup = sess.mouse.onmousemove = null; } catch (_) {}
+        sess.mouse = null;
+      }
+      sess.tunnel = null;
+    }
+    if (sess.mount) sess.mount.innerHTML = "";
+  }
+
+  async function reconnectLiveSession(sess) {
+    setSessionStatus(sess, "reconnecting");
+    teardownSessionConnection(sess);
+    try {
+      const asset = await api("/api/v1/cmdb/assets/" + encodeURIComponent(sess.asset.id));
+      sess.asset = { id: asset.id, name: asset.name, type: asset.type, env: asset.env };
+      renderLiveTabs();
+      if (sess.id === activeSessionID) renderLiveToolbar();
+      if (sess.kind === "ssh") {
+        const resp = await api("/api/v1/cmdb/assets/" + encodeURIComponent(asset.id) + "/terminal/ticket", { method: "POST", body: "{}" });
+        if (!resp || !resp.ticket) throw new Error("no ticket returned");
+        attachSSHToSession(sess, resp.ticket);
+      } else {
+        const resp = await api("/api/v1/cmdb/assets/" + encodeURIComponent(asset.id) + "/rdp/ticket", { method: "POST", body: "{}" });
+        if (!resp || !resp.ticket) throw new Error("no ticket returned");
+        attachRDPToSession(sess, resp.ticket);
+      }
+    } catch (err) {
+      setSessionStatus(sess, "error");
+      if (!handleConnectError(err, sess.asset, sess.kind)) {
+        toast("Reconnect failed: " + err.message, "error");
+      }
+    }
+  }
+
+  async function duplicateLiveSession(sess) {
+    try {
+      if (sess.kind === "ssh") {
+        await connectAssetFromList(sess.asset.id);
+      } else {
+        const asset = await api("/api/v1/cmdb/assets/" + encodeURIComponent(sess.asset.id));
+        const resp = await api("/api/v1/cmdb/assets/" + encodeURIComponent(asset.id) + "/rdp/ticket", { method: "POST", body: "{}" });
+        if (!resp || !resp.ticket) throw new Error("no ticket returned");
+        const newSess = createLiveSession({ kind: "rdp", asset });
+        attachRDPToSession(newSess, resp.ticket);
+      }
+    } catch (err) {
+      toast("Duplicate failed: " + err.message, "error");
+    }
+  }
+
+  function findLiveSession(id) {
+    return liveSessions.find((s) => s.id === id) || null;
+  }
+
+  function setSessionsPane(pane) {
+    const live = $("sessions-pane-live");
+    const audit = $("sessions-pane-audit");
+    if (live) live.hidden = pane !== "live";
+    if (audit) audit.hidden = pane !== "audit";
+    document.querySelectorAll("#sessions-tab-switcher .sessions-tab").forEach((btn) => {
+      const isActive = btn.dataset.sessionsPane === pane;
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+    if (pane === "live" && activeSessionID) {
+      const sess = liveSessions.find((s) => s.id === activeSessionID);
+      if (sess && sess.kind === "ssh" && sess.fit) {
+        setTimeout(() => { try { sess.fit.fit(); } catch (_) {} }, 0);
+      }
+    }
+  }
+
+  function bindLiveSessionsEvents() {
+    const switcher = $("sessions-tab-switcher");
+    if (switcher) {
+      switcher.addEventListener("click", (e) => {
+        const btn = e.target.closest(".sessions-tab[data-sessions-pane]");
+        if (!btn) return;
+        // Route through the top-level navigation so the URL and the
+        // section sub-nav both stay in sync with the chosen pane.
+        setView("sessions", btn.dataset.sessionsPane);
+      });
+    }
+    const tabs = liveTabsEl();
+    if (tabs) {
+      tabs.addEventListener("click", (e) => {
+        const closeBtn = e.target.closest("[data-ls-close]");
+        if (closeBtn) {
+          e.stopPropagation();
+          const s = findLiveSession(closeBtn.dataset.lsClose);
+          if (s) closeLiveSession(s);
+          return;
+        }
+        const tab = e.target.closest(".live-tab[data-ls-id]");
+        if (!tab) return;
+        setActiveSession(tab.dataset.lsId);
+      });
+    }
+    const toolbar = liveToolbarEl();
+    if (toolbar) {
+      toolbar.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-ls-action]");
+        if (!btn) return;
+        const sess = liveSessions.find((s) => s.id === activeSessionID);
+        if (!sess) return;
+        const action = btn.dataset.lsAction;
+        if (action === "close") closeLiveSession(sess);
+        else if (action === "reconnect") reconnectLiveSession(sess);
+        else if (action === "duplicate") duplicateLiveSession(sess);
+      });
+    }
+    const empty = liveEmptyEl();
+    if (empty) {
+      empty.addEventListener("click", (e) => {
+        const link = e.target.closest("[data-nav]");
+        if (!link) return;
+        e.preventDefault();
+        setView(link.dataset.nav);
+      });
+    }
+  }
+
+  // ===== Per-session connection attach =====
+
+  function attachSSHToSession(sess, ticket) {
+    if (!window.Terminal) {
+      setSessionStatus(sess, "error");
+      toast("Terminal component not loaded", "error");
+      return;
+    }
+    const asset = sess.asset;
+    setSessionStatus(sess, "connecting");
+    sess.mount.innerHTML = "";
+
+    const term = new window.Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: '"JetBrains Mono", Menlo, monospace',
+      theme: { background: "#000000" },
+    });
+    const FitCtor = window.FitAddon && window.FitAddon.FitAddon;
+    const fit = FitCtor ? new FitCtor() : null;
+    if (fit) term.loadAddon(fit);
+    term.open(sess.mount);
+    if (fit) { try { fit.fit(); } catch (_) {} }
+    sess.term = term;
+    sess.fit = fit;
+
+    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+    const url = wsProto + "//" + location.host + "/ws/v1/cmdb/assets/" +
+      encodeURIComponent(asset.id) + "/terminal?ticket=" + encodeURIComponent(ticket);
+    const ws = new WebSocket(url);
+    sess.ws = ws;
+
+    ws.onopen = () => {
+      setSessionStatus(sess, "connected");
+      if (fit) {
+        try { fit.fit(); } catch (_) {}
+        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      }
+      logActivity("Terminal opened for " + (asset.name || asset.id), "info");
+    };
+    ws.onmessage = (event) => {
+      let frame;
+      try { frame = JSON.parse(event.data); } catch (e) { return; }
+      if (frame.type === "data") {
+        term.write(frame.payload || "");
+      } else if (frame.type === "error") {
+        term.write("\r\n\x1b[31m[error] " + (frame.message || "") + "\x1b[0m\r\n");
+        setSessionStatus(sess, "error");
+        maybeShowHostKeyBanner(sess, frame.message || "");
+      } else if (frame.type === "exit") {
+        term.write("\r\n\x1b[33m[session exited code=" + (frame.code || 0) + "]\x1b[0m\r\n");
+        setSessionStatus(sess, "closed");
+      }
+    };
+    ws.onclose = () => {
+      if (sess.status !== "error" && sess.status !== "closed") {
+        setSessionStatus(sess, "disconnected");
+      }
+    };
+    ws.onerror = () => setSessionStatus(sess, "error");
+
+    term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "data", payload: data }));
+      }
+    });
+
+    const onResize = () => {
+      if (fit) { try { fit.fit(); } catch (_) {} }
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      }
+    };
+    window.addEventListener("resize", onResize);
+    sess.onResize = onResize;
+  }
+
+  function attachRDPToSession(sess, ticket) {
+    if (!window.Guacamole) {
+      setSessionStatus(sess, "error");
+      toast("Guacamole client not loaded", "error");
+      return;
+    }
+    const asset = sess.asset;
+    setSessionStatus(sess, "connecting");
+    sess.mount.innerHTML = "";
+    const scroll = document.createElement("div");
+    scroll.className = "guac-scroll";
+    sess.mount.appendChild(scroll);
+
+    const rect = sess.mount.getBoundingClientRect();
+    const width = Math.max(800, Math.floor(rect.width || 1024));
+    const height = Math.max(600, Math.floor(rect.height || 720));
+    const dpi = Math.round((window.devicePixelRatio || 1) * 96);
+    const tz = (Intl.DateTimeFormat && Intl.DateTimeFormat().resolvedOptions().timeZone) || "UTC";
+
+    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+    const base = wsProto + "//" + location.host + "/ws/v1/cmdb/assets/" +
+      encodeURIComponent(asset.id) + "/rdp";
+    const tunnel = new window.Guacamole.WebSocketTunnel(base);
+    const client = new window.Guacamole.Client(tunnel);
+    scroll.appendChild(client.getDisplay().getElement());
+
+    client.onstatechange = (s) => {
+      if (s === 3) {
+        setSessionStatus(sess, "connected");
+        logActivity("RDP opened for " + (asset.name || asset.id), "info");
+      } else if (s === 5) {
+        if (sess.status !== "error") setSessionStatus(sess, "disconnected");
+      }
+    };
+    client.onerror = (err) => {
+      setSessionStatus(sess, "error");
+      toast("RDP error: " + ((err && err.message) || "connection error"), "error");
+    };
+
+    const params = new URLSearchParams({
+      ticket, width: String(width), height: String(height), dpi: String(dpi), timezone: tz,
+    });
+    client.connect(params.toString());
+
+    const display = client.getDisplay();
+    const mouse = new window.Guacamole.Mouse(scroll);
+    mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (mouseState) => {
+      const scale = display.getScale() || 1;
+      client.sendMouseState({
+        x: mouseState.x / scale,
+        y: mouseState.y / scale,
+        left: mouseState.left,
+        middle: mouseState.middle,
+        right: mouseState.right,
+        up: mouseState.up,
+        down: mouseState.down,
+      });
+    };
+    // Keyboard is scoped to the mount so only the visible session receives keystrokes.
+    const keyboard = new window.Guacamole.Keyboard(sess.mount);
+    keyboard.onkeydown = (keysym) => client.sendKeyEvent(1, keysym);
+    keyboard.onkeyup = (keysym) => client.sendKeyEvent(0, keysym);
+    sess.mount.addEventListener("mousedown", () => {
+      try { sess.mount.focus(); } catch (_) {}
+    });
+
+    sess.client = client;
+    sess.tunnel = tunnel;
+    sess.keyboard = keyboard;
+    sess.mouse = mouse;
+  }
+
+  // ===== Entry points =====
 
   async function connectAssetFromList(assetID) {
     try {
@@ -1831,9 +2847,12 @@
         { method: "POST", body: "{}" }
       );
       if (!resp || !resp.ticket) throw new Error("no ticket returned");
-      openTerminalModal(asset, resp.ticket);
+      const sess = createLiveSession({ kind: "ssh", asset });
+      attachSSHToSession(sess, resp.ticket);
     } catch (error) {
-      toast("Connect failed: " + error.message, "error");
+      if (!handleConnectError(error, { id: assetID }, "ssh")) {
+        toast("Connect failed: " + error.message, "error");
+      }
     }
   }
 
@@ -1846,109 +2865,40 @@
         { method: "POST", body: "{}" }
       );
       if (!resp || !resp.ticket) throw new Error("no ticket returned");
-      openTerminalModal(asset, resp.ticket);
+      const sess = createLiveSession({ kind: "ssh", asset });
+      attachSSHToSession(sess, resp.ticket);
     } catch (error) {
-      toast("Terminal open failed: " + error.message, "error");
+      if (!handleConnectError(error, asset, "ssh")) {
+        toast("Terminal open failed: " + error.message, "error");
+      }
     }
   }
 
-  function openTerminalModal(asset, ticket) {
-    const modal = $("terminal-modal");
-    const mount = $("terminal-mount");
-    const statusEl = $("terminal-status");
-    if (!modal || !mount || !statusEl || !window.Terminal) {
-      toast("Terminal component not loaded", "error");
+  async function openRDPForCurrentAsset() {
+    const asset = state.assetDrawer.asset;
+    if (!asset) return;
+    if (!window.Guacamole) {
+      toast("Guacamole client not loaded", "error");
       return;
     }
-    closeTerminalModal();
-    $("terminal-eyebrow").textContent = (asset.type || "asset") + " · " + (asset.env || "");
-    $("terminal-title").textContent = asset.name || asset.id;
-
-    const term = new window.Terminal({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: '"JetBrains Mono", Menlo, monospace',
-      theme: { background: "#000000" },
-    });
-    const FitCtor = window.FitAddon && window.FitAddon.FitAddon;
-    const fit = FitCtor ? new FitCtor() : null;
-    if (fit) term.loadAddon(fit);
-    term.open(mount);
-    if (fit) fit.fit();
-
-    modal.setAttribute("aria-hidden", "false");
-    statusEl.textContent = "connecting";
-    statusEl.className = "pill neutral";
-
-    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = wsProto + "//" + location.host + "/ws/v1/cmdb/assets/" +
-      encodeURIComponent(asset.id) + "/terminal?ticket=" + encodeURIComponent(ticket);
-    const ws = new WebSocket(url);
-    terminalState.ws = ws;
-    terminalState.term = term;
-    terminalState.fit = fit;
-    terminalState.assetID = asset.id;
-
-    ws.onopen = () => {
-      statusEl.textContent = "connected";
-      statusEl.className = "pill success";
-      if (fit) {
-        fit.fit();
-        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+    try {
+      const resp = await api(
+        "/api/v1/cmdb/assets/" + encodeURIComponent(asset.id) + "/rdp/ticket",
+        { method: "POST", body: "{}" }
+      );
+      if (!resp || !resp.ticket) throw new Error("no ticket returned");
+      const sess = createLiveSession({ kind: "rdp", asset });
+      attachRDPToSession(sess, resp.ticket);
+    } catch (error) {
+      if (!handleConnectError(error, asset, "rdp")) {
+        toast("RDP open failed: " + error.message, "error");
       }
-      logActivity("Terminal opened for " + (asset.name || asset.id), "info");
-    };
-    ws.onmessage = (event) => {
-      let frame;
-      try { frame = JSON.parse(event.data); } catch (e) { return; }
-      if (frame.type === "data") {
-        term.write(frame.payload || "");
-      } else if (frame.type === "error") {
-        term.write("\r\n\x1b[31m[error] " + (frame.message || "") + "\x1b[0m\r\n");
-        statusEl.textContent = "error";
-        statusEl.className = "pill danger";
-        maybeShowHostKeyBanner(asset, frame.message || "");
-      } else if (frame.type === "exit") {
-        term.write("\r\n\x1b[33m[session exited code=" + (frame.code || 0) + "]\x1b[0m\r\n");
-        statusEl.textContent = "closed";
-        statusEl.className = "pill neutral";
-      }
-    };
-    ws.onclose = () => {
-      statusEl.textContent = "disconnected";
-      statusEl.className = "pill neutral";
-    };
-    ws.onerror = () => {
-      statusEl.textContent = "error";
-      statusEl.className = "pill danger";
-    };
-
-    term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "data", payload: data }));
-      }
-    });
-
-    const onResize = () => {
-      if (fit) {
-        try { fit.fit(); } catch (e) { /* ignore */ }
-      }
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-      }
-    };
-    window.addEventListener("resize", onResize);
-    terminalState.onResize = onResize;
-
-    // close handlers
-    modal.querySelectorAll("[data-terminal-close]").forEach((el) => {
-      el.addEventListener("click", closeTerminalModal, { once: true });
-    });
+    }
   }
 
-  function maybeShowHostKeyBanner(asset, message) {
+  function maybeShowHostKeyBanner(sess, message) {
     if (!/host key mismatch/i.test(message)) return;
-    const mount = $("terminal-mount");
+    const mount = sess.mount;
     if (!mount || mount.querySelector(".terminal-hostkey-banner")) return;
     const banner = document.createElement("div");
     banner.className = "terminal-hostkey-banner";
@@ -1969,10 +2919,9 @@
           btn.disabled = true;
           btn.textContent = "Approving…";
           try {
-            await api("/api/v1/cmdb/hostkeys/asset/" + encodeURIComponent(asset.id) + "/override", { method: "POST", body: "{}" });
+            await api("/api/v1/cmdb/hostkeys/asset/" + encodeURIComponent(sess.asset.id) + "/override", { method: "POST", body: "{}" });
             toast("Override approved, reconnecting", "success");
-            closeTerminalModal();
-            setTimeout(() => openTerminalForCurrentAsset(), 250);
+            reconnectLiveSession(sess);
           } catch (err) {
             toast("Override failed: " + err.message, "error");
             btn.disabled = false;
@@ -1981,26 +2930,6 @@
         }
       });
     });
-  }
-
-  function closeTerminalModal() {
-    const modal = $("terminal-modal");
-    if (!modal) return;
-    if (terminalState.ws) {
-      try { terminalState.ws.close(); } catch (e) { /* ignore */ }
-      terminalState.ws = null;
-    }
-    if (terminalState.term) {
-      try { terminalState.term.dispose(); } catch (e) { /* ignore */ }
-      terminalState.term = null;
-    }
-    if (terminalState.onResize) {
-      window.removeEventListener("resize", terminalState.onResize);
-      terminalState.onResize = null;
-    }
-    const mount = $("terminal-mount");
-    if (mount) mount.innerHTML = "";
-    modal.setAttribute("aria-hidden", "true");
   }
 
   function renderLabelsEditor() {
@@ -2136,18 +3065,46 @@
     }
   }
 
+  // summarizeAwsSyncByAccount walks awsSyncRuns once and returns a map of
+  // account_id → { lastRun, lastSuccess, lastFailure }. Used by the accounts
+  // table to surface "Last sync" inline so operators don't have to scroll the
+  // sync history to find which account is broken.
+  function summarizeAwsSyncByAccount() {
+    const out = {};
+    (state.awsSyncRuns || []).forEach((run) => {
+      const id = run.account_id || "";
+      if (!id) return;
+      if (!out[id]) out[id] = { lastRun: null, lastSuccess: null, lastFailure: null };
+      const slot = out[id];
+      const t = new Date(run.started_at).getTime();
+      const lastT = slot.lastRun ? new Date(slot.lastRun.started_at).getTime() : 0;
+      if (t >= lastT) slot.lastRun = run;
+      if (run.status === "success") {
+        const okT = slot.lastSuccess ? new Date(slot.lastSuccess.started_at).getTime() : 0;
+        if (t >= okT) slot.lastSuccess = run;
+      }
+      if (run.status === "failed") {
+        const failT = slot.lastFailure ? new Date(slot.lastFailure.started_at).getTime() : 0;
+        if (t >= failT) slot.lastFailure = run;
+      }
+    });
+    return out;
+  }
+
   function renderAwsAccounts() {
     if (!hasPermission("aws.account:read")) {
       elements.cloudAccountsBody.innerHTML =
-        '<tr class="empty-row"><td colspan="5">Permission required: aws.account:read</td></tr>';
+        '<tr class="empty-row"><td colspan="6">Permission required: aws.account:read</td></tr>';
       return;
     }
 
     if (state.awsAccounts.length === 0) {
       elements.cloudAccountsBody.innerHTML =
-        '<tr class="empty-row"><td colspan="5">No AWS accounts connected yet.</td></tr>';
+        '<tr class="empty-row"><td colspan="6">No AWS accounts connected yet.</td></tr>';
       return;
     }
+
+    const summary = summarizeAwsSyncByAccount();
 
     elements.cloudAccountsBody.innerHTML = state.awsAccounts
       .map((item) => {
@@ -2162,6 +3119,33 @@
         const enabled = item.enabled
           ? '<span class="pill success"><span class="dot"></span>enabled</span>'
           : '<span class="pill neutral"><span class="dot"></span>disabled</span>';
+
+        // Last-sync column: prefer the most recent attempt; show a danger pill
+        // and a "see history" link if the latest run failed, so a broken
+        // account is visible without leaving the page.
+        const sum = summary[item.account_id];
+        let lastSyncCell;
+        if (!sum || !sum.lastRun) {
+          lastSyncCell = '<span class="muted">never</span>';
+        } else {
+          const last = sum.lastRun;
+          const rel = formatRelative(last.started_at);
+          const failed = last.status === "failed";
+          const pill = failed
+            ? '<span class="pill danger"><span class="dot"></span>failed</span>'
+            : last.status === "running"
+            ? '<span class="pill warn"><span class="dot"></span>running</span>'
+            : '<span class="pill success"><span class="dot"></span>ok</span>';
+          const errLine = failed && last.error_message
+            ? '<div class="sub muted" title="' + safe(last.error_message) + '">' +
+              safe(last.error_message.length > 80 ? last.error_message.slice(0, 80) + "…" : last.error_message) +
+              ' · <a href="#" class="sync-history-link" data-sync-account="' + safe(item.account_id) + '">see history</a></div>'
+            : sum.lastSuccess && failed
+            ? '<div class="sub muted">last ok ' + safe(formatRelative(sum.lastSuccess.started_at)) + '</div>'
+            : '';
+          lastSyncCell = pill + ' <span class="muted">' + safe(rel) + '</span>' + errLine;
+        }
+
         return (
           "<tr>" +
           '<td><div class="primary">' + safe(item.display_name) + '</div>' +
@@ -2169,11 +3153,24 @@
           "<td>" + safe(item.auth_mode) + "</td>" +
           "<td>" + roleKey + "</td>" +
           '<td><div class="chips">' + regions + "</div></td>" +
+          "<td>" + lastSyncCell + "</td>" +
           "<td>" + enabled + "</td>" +
           "</tr>"
         );
       })
       .join("");
+
+    // "see history" links jump to the sync history table with the status
+    // filter pre-set to failed so the user lands on the broken row.
+    elements.cloudAccountsBody.querySelectorAll(".sync-history-link").forEach((link) => {
+      link.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        const sel = $("sync-runs-status-filter");
+        if (sel) { sel.value = "failed"; sel.dispatchEvent(new Event("change")); }
+        const target = $("sync-runs-body");
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
   }
 
   function renderAwsSyncStatus() {
@@ -2215,32 +3212,60 @@
       .join("");
   }
 
+  // syncRunsFilter: status one of "" | "success" | "failed" | "running".
+  const syncRunsFilter = { status: "" };
+
   function renderAwsSyncRuns() {
     if (!hasPermission("aws.account:read")) {
       elements.syncRunsBody.innerHTML =
         '<tr class="empty-row"><td colspan="6">Permission required: aws.account:read</td></tr>';
       return;
     }
-    if (state.awsSyncRuns.length === 0) {
+    const filtered = (state.awsSyncRuns || []).filter((run) =>
+      !syncRunsFilter.status || run.status === syncRunsFilter.status
+    );
+    if (filtered.length === 0) {
+      const msg = syncRunsFilter.status
+        ? "No " + syncRunsFilter.status + " runs."
+        : "No sync runs yet.";
       elements.syncRunsBody.innerHTML =
-        '<tr class="empty-row"><td colspan="6">No sync runs yet.</td></tr>';
+        '<tr class="empty-row"><td colspan="6">' + safe(msg) + '</td></tr>';
       return;
     }
-    elements.syncRunsBody.innerHTML = state.awsSyncRuns
+    elements.syncRunsBody.innerHTML = filtered
       .map((run) => {
+        // Inline error: when a run failed, show the message as a sub-line
+        // under the resource type so the operator doesn't have to hover or
+        // open a separate panel to see what went wrong.
+        const resourceCell = run.status === "failed" && run.error_message
+          ? safe(run.resource_type || "—") +
+            '<div class="sub error" title="' + safe(run.error_message) + '">' +
+            safe(run.error_message.length > 120 ? run.error_message.slice(0, 120) + "…" : run.error_message) +
+            '</div>'
+          : safe(run.resource_type || "—");
         return (
           "<tr>" +
           "<td>" + safe(formatDateTime(run.started_at)) + "</td>" +
           '<td><div class="primary">' + safe(run.account_display_name || "—") + '</div>' +
           '<div class="muted">' + safe(run.account_id || "") + "</div></td>" +
           "<td><code>" + safe(run.region || "—") + "</code></td>" +
-          "<td>" + safe(run.resource_type || "—") + "</td>" +
+          "<td>" + resourceCell + "</td>" +
           "<td>" + statusPill(run.status) + "</td>" +
           '<td style="text-align: right;">' + String(run.resources_processed || 0) + "</td>" +
           "</tr>"
         );
       })
       .join("");
+  }
+
+  function bindSyncRunsFilter() {
+    const sel = $("sync-runs-status-filter");
+    if (!sel || sel.dataset.bound) return;
+    sel.dataset.bound = "1";
+    sel.addEventListener("change", () => {
+      syncRunsFilter.status = sel.value || "";
+      renderAwsSyncRuns();
+    });
   }
 
   function renderIAMUserTable() {
@@ -2409,21 +3434,9 @@
   function applyPermissionUI() {
     const canWriteAsset = hasPermission("cmdb.asset:write");
     elements.toggleAssetFormBtn.disabled = !canWriteAsset;
-    if (elements.assetForm) {
-      elements.assetForm.querySelectorAll("input,button,select,textarea").forEach((el) => {
-        if (el.id === "cancel-asset-form") return;
-        el.disabled = !canWriteAsset;
-      });
-    }
 
     const canWriteAws = hasPermission("aws.account:write");
     elements.toggleAwsFormBtn.disabled = !canWriteAws;
-    if (elements.awsForm) {
-      elements.awsForm.querySelectorAll("input,button,select,textarea").forEach((el) => {
-        if (el.id === "cancel-aws-form") return;
-        el.disabled = !canWriteAws;
-      });
-    }
     elements.triggerAwsSyncBtn.disabled = !canWriteAws;
 
     const disableIAMRead = !canReadIAM();
@@ -2482,7 +3495,10 @@
 
     if (!response.ok) {
       const message = typeof payload === "string" ? payload : payload.error || JSON.stringify(payload);
-      throw new Error(message);
+      const err = new Error(message);
+      err.status = response.status;
+      err.payload = payload;
+      throw err;
     }
     return payload;
   }
@@ -2539,8 +3555,16 @@
     add("region", q.region);
     add("criticality", q.criticality);
     add("q", q.q);
-    add("limit", q.limit);
-    add("offset", q.offset);
+    if (!q.includeBastions) {
+      add("is_vpc_proxy", "false");
+    }
+    if (state.assetViewMode === "tree") {
+      add("limit", 500);
+      add("offset", 0);
+    } else {
+      add("limit", q.limit);
+      add("offset", q.offset);
+    }
     return parts.length ? "?" + parts.join("&") : "";
   }
 
@@ -2799,63 +3823,148 @@
     }
   }
 
-  async function createAsset(event) {
-    event.preventDefault();
-    const form = new FormData(event.target);
-    const s = (k) => String(form.get(k) || "").trim();
-    const body = {
-      name: s("name"),
-      type: s("type"),
-      env: s("env") || "default",
-      status: s("status") || "active",
-      source: "manual",
-      external_id: s("external_id"),
-      public_ip: s("public_ip"),
-      private_ip: s("private_ip"),
-      private_dns: s("private_dns"),
-      region: s("region"),
-      account_id: s("account_id"),
-      instance_type: s("instance_type"),
-      owner: s("owner"),
-      business_unit: s("business_unit"),
-      criticality: s("criticality"),
-    };
-    try {
-      await api("/api/v1/cmdb/assets", { method: "POST", body: JSON.stringify(body) });
-      event.target.reset();
-      elements.assetFormPanel.style.display = "none";
-      await refreshAssets();
-      toast("Asset created: " + body.name, "success");
-      logActivity("Asset created: " + body.name, "success");
-    } catch (error) {
-      toast("Create failed: " + error.message, "error");
+  // openCreateAssetModal renders the create-asset form inside the shared
+  // modal primitive. Replaces the old top-of-page panel that pushed the
+  // inventory below the fold every time it was opened.
+  function openCreateAssetModal() {
+    if (!hasPermission("cmdb.asset:write")) {
+      toast("You don't have permission to create assets.", "error");
+      return;
     }
+    const body =
+      '<form id="ui-asset-create-form">' +
+        '<div class="form-grid">' +
+          '<div class="field"><label>Name</label><input name="name" required autofocus /></div>' +
+          '<div class="field"><label>Type</label><input name="type" placeholder="e.g. server, database" required /></div>' +
+          '<div class="field"><label>Environment</label><input name="env" placeholder="default" /></div>' +
+          '<div class="field"><label>Status</label><input name="status" placeholder="active" /></div>' +
+          '<div class="field"><label>Criticality</label>' +
+            '<select name="criticality"><option value="">—</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="critical">critical</option></select></div>' +
+          '<div class="field"><label>Owner</label><input name="owner" placeholder="team or individual" /></div>' +
+          '<div class="field"><label>Business unit</label><input name="business_unit" /></div>' +
+          '<div class="field"><label>Region</label><input name="region" /></div>' +
+          '<div class="field"><label>Account ID</label><input name="account_id" /></div>' +
+          '<div class="field"><label>Instance type</label><input name="instance_type" /></div>' +
+          '<div class="field"><label>External ID</label><input name="external_id" /></div>' +
+          '<div class="field"><label>Public IP</label><input name="public_ip" /></div>' +
+          '<div class="field"><label>Private IP</label><input name="private_ip" /></div>' +
+          '<div class="field"><label>Private DNS</label><input name="private_dns" /></div>' +
+        '</div>' +
+      '</form>';
+
+    openModal({
+      title: "Create asset",
+      size: "lg",
+      body,
+      actions: [
+        { label: "Cancel", variant: "ghost", onClick: ({ close }) => close() },
+        {
+          label: "Create asset",
+          variant: "primary",
+          onClick: async (ctx) => {
+            const form = ctx.root.querySelector("#ui-asset-create-form");
+            if (!form.reportValidity()) return;
+            ctx.setBusy("Creating…");
+            const data = new FormData(form);
+            const s = (k) => String(data.get(k) || "").trim();
+            const payload = {
+              name: s("name"),
+              type: s("type"),
+              env: s("env") || "default",
+              status: s("status") || "active",
+              source: "manual",
+              external_id: s("external_id"),
+              public_ip: s("public_ip"),
+              private_ip: s("private_ip"),
+              private_dns: s("private_dns"),
+              region: s("region"),
+              account_id: s("account_id"),
+              instance_type: s("instance_type"),
+              owner: s("owner"),
+              business_unit: s("business_unit"),
+              criticality: s("criticality"),
+            };
+            try {
+              await api("/api/v1/cmdb/assets", { method: "POST", body: JSON.stringify(payload) });
+              toast("Asset created: " + payload.name, "success");
+              logActivity("Asset created: " + payload.name, "success");
+              ctx.close();
+              await refreshAssets();
+            } catch (err) {
+              ctx.setBusy(null);
+              toast("Create failed: " + err.message, "error");
+            }
+          },
+        },
+      ],
+    });
   }
 
-  async function createAwsAccount(event) {
-    event.preventDefault();
-    const form = new FormData(event.target);
-    const body = {
-      account_id: String(form.get("account_id") || "").trim(),
-      display_name: String(form.get("display_name") || "").trim(),
-      auth_mode: String(form.get("auth_mode") || "assume_role"),
-      role_arn: String(form.get("role_arn") || "").trim(),
-      access_key_id: String(form.get("access_key_id") || "").trim(),
-      secret_access_key: String(form.get("secret_access_key") || "").trim(),
-      external_id: String(form.get("external_id") || "").trim(),
-      region_allowlist: parseCSV(String(form.get("region_allowlist") || "")),
-      enabled: true,
-    };
-    try {
-      await api("/api/v1/aws/accounts", { method: "POST", body: JSON.stringify(body) });
-      event.target.reset();
-      elements.awsFormPanel.style.display = "none";
-      await refreshAwsAccounts();
-      toast("AWS account added: " + body.account_id, "success");
-      logActivity("AWS account added: " + body.account_id, "success");
-    } catch (error) {
-      toast("Create failed: " + error.message, "error");
+  // openCreateAwsAccountModal renders the Connect-AWS-Account form inside
+  // the shared modal (Redesign Phase 4). Replaces the old top-of-page panel
+  // — same pattern as Phase 2 asset create.
+  function openCreateAwsAccountModal() {
+    if (!hasPermission("aws.account:write")) {
+      toast("You don't have permission to add accounts.", "error");
+      return;
     }
+    const body =
+      '<form id="ui-aws-create-form">' +
+        '<div class="form-grid">' +
+          '<div class="field"><label>Account ID</label><input name="account_id" placeholder="12-digit AWS account ID" required autofocus /></div>' +
+          '<div class="field"><label>Display name</label><input name="display_name" required /></div>' +
+          '<div class="field"><label>Auth mode</label>' +
+            '<select name="auth_mode"><option value="assume_role">Assume role</option><option value="static">Static keys</option></select></div>' +
+          '<div class="field"><label>Role ARN</label><input name="role_arn" placeholder="arn:aws:iam::..." />' +
+            '<span class="hint">Required for assume_role mode.</span></div>' +
+          '<div class="field"><label>External ID</label><input name="external_id" />' +
+            '<span class="hint">Optional trust-policy external ID.</span></div>' +
+          '<div class="field"><label>Access key ID</label><input name="access_key_id" /></div>' +
+          '<div class="field"><label>Secret access key</label><input name="secret_access_key" type="password" /></div>' +
+          '<div class="field full"><label>Regions</label><input name="region_allowlist" placeholder="us-east-1, ap-southeast-1" />' +
+            '<span class="hint">Comma-separated. Only these regions will be synced.</span></div>' +
+        '</div>' +
+      '</form>';
+
+    openModal({
+      title: "Connect AWS account",
+      size: "lg",
+      body,
+      actions: [
+        { label: "Cancel", variant: "ghost", onClick: ({ close }) => close() },
+        {
+          label: "Add account",
+          variant: "primary",
+          onClick: async (ctx) => {
+            const form = ctx.root.querySelector("#ui-aws-create-form");
+            if (!form.reportValidity()) return;
+            ctx.setBusy("Adding…");
+            const data = new FormData(form);
+            const payload = {
+              account_id: String(data.get("account_id") || "").trim(),
+              display_name: String(data.get("display_name") || "").trim(),
+              auth_mode: String(data.get("auth_mode") || "assume_role"),
+              role_arn: String(data.get("role_arn") || "").trim(),
+              access_key_id: String(data.get("access_key_id") || "").trim(),
+              secret_access_key: String(data.get("secret_access_key") || "").trim(),
+              external_id: String(data.get("external_id") || "").trim(),
+              region_allowlist: parseCSV(String(data.get("region_allowlist") || "")),
+              enabled: true,
+            };
+            try {
+              await api("/api/v1/aws/accounts", { method: "POST", body: JSON.stringify(payload) });
+              toast("AWS account added: " + payload.account_id, "success");
+              logActivity("AWS account added: " + payload.account_id, "success");
+              ctx.close();
+              await refreshAwsAccounts();
+            } catch (err) {
+              ctx.setBusy(null);
+              toast("Create failed: " + err.message, "error");
+            }
+          },
+        },
+      ],
+    });
   }
 
   async function loadAuthorizedData() {
@@ -2927,6 +4036,9 @@
     elements.localLoginForm.addEventListener("submit", localLogin);
     elements.oidcLoginBtn.addEventListener("click", oidcLogin);
     elements.logoutBtn.addEventListener("click", logout);
+    if (elements.themeToggleBtn) {
+      elements.themeToggleBtn.addEventListener("click", toggleTheme);
+    }
 
     elements.navItems.forEach((item) => {
       item.addEventListener("click", () => setView(item.dataset.view || "overview"));
@@ -2959,10 +4071,26 @@
     elements.filterSource.addEventListener("change", onFilterChange("source"));
     elements.filterRegion.addEventListener("change", onFilterChange("region"));
     elements.filterResetBtn.addEventListener("click", () => {
-      state.assetQuery = { env: "", type: "", status: "", source: "", region: "", q: "", limit: state.assetQuery.limit, offset: 0 };
+      state.assetQuery = { env: "", type: "", status: "", source: "", region: "", criticality: "", q: "", limit: state.assetQuery.limit, offset: 0, includeBastions: false };
       elements.assetSearch.value = "";
+      const incBtn = document.getElementById("filter-include-bastions");
+      if (incBtn) {
+        incBtn.dataset.on = "0";
+        incBtn.classList.remove("active");
+      }
       refreshAssets();
     });
+    const includeBastionsBtn = document.getElementById("filter-include-bastions");
+    if (includeBastionsBtn) {
+      includeBastionsBtn.addEventListener("click", () => {
+        const next = includeBastionsBtn.dataset.on !== "1";
+        includeBastionsBtn.dataset.on = next ? "1" : "0";
+        includeBastionsBtn.classList.toggle("active", next);
+        state.assetQuery.includeBastions = next;
+        state.assetQuery.offset = 0;
+        refreshAssets();
+      });
+    }
     elements.assetsPagination.addEventListener("click", (event) => {
       const btn = event.target.closest("button[data-page]");
       if (!btn || btn.disabled) return;
@@ -2984,30 +4112,54 @@
       openAssetDrawer(row.dataset.assetId);
     });
 
+    if (elements.assetsViewToggle) {
+      elements.assetsViewToggle.addEventListener("click", (event) => {
+        const btn = event.target.closest(".view-toggle-btn[data-view-mode]");
+        if (!btn) return;
+        const mode = btn.dataset.viewMode === "tree" ? "tree" : "list";
+        if (state.assetViewMode === mode) return;
+        state.assetViewMode = mode;
+        try { localStorage.setItem("ops_platform_asset_view_mode", mode); } catch (_) {}
+        if (mode === "tree") {
+          state.assetQuery.offset = 0;
+        }
+        refreshAssets();
+      });
+    }
+
+    if (elements.assetsTree) {
+      elements.assetsTree.addEventListener("click", (event) => {
+        const node = event.target.closest(".tree-node[data-asset-id]");
+        if (!node) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openAssetDrawer(node.dataset.assetId);
+      });
+      elements.assetsTree.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const node = event.target.closest(".tree-node[data-asset-id]");
+        if (!node) return;
+        event.preventDefault();
+        openAssetDrawer(node.dataset.assetId);
+      });
+      elements.assetsTree.addEventListener("toggle", (event) => {
+        const det = event.target;
+        if (!(det instanceof HTMLElement) || det.tagName !== "DETAILS") return;
+        const key = det.dataset.treeKey;
+        if (!key) return;
+        state.treeExpanded[key] = det.open;
+      }, true);
+    }
+
     elements.assetDrawer.addEventListener("click", (event) => {
       if (event.target.closest("[data-drawer-close]")) closeAssetDrawer();
     });
 
-    elements.assetForm.addEventListener("submit", createAsset);
-    elements.toggleAssetFormBtn.addEventListener("click", () => {
-      const shown = elements.assetFormPanel.style.display !== "none";
-      elements.assetFormPanel.style.display = shown ? "none" : "block";
-    });
-    elements.cancelAssetForm.addEventListener("click", () => {
-      elements.assetForm.reset();
-      elements.assetFormPanel.style.display = "none";
-    });
+    elements.toggleAssetFormBtn.addEventListener("click", openCreateAssetModal);
 
     elements.refreshAwsBtn.addEventListener("click", refreshAwsAccounts);
-    elements.awsForm.addEventListener("submit", createAwsAccount);
-    elements.toggleAwsFormBtn.addEventListener("click", () => {
-      const shown = elements.awsFormPanel.style.display !== "none";
-      elements.awsFormPanel.style.display = shown ? "none" : "block";
-    });
-    elements.cancelAwsForm.addEventListener("click", () => {
-      elements.awsForm.reset();
-      elements.awsFormPanel.style.display = "none";
-    });
+    elements.toggleAwsFormBtn.addEventListener("click", openCreateAwsAccountModal);
+    bindSyncRunsFilter();
     elements.triggerAwsSyncBtn.addEventListener("click", triggerAwsSync);
     elements.refreshSyncBtn.addEventListener("click", async () => {
       await refreshAwsSyncStatus();
@@ -3055,17 +4207,34 @@
       const ok = await refreshProfile();
       if (ok) await loadAuthorizedData();
     });
+
+    bindLiveSessionsEvents();
+    bindSessionsSidebarEvents();
+    bindBastionsEvents();
+    bindConnectivityTabs();
   }
 
   async function bootstrap() {
     bindEvents();
-    setView("overview");
+    syncThemeIcon();
+
+    // Initial route from the URL hash so deep links (and back/forward) work.
+    // Falls back to "overview" when no hash is present.
+    const initial = parseHashRoute();
+    setView(initial.section, initial.subsection);
+
+    window.addEventListener("hashchange", () => {
+      const r = parseHashRoute();
+      setView(r.section, r.subsection);
+    });
+
     renderShell();
+    renderLiveEmptyState();
 
     await refreshHealth();
     const ok = await refreshProfile();
     if (ok) await loadAuthorizedData();
   }
 
-  bootstrap();
-})();
+
+bootstrap();

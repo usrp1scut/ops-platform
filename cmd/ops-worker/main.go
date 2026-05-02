@@ -9,7 +9,9 @@ import (
 
 	awsrepo "ops-platform/internal/aws"
 	"ops-platform/internal/awssync"
+	"ops-platform/internal/cmdb"
 	"ops-platform/internal/config"
+	"ops-platform/internal/sshproxy"
 	"ops-platform/internal/store"
 )
 
@@ -26,7 +28,11 @@ func main() {
 	defer db.Close()
 
 	accountRepo := awsrepo.NewRepository(db, cfg.MasterKey)
-	service := awssync.NewService(cfg, db, accountRepo)
+	proxyRepo := sshproxy.NewRepository(db)
+	cmdbRepo := cmdb.NewRepository(db, proxyRepo)
+	vpcProxy := cmdb.NewVPCProxyService(cmdbRepo)
+	awsWriter := cmdb.NewAWSWriter(cmdbRepo)
+	service := awssync.NewService(cfg, accountRepo, awsWriter, vpcProxy)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

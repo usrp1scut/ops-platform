@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"ops-platform/internal/platform/httpx"
 )
 
 // BastionRunner is the subset of bastionprobe.Service the handler needs.
@@ -21,6 +23,7 @@ type BastionRunner interface {
 type Handler struct {
 	masterKey string
 	repo      *Repository
+	vpcProxy  *VPCProxyService
 	bastion   BastionRunner
 	readMW    func(http.Handler) http.Handler
 	writeMW   func(http.Handler) http.Handler
@@ -29,6 +32,7 @@ type Handler struct {
 func NewHandler(
 	masterKey string,
 	repo *Repository,
+	vpcProxy *VPCProxyService,
 	bastion BastionRunner,
 	readMW func(http.Handler) http.Handler,
 	writeMW func(http.Handler) http.Handler,
@@ -36,6 +40,7 @@ func NewHandler(
 	return &Handler{
 		masterKey: masterKey,
 		repo:      repo,
+		vpcProxy:  vpcProxy,
 		bastion:   bastion,
 		readMW:    readMW,
 		writeMW:   writeMW,
@@ -61,6 +66,8 @@ func (h *Handler) Routes() chi.Router {
 	r.With(h.withReadAuth).Get("/{assetID}/relations", h.ListAssetRelations)
 	r.With(h.withWriteAuth).Post("/{assetID}/relations", h.CreateRelation)
 	r.With(h.withWriteAuth).Delete("/{assetID}/relations/{relationID}", h.DeleteRelation)
+	r.With(h.withWriteAuth).Post("/{assetID}/promote-vpc-proxy", h.PromoteVPCProxy)
+	r.With(h.withWriteAuth).Post("/{assetID}/demote-vpc-proxy", h.DemoteVPCProxy)
 
 	return r
 }
@@ -83,6 +90,17 @@ func (h *Handler) ListAssets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
+	var isVPCProxy *bool
+	if raw := q.Get("is_vpc_proxy"); raw != "" {
+		switch strings.ToLower(raw) {
+		case "true", "1", "yes":
+			v := true
+			isVPCProxy = &v
+		case "false", "0", "no":
+			v := false
+			isVPCProxy = &v
+		}
+	}
 	result, err := h.repo.ListAssets(r.Context(), ListAssetsQuery{
 		Type:        q.Get("type"),
 		Env:         q.Get("env"),
@@ -93,24 +111,25 @@ func (h *Handler) ListAssets(w http.ResponseWriter, r *http.Request) {
 		Owner:       q.Get("owner"),
 		Criticality: q.Get("criticality"),
 		Query:       q.Get("q"),
+		IsVPCProxy:  isVPCProxy,
 		Limit:       limit,
 		Offset:      offset,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) CreateAsset(w http.ResponseWriter, r *http.Request) {
 	var req CreateAssetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+		httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
 	if req.Type == "" || req.Name == "" {
-		writeError(w, http.StatusBadRequest, "type and name are required")
+		httpx.WriteError(w, http.StatusBadRequest, "type and name are required")
 		return
 	}
 	if req.Status == "" {
@@ -125,55 +144,55 @@ func (h *Handler) CreateAsset(w http.ResponseWriter, r *http.Request) {
 
 	asset, err := h.repo.CreateAsset(r.Context(), req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, asset)
+	httpx.WriteJSON(w, http.StatusCreated, asset)
 }
 
 func (h *Handler) GetAsset(w http.ResponseWriter, r *http.Request) {
 	asset, err := h.repo.GetAsset(r.Context(), chi.URLParam(r, "assetID"))
 	if err != nil {
 		if errors.Is(err, ErrAssetNotFound) {
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpx.WriteJSON(w, http.StatusOK, asset)
 }
 
 func (h *Handler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
 	var req UpdateAssetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+		httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
 
 	asset, err := h.repo.UpdateAsset(r.Context(), chi.URLParam(r, "assetID"), req)
 	if err != nil {
 		if errors.Is(err, ErrAssetNotFound) {
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpx.WriteJSON(w, http.StatusOK, asset)
 }
 
 func (h *Handler) DeleteAsset(w http.ResponseWriter, r *http.Request) {
 	err := h.repo.DeleteAsset(r.Context(), chi.URLParam(r, "assetID"))
 	if err != nil {
 		if errors.Is(err, ErrAssetNotFound) {
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (h *Handler) GetAssetConnection(w http.ResponseWriter, r *http.Request) {
@@ -182,13 +201,13 @@ func (h *Handler) GetAssetConnection(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAssetNotFound), errors.Is(err, ErrConnectionProfileNotFound):
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, profile)
+	httpx.WriteJSON(w, http.StatusOK, profile)
 }
 
 func (h *Handler) ResolveAssetConnection(w http.ResponseWriter, r *http.Request) {
@@ -197,13 +216,13 @@ func (h *Handler) ResolveAssetConnection(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAssetNotFound), errors.Is(err, ErrConnectionProfileNotFound):
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, profile)
+	httpx.WriteJSON(w, http.StatusOK, profile)
 }
 
 func (h *Handler) UpsertAssetConnection(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +230,7 @@ func (h *Handler) UpsertAssetConnection(w http.ResponseWriter, r *http.Request) 
 
 	var req UpsertAssetConnectionProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+		httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
 
@@ -219,13 +238,13 @@ func (h *Handler) UpsertAssetConnection(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAssetNotFound):
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 		default:
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, profile)
+	httpx.WriteJSON(w, http.StatusOK, profile)
 }
 
 func (h *Handler) GetLatestAssetProbe(w http.ResponseWriter, r *http.Request) {
@@ -234,20 +253,20 @@ func (h *Handler) GetLatestAssetProbe(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAssetNotFound), errors.Is(err, ErrProbeSnapshotNotFound):
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, snapshot)
+	httpx.WriteJSON(w, http.StatusOK, snapshot)
 }
 
 func (h *Handler) UpsertAssetProbe(w http.ResponseWriter, r *http.Request) {
 	assetID := chi.URLParam(r, "assetID")
 	var req UpsertAssetProbeSnapshotRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+		httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
 
@@ -255,18 +274,18 @@ func (h *Handler) UpsertAssetProbe(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAssetNotFound):
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 		default:
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, snapshot)
+	httpx.WriteJSON(w, http.StatusOK, snapshot)
 }
 
 func (h *Handler) RunAssetProbe(w http.ResponseWriter, r *http.Request) {
 	if h.bastion == nil {
-		writeError(w, http.StatusServiceUnavailable, "bastion probe service not configured")
+		httpx.WriteError(w, http.StatusServiceUnavailable, "bastion probe service not configured")
 		return
 	}
 	assetID := chi.URLParam(r, "assetID")
@@ -274,37 +293,37 @@ func (h *Handler) RunAssetProbe(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAssetNotFound), errors.Is(err, ErrConnectionProfileNotFound):
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 		default:
-			writeError(w, http.StatusBadGateway, err.Error())
+			httpx.WriteError(w, http.StatusBadGateway, err.Error())
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, snapshot)
+	httpx.WriteJSON(w, http.StatusOK, snapshot)
 }
 
 func (h *Handler) TestAssetConnection(w http.ResponseWriter, r *http.Request) {
 	if h.bastion == nil {
-		writeError(w, http.StatusServiceUnavailable, "bastion probe service not configured")
+		httpx.WriteError(w, http.StatusServiceUnavailable, "bastion probe service not configured")
 		return
 	}
 	assetID := chi.URLParam(r, "assetID")
 	if err := h.bastion.TestConnection(r.Context(), assetID); err != nil {
 		switch {
 		case errors.Is(err, ErrAssetNotFound), errors.Is(err, ErrConnectionProfileNotFound):
-			writeError(w, http.StatusNotFound, err.Error())
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
 		default:
-			writeError(w, http.StatusBadGateway, err.Error())
+			httpx.WriteError(w, http.StatusBadGateway, err.Error())
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *Handler) ListAssetFacets(w http.ResponseWriter, r *http.Request) {
 	facets, err := h.repo.ListAssetFacets(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if facets.Envs == nil {
@@ -322,31 +341,31 @@ func (h *Handler) ListAssetFacets(w http.ResponseWriter, r *http.Request) {
 	if facets.Regions == nil {
 		facets.Regions = []string{}
 	}
-	writeJSON(w, http.StatusOK, facets)
+	httpx.WriteJSON(w, http.StatusOK, facets)
 }
 
 func (h *Handler) ListAssetRelations(w http.ResponseWriter, r *http.Request) {
 	assetID := chi.URLParam(r, "assetID")
 	rels, err := h.repo.ListRelationsByAsset(r.Context(), assetID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if rels == nil {
 		rels = []AssetRelation{}
 	}
-	writeJSON(w, http.StatusOK, rels)
+	httpx.WriteJSON(w, http.StatusOK, rels)
 }
 
 func (h *Handler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 	assetID := chi.URLParam(r, "assetID")
 	var req CreateRelationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json body")
+		httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
 	if req.RelationType == "" {
-		writeError(w, http.StatusBadRequest, "relation_type is required")
+		httpx.WriteError(w, http.StatusBadRequest, "relation_type is required")
 		return
 	}
 	if req.FromAssetID == "" {
@@ -357,37 +376,66 @@ func (h *Handler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 	}
 	rel, err := h.repo.UpsertRelation(r.Context(), req.FromAssetID, req.ToAssetID, req.RelationType, "manual")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, rel)
+	httpx.WriteJSON(w, http.StatusCreated, rel)
 }
 
 func (h *Handler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
 	relID := chi.URLParam(r, "relationID")
 	if err := h.repo.DeleteRelation(r.Context(), relID); err != nil {
 		if errors.Is(err, ErrAssetNotFound) {
-			writeError(w, http.StatusNotFound, "relation not found")
+			httpx.WriteError(w, http.StatusNotFound, "relation not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-type errorBody struct {
-	Error string `json:"error"`
+type promoteVPCProxyRequest struct {
+	Username string `json:"username"`
+	AuthType string `json:"auth_type"`
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		log.Printf("writeJSON: encode failed: %v", err)
+func (h *Handler) PromoteVPCProxy(w http.ResponseWriter, r *http.Request) {
+	assetID := chi.URLParam(r, "assetID")
+	var req promoteVPCProxyRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
 	}
+	asset, proxy, err := h.vpcProxy.Promote(r.Context(), assetID, PromoteOptions(req))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAssetNotFound):
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrAssetMissingNetwork),
+			errors.Is(err, ErrAssetUsernameUnresolved),
+			errors.Is(err, ErrVPCProxyAlreadyExists):
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		default:
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"asset": asset, "proxy": proxy})
 }
 
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, errorBody{Error: message})
+func (h *Handler) DemoteVPCProxy(w http.ResponseWriter, r *http.Request) {
+	assetID := chi.URLParam(r, "assetID")
+	if err := h.vpcProxy.Demote(r.Context(), assetID); err != nil {
+		if errors.Is(err, ErrAssetNotFound) {
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "demoted"})
 }
+

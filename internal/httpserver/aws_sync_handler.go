@@ -6,6 +6,7 @@ import (
 
 	awsrepo "ops-platform/internal/aws"
 	"ops-platform/internal/awssync"
+	"ops-platform/internal/platform/httpx"
 )
 
 type awsSyncHandler struct {
@@ -24,14 +25,14 @@ func (h *awsSyncHandler) Trigger(w http.ResponseWriter, _ *http.Request) {
 	started := h.runner.Trigger()
 	status := h.runner.Status()
 	if !started {
-		writeJSON(w, http.StatusAccepted, map[string]any{
+		httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 			"triggered": false,
 			"message":   "sync is already running",
 			"status":    status,
 		})
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 		"triggered": true,
 		"message":   "sync triggered",
 		"status":    status,
@@ -39,7 +40,7 @@ func (h *awsSyncHandler) Trigger(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *awsSyncHandler) Status(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.runner.Status())
+	httpx.WriteJSON(w, http.StatusOK, h.runner.Status())
 }
 
 func (h *awsSyncHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
@@ -52,10 +53,10 @@ func (h *awsSyncHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 
 	runs, err := h.repo.ListSyncRuns(r.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"items": runs,
 		"limit": limit,
 	})

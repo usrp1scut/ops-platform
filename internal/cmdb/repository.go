@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"ops-platform/internal/security"
+	"ops-platform/internal/sshproxy"
 )
 
 const assetColumns = `
@@ -31,6 +32,9 @@ zone,
 account_id,
 instance_type,
 os_image,
+COALESCE(ami_name, ''),
+COALESCE(ami_owner_id, ''),
+COALESCE(os_family, ''),
 vpc_id,
 subnet_id,
 COALESCE(key_name, ''),
@@ -38,6 +42,7 @@ owner,
 business_unit,
 criticality,
 expires_at,
+is_vpc_proxy,
 COALESCE(system_tags, '{}'::jsonb),
 COALESCE(labels, '{}'::jsonb),
 created_at,
@@ -67,6 +72,9 @@ func scanAsset(row interface {
 		&a.AccountID,
 		&a.InstanceType,
 		&a.OSImage,
+		&a.AMIName,
+		&a.AMIOwnerID,
+		&a.OSFamily,
 		&a.VPCID,
 		&a.SubnetID,
 		&a.KeyName,
@@ -74,6 +82,7 @@ func scanAsset(row interface {
 		&a.BusinessUnit,
 		&a.Criticality,
 		&expires,
+		&a.IsVPCProxy,
 		&rawSystem,
 		&rawLabels,
 		&a.CreatedAt,
@@ -117,11 +126,15 @@ func nullTime(t *time.Time) any {
 }
 
 type Repository struct {
-	db *sql.DB
+	db      *sql.DB
+	proxies *sshproxy.Repository
 }
 
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+// NewRepository binds the cmdb persistence layer to the SSH proxy repository
+// so probe-target loaders can resolve the proxy half of a connection profile
+// without re-implementing the SQL or owning the cmdb_ssh_proxy table.
+func NewRepository(db *sql.DB, proxies *sshproxy.Repository) *Repository {
+	return &Repository{db: db, proxies: proxies}
 }
 
 func (r *Repository) ListAssets(ctx context.Context, q ListAssetsQuery) (ListAssetsResult, error) {
@@ -155,6 +168,12 @@ func (r *Repository) ListAssets(ctx context.Context, q ListAssetsQuery) (ListAss
 	addEq("account_id", q.AccountID)
 	addEq("owner", q.Owner)
 	addEq("criticality", q.Criticality)
+
+	if q.IsVPCProxy != nil {
+		where.WriteString(fmt.Sprintf(" AND is_vpc_proxy = $%d", index))
+		args = append(args, *q.IsVPCProxy)
+		index++
+	}
 
 	if q.Query != "" {
 		where.WriteString(fmt.Sprintf(
@@ -328,9 +347,7 @@ func (r *Repository) UpdateAsset(ctx context.Context, id string, req UpdateAsset
 	if req.ExpiresAt != nil {
 		current.ExpiresAt = req.ExpiresAt
 	}
-	if req.Labels != nil {
-		current.Labels = req.Labels
-	}
+	current.Labels = applyLabelsUpdate(current.Labels, req)
 
 	rawLabels, err := json.Marshal(current.Labels)
 	if err != nil {
@@ -532,8 +549,8 @@ func (r *Repository) UpsertAssetConnectionProfile(
 	if protocol == "" {
 		protocol = "ssh"
 	}
-	if protocol != "ssh" && protocol != "postgres" {
-		return AssetConnectionProfile{}, errors.New("protocol must be ssh or postgres")
+	if protocol != "ssh" && protocol != "postgres" && protocol != "rdp" {
+		return AssetConnectionProfile{}, errors.New("protocol must be ssh, postgres, or rdp")
 	}
 	host := strings.TrimSpace(req.Host)
 	if host == "" {
@@ -541,9 +558,12 @@ func (r *Repository) UpsertAssetConnectionProfile(
 	}
 	port := req.Port
 	if port <= 0 {
-		if protocol == "postgres" {
+		switch protocol {
+		case "postgres":
 			port = 5432
-		} else {
+		case "rdp":
+			port = 3389
+		default:
 			port = 22
 		}
 	}
@@ -557,6 +577,9 @@ func (r *Repository) UpsertAssetConnectionProfile(
 	}
 	if protocol == "postgres" && authType != "password" {
 		return AssetConnectionProfile{}, errors.New("postgres only supports password auth")
+	}
+	if protocol == "rdp" && authType != "password" {
+		return AssetConnectionProfile{}, errors.New("rdp only supports password auth")
 	}
 	if authType != "password" && authType != "key" {
 		return AssetConnectionProfile{}, errors.New("auth_type must be password or key")
@@ -628,9 +651,9 @@ func (r *Repository) UpsertAssetConnectionProfile(
 INSERT INTO cmdb_asset_connection (
     asset_id, protocol, host, port, username, auth_type, database_name,
     password_encrypted, private_key_encrypted, passphrase_encrypted,
-    bastion_enabled, proxy_id
+    bastion_enabled, proxy_id, auto_managed
 ) VALUES (
-    $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid
+    $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid, false
 )
 ON CONFLICT (asset_id) DO UPDATE SET
     protocol = EXCLUDED.protocol,
@@ -644,6 +667,7 @@ ON CONFLICT (asset_id) DO UPDATE SET
     passphrase_encrypted = EXCLUDED.passphrase_encrypted,
     bastion_enabled = EXCLUDED.bastion_enabled,
     proxy_id = EXCLUDED.proxy_id,
+    auto_managed = false,
     updated_at = now()
 `, assetID, protocol, host, port, username, authType, database,
 		encryptedPassword, encryptedPrivateKey, encryptedPassphrase,
@@ -920,10 +944,12 @@ LIMIT $1
 			return nil, err
 		}
 		if proxyID.Valid && proxyID.String != "" {
-			proxyTarget, err := r.GetSSHProxyTarget(ctx, proxyID.String, masterKey)
-			if err == nil {
-				target.Proxy = &proxyTarget
+			target.ProxyRequired = true
+			proxyTarget, err := r.proxies.GetTarget(ctx, proxyID.String, masterKey)
+			if err != nil {
+				return nil, fmt.Errorf("resolve proxy %s for asset %s: %w", proxyID.String, target.AssetID, err)
 			}
+			target.Proxy = &proxyTarget
 		}
 
 		if encryptedPassword != "" {
@@ -1010,13 +1036,12 @@ WHERE c.asset_id = $1::uuid AND a.deleted_at IS NULL
 		return BastionProbeTarget{}, err
 	}
 	if proxyID.Valid && proxyID.String != "" {
-		proxyTarget, err := r.GetSSHProxyTarget(ctx, proxyID.String, masterKey)
-		if err != nil && !errors.Is(err, ErrSSHProxyNotFound) {
-			return BastionProbeTarget{}, err
+		target.ProxyRequired = true
+		proxyTarget, err := r.proxies.GetTarget(ctx, proxyID.String, masterKey)
+		if err != nil {
+			return BastionProbeTarget{}, fmt.Errorf("resolve proxy %s for asset %s: %w", proxyID.String, target.AssetID, err)
 		}
-		if err == nil {
-			target.Proxy = &proxyTarget
-		}
+		target.Proxy = &proxyTarget
 	}
 
 	if encryptedPassword != "" {

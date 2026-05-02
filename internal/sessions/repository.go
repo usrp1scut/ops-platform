@@ -3,6 +3,7 @@ package sessions
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
@@ -52,6 +53,53 @@ type EndInput struct {
 	Error     string
 }
 
+// SetRecording records the storage key + size after the asciinema cast has
+// been uploaded. Called from the terminal handler after the session ends and
+// the upload completes — separate from End so a failed upload doesn't lose
+// the session-end audit row.
+func (r *Repository) SetRecording(ctx context.Context, sessionID, uri string, bytesSize int64) error {
+	_, err := r.db.ExecContext(ctx, `
+UPDATE terminal_session
+   SET recording_uri = $2,
+       recording_bytes = $3
+ WHERE id = $1::uuid`, sessionID, uri, bytesSize)
+	return err
+}
+
+// GetSessionOwner returns the user_id stored on a session row. Empty
+// string + nil error means no such session — used by the recording
+// download handler to return 404 on cross-user access without disclosing
+// whether the session exists.
+func (r *Repository) GetSessionOwner(ctx context.Context, sessionID string) (string, error) {
+	var ownerID string
+	err := r.db.QueryRowContext(ctx, `
+SELECT user_id::text FROM terminal_session WHERE id = $1::uuid`, sessionID).Scan(&ownerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return ownerID, nil
+}
+
+// GetRecordingURI returns the storage key for a session's recording, or
+// empty string if either the session row is missing or the session has no
+// recording. Returns a non-nil error only for actual DB failures so the
+// handler can map "no recording" to 404 cleanly.
+func (r *Repository) GetRecordingURI(ctx context.Context, sessionID string) (string, error) {
+	var uri string
+	err := r.db.QueryRowContext(ctx, `
+SELECT COALESCE(recording_uri, '') FROM terminal_session WHERE id = $1::uuid`, sessionID).Scan(&uri)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return uri, nil
+}
+
 func (r *Repository) End(ctx context.Context, in EndInput) error {
 	var exit any
 	if in.ExitCode != nil {
@@ -90,7 +138,8 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Session, error) {
 	query := `
 SELECT id::text, user_id, COALESCE(user_name, ''), asset_id::text, COALESCE(asset_name, ''),
        COALESCE(proxy_id::text, ''), COALESCE(proxy_name, ''),
-       COALESCE(client_ip, ''), started_at, ended_at, exit_code, bytes_in, bytes_out, COALESCE(error_msg, '')
+       COALESCE(client_ip, ''), started_at, ended_at, exit_code, bytes_in, bytes_out, COALESCE(error_msg, ''),
+       COALESCE(recording_uri, ''), COALESCE(recording_bytes, 0)
   FROM terminal_session
  WHERE ` + strings.Join(where, " AND ") + `
  ORDER BY started_at DESC
@@ -106,11 +155,13 @@ SELECT id::text, user_id, COALESCE(user_name, ''), asset_id::text, COALESCE(asse
 		var s Session
 		var endedAt sql.NullTime
 		var exitCode sql.NullInt32
+		var recordingURI string
 		if err := rows.Scan(&s.ID, &s.UserID, &s.UserName, &s.AssetID, &s.AssetName,
 			&s.ProxyID, &s.ProxyName, &s.ClientIP, &s.StartedAt, &endedAt, &exitCode,
-			&s.BytesIn, &s.BytesOut, &s.ErrorMsg); err != nil {
+			&s.BytesIn, &s.BytesOut, &s.ErrorMsg, &recordingURI, &s.RecordingBytes); err != nil {
 			return nil, err
 		}
+		s.HasRecording = recordingURI != ""
 		if endedAt.Valid {
 			t := endedAt.Time
 			s.EndedAt = &t

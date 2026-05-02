@@ -12,6 +12,7 @@ import (
 	"ops-platform/internal/config"
 	"ops-platform/internal/hostkey"
 	"ops-platform/internal/keypair"
+	"ops-platform/internal/sshproxy"
 	"ops-platform/internal/store"
 )
 
@@ -27,7 +28,7 @@ func main() {
 	}
 	defer db.Close()
 
-	repo := cmdb.NewRepository(db)
+	repo := cmdb.NewRepository(db, sshproxy.NewRepository(db))
 	hostkeyVerifier := hostkey.NewVerifier(hostkey.NewRepository(db))
 	keypairRepo := keypair.NewRepository(db, cfg.MasterKey)
 	service := bastionprobe.NewService(cfg, repo, hostkeyVerifier, keypairRepo)

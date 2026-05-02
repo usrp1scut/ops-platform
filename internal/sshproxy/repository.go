@@ -1,9 +1,10 @@
-package cmdb
+package sshproxy
 
 import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -11,9 +12,11 @@ import (
 	"ops-platform/internal/security"
 )
 
-var ErrSSHProxyNotFound = errors.New("ssh proxy not found")
-
-const sshProxyColumns = `
+// Columns is the canonical SELECT list for cmdb_ssh_proxy. Exported so
+// cmdb's cross-aggregate Tx helpers (vpcproxy.go) can reuse it without
+// duplicating the row shape — the only legitimate caller outside this
+// package.
+const Columns = `
 id::text,
 name,
 COALESCE(description, ''),
@@ -28,7 +31,25 @@ CASE WHEN COALESCE(passphrase_encrypted, '') <> '' THEN true ELSE false END,
 created_at,
 updated_at`
 
-func scanSSHProxy(row interface {
+// Scan reads a row produced by a SELECT against Columns into an SSHProxy.
+// Exported for the same reason as Columns.
+func Scan(row interface {
+	Scan(dest ...any) error
+}) (SSHProxy, error) {
+	return scanProxy(row)
+}
+
+type Repository struct {
+	db *sql.DB
+}
+
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{db: db}
+}
+
+func (r *Repository) DB() *sql.DB { return r.db }
+
+func scanProxy(row interface {
 	Scan(dest ...any) error
 }) (SSHProxy, error) {
 	var p SSHProxy
@@ -52,8 +73,8 @@ func scanSSHProxy(row interface {
 	return p, nil
 }
 
-func (r *Repository) ListSSHProxies(ctx context.Context) ([]SSHProxy, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT "+sshProxyColumns+" FROM cmdb_ssh_proxy WHERE deleted_at IS NULL ORDER BY network_zone, name")
+func (r *Repository) List(ctx context.Context) ([]SSHProxy, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT "+Columns+" FROM cmdb_ssh_proxy WHERE deleted_at IS NULL ORDER BY network_zone, name")
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +82,7 @@ func (r *Repository) ListSSHProxies(ctx context.Context) ([]SSHProxy, error) {
 
 	out := make([]SSHProxy, 0)
 	for rows.Next() {
-		p, err := scanSSHProxy(rows)
+		p, err := scanProxy(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -70,19 +91,19 @@ func (r *Repository) ListSSHProxies(ctx context.Context) ([]SSHProxy, error) {
 	return out, rows.Err()
 }
 
-func (r *Repository) GetSSHProxy(ctx context.Context, id string) (SSHProxy, error) {
-	row := r.db.QueryRowContext(ctx, "SELECT "+sshProxyColumns+" FROM cmdb_ssh_proxy WHERE id = $1::uuid AND deleted_at IS NULL", id)
-	p, err := scanSSHProxy(row)
+func (r *Repository) Get(ctx context.Context, id string) (SSHProxy, error) {
+	row := r.db.QueryRowContext(ctx, "SELECT "+Columns+" FROM cmdb_ssh_proxy WHERE id = $1::uuid AND deleted_at IS NULL", id)
+	p, err := scanProxy(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return SSHProxy{}, ErrSSHProxyNotFound
+			return SSHProxy{}, ErrNotFound
 		}
 		return SSHProxy{}, err
 	}
 	return p, nil
 }
 
-func (r *Repository) CreateSSHProxy(ctx context.Context, req UpsertSSHProxyRequest, masterKey string) (SSHProxy, error) {
+func (r *Repository) Create(ctx context.Context, req UpsertSSHProxyRequest, masterKey string) (SSHProxy, error) {
 	if err := validateProxyRequest(&req); err != nil {
 		return SSHProxy{}, err
 	}
@@ -119,23 +140,21 @@ INSERT INTO cmdb_ssh_proxy (
     id, name, description, network_zone, host, port, username, auth_type,
     password_encrypted, private_key_encrypted, passphrase_encrypted
 ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING `+sshProxyColumns,
+RETURNING `+Columns,
 		id, req.Name, req.Description, req.NetworkZone, req.Host, req.Port, req.Username, req.AuthType,
 		encPass, encKey, encPhrase,
 	)
-	return scanSSHProxy(row)
+	return scanProxy(row)
 }
 
-func (r *Repository) UpdateSSHProxy(ctx context.Context, id string, req UpsertSSHProxyRequest, masterKey string) (SSHProxy, error) {
+func (r *Repository) Update(ctx context.Context, id string, req UpsertSSHProxyRequest, masterKey string) (SSHProxy, error) {
 	if err := validateProxyRequest(&req); err != nil {
 		return SSHProxy{}, err
 	}
-	// ensure exists
-	if _, err := r.GetSSHProxy(ctx, id); err != nil {
+	if _, err := r.Get(ctx, id); err != nil {
 		return SSHProxy{}, err
 	}
 
-	// only update secrets that were provided
 	args := []any{id, req.Name, req.Description, req.NetworkZone, req.Host, req.Port, req.Username, req.AuthType}
 	setParts := []string{
 		"name = $2",
@@ -152,7 +171,7 @@ func (r *Repository) UpdateSSHProxy(ctx context.Context, id string, req UpsertSS
 		if err != nil {
 			return SSHProxy{}, err
 		}
-		setParts = append(setParts, "password_encrypted = $"+itoa(idx))
+		setParts = append(setParts, "password_encrypted = $"+strconv.Itoa(idx))
 		args = append(args, enc)
 		idx++
 	}
@@ -161,7 +180,7 @@ func (r *Repository) UpdateSSHProxy(ctx context.Context, id string, req UpsertSS
 		if err != nil {
 			return SSHProxy{}, err
 		}
-		setParts = append(setParts, "private_key_encrypted = $"+itoa(idx))
+		setParts = append(setParts, "private_key_encrypted = $"+strconv.Itoa(idx))
 		args = append(args, enc)
 		idx++
 	}
@@ -170,41 +189,44 @@ func (r *Repository) UpdateSSHProxy(ctx context.Context, id string, req UpsertSS
 		if err != nil {
 			return SSHProxy{}, err
 		}
-		setParts = append(setParts, "passphrase_encrypted = $"+itoa(idx))
+		setParts = append(setParts, "passphrase_encrypted = $"+strconv.Itoa(idx))
 		args = append(args, enc)
 		idx++
 	}
 	setParts = append(setParts, "updated_at = now()")
 
-	query := "UPDATE cmdb_ssh_proxy SET " + strings.Join(setParts, ", ") + " WHERE id = $1::uuid AND deleted_at IS NULL RETURNING " + sshProxyColumns
+	query := "UPDATE cmdb_ssh_proxy SET " + strings.Join(setParts, ", ") + " WHERE id = $1::uuid AND deleted_at IS NULL RETURNING " + Columns
 	row := r.db.QueryRowContext(ctx, query, args...)
-	return scanSSHProxy(row)
+	return scanProxy(row)
 }
 
-func (r *Repository) DeleteSSHProxy(ctx context.Context, id string) error {
+func (r *Repository) Delete(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, "UPDATE cmdb_ssh_proxy SET deleted_at = now() WHERE id = $1::uuid AND deleted_at IS NULL", id)
 	if err != nil {
 		return err
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {
-		return ErrSSHProxyNotFound
+		return ErrNotFound
 	}
 	return nil
 }
 
-// GetSSHProxyTarget loads decrypted proxy credentials for dialing.
-func (r *Repository) GetSSHProxyTarget(ctx context.Context, id, masterKey string) (SSHProxyTarget, error) {
+// GetTarget loads a proxy with decrypted credentials so bastionprobe can dial
+// it. The masterKey arg keeps decryption out of the repo's startup config and
+// makes test wiring obvious.
+func (r *Repository) GetTarget(ctx context.Context, id, masterKey string) (SSHProxyTarget, error) {
 	var t SSHProxyTarget
 	var encPass, encKey, encPhrase string
 	err := r.db.QueryRowContext(ctx, `
 SELECT id::text, name, COALESCE(network_zone, ''), host, port, username, auth_type,
+    COALESCE(key_name, ''),
     COALESCE(password_encrypted, ''), COALESCE(private_key_encrypted, ''), COALESCE(passphrase_encrypted, '')
 FROM cmdb_ssh_proxy
 WHERE id = $1::uuid AND deleted_at IS NULL
-`, id).Scan(&t.ID, &t.Name, &t.NetworkZone, &t.Host, &t.Port, &t.Username, &t.AuthType, &encPass, &encKey, &encPhrase)
+`, id).Scan(&t.ID, &t.Name, &t.NetworkZone, &t.Host, &t.Port, &t.Username, &t.AuthType, &t.KeyName, &encPass, &encKey, &encPhrase)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return SSHProxyTarget{}, ErrSSHProxyNotFound
+			return SSHProxyTarget{}, ErrNotFound
 		}
 		return SSHProxyTarget{}, err
 	}
@@ -256,18 +278,4 @@ func validateProxyRequest(req *UpsertSSHProxyRequest) error {
 		return errors.New("auth_type must be password or key")
 	}
 	return nil
-}
-
-func itoa(i int) string {
-	// small local helper to avoid importing strconv just for this file
-	const digits = "0123456789"
-	if i == 0 {
-		return "0"
-	}
-	buf := make([]byte, 0, 4)
-	for i > 0 {
-		buf = append([]byte{digits[i%10]}, buf...)
-		i /= 10
-	}
-	return string(buf)
 }

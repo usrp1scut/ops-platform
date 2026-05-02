@@ -1,7 +1,10 @@
 package httpserver
 
 import (
+	"context"
 	"database/sql"
+	"errors"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -9,13 +12,19 @@ import (
 
 	"ops-platform/internal/aws"
 	"ops-platform/internal/awssync"
+	"ops-platform/internal/bastion"
 	"ops-platform/internal/bastionprobe"
 	"ops-platform/internal/cmdb"
 	"ops-platform/internal/config"
+	"ops-platform/internal/connectivity"
+	"ops-platform/internal/guacproxy"
 	"ops-platform/internal/hostkey"
 	"ops-platform/internal/iam"
 	"ops-platform/internal/keypair"
+	"ops-platform/internal/platform/httpx"
 	"ops-platform/internal/sessions"
+	"ops-platform/internal/sshproxy"
+	"ops-platform/internal/storage"
 	"ops-platform/internal/terminal"
 )
 
@@ -46,11 +55,14 @@ func (s *Server) Router() http.Handler {
 	)
 	tokenService := iam.NewTokenService(s.cfg.MasterKey)
 	awsRepo := aws.NewRepository(s.db, s.cfg.MasterKey)
-	awsSyncService := awssync.NewService(s.cfg, s.db, awsRepo)
+
+	proxyRepo := sshproxy.NewRepository(s.db)
+	cmdbRepo := cmdb.NewRepository(s.db, proxyRepo)
+	cmdbVPCProxy := cmdb.NewVPCProxyService(cmdbRepo)
+	cmdbAWSWriter := cmdb.NewAWSWriter(cmdbRepo)
+	awsSyncService := awssync.NewService(s.cfg, awsRepo, cmdbAWSWriter, cmdbVPCProxy)
 	awsSyncRunner := awssync.NewRunner(awsSyncService)
 	awsSyncHandler := newAWSSyncHandler(awsRepo, awsSyncRunner)
-
-	cmdbRepo := cmdb.NewRepository(s.db)
 	hostkeyRepo := hostkey.NewRepository(s.db)
 	hostkeyVerifier := hostkey.NewVerifier(hostkeyRepo)
 	hostkeyHandler := hostkey.NewHandler(
@@ -59,7 +71,6 @@ func (s *Server) Router() http.Handler {
 		iam.RequirePermission("cmdb.asset", "write"),
 	)
 	sessionsRepo := sessions.NewRepository(s.db)
-	sessionsHandler := sessions.NewHandler(sessionsRepo, iam.RequirePermission("cmdb.asset", "read"))
 	keypairRepo := keypair.NewRepository(s.db, s.cfg.MasterKey)
 	keypairHandler := keypair.NewHandler(
 		keypairRepo,
@@ -70,30 +81,53 @@ func (s *Server) Router() http.Handler {
 	cmdbHandler := cmdb.NewHandler(
 		s.cfg.MasterKey,
 		cmdbRepo,
+		cmdbVPCProxy,
 		bastionService,
 		iam.RequirePermission("cmdb.asset", "read"),
 		iam.RequirePermission("cmdb.asset", "write"),
 	)
-	cmdbProxyHandler := cmdb.NewProxyHandler(
+	proxyHandler := sshproxy.NewHandler(
 		s.cfg.MasterKey,
-		cmdbRepo,
+		proxyRepo,
 		iam.RequirePermission("cmdb.asset", "read"),
 		iam.RequirePermission("cmdb.asset", "write"),
 	)
+	ticketService := connectivity.NewTicketService(context.Background(), 0)
 	terminalSvc := terminal.NewService()
-	terminalHandler := terminal.NewHandler(terminalSvc, bastionService, sessionsRepo, cmdbRepo)
+	recordingStorage, recordingErr := storage.NewClient(s.cfg)
+	if recordingErr != nil && !errors.Is(recordingErr, storage.ErrNoStorage) {
+		log.Printf("session recording disabled: %v", recordingErr)
+		recordingStorage = nil
+	}
+	var sessionsRecordings sessions.RecordingFetcher
+	if recordingStorage != nil {
+		sessionsRecordings = recordingFetcher{recordingStorage}
+	}
+	sessionsHandler := sessions.NewHandler(sessionsRepo, sessionsRecordings, iam.RequirePermission("cmdb.asset", "read"))
+	terminalHandler := terminal.NewHandler(terminalSvc, ticketService, bastionService, sessionsRepo, cmdbRepo, recordingStorage)
+	guacSvc := guacproxy.NewService(s.cfg.GuacdAddr, s.cfg.GuacTunnelHost, bastionService)
+	guacHandler := guacproxy.NewHandler(guacSvc, ticketService, cmdbRepo, sessionsRepo)
 	awsHandler := aws.NewHandler(
 		awsRepo,
 		iam.RequirePermission("aws.account", "read"),
 		iam.RequirePermission("aws.account", "write"),
 	)
+	bastionRepo := bastion.NewRepository(s.db)
+	bastionHandler := bastion.NewHandler(
+		bastionRepo,
+		iam.RequirePermission("bastion.grant", "read"),
+		iam.RequirePermission("bastion.grant", "write"),
+		iam.RequirePermission("bastion.request", "read"),
+		iam.RequirePermission("bastion.request", "write"),
+	)
+	requireGrant := bastion.RequireActiveGrant(bastionRepo, "assetID")
 
 	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.db.PingContext(r.Context()); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "error": "database unavailable"})
+			httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "error": "database unavailable"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	router.Route("/auth", func(r chi.Router) {
@@ -104,12 +138,18 @@ func (s *Server) Router() http.Handler {
 		r.Use(iam.AuthMiddleware(tokenService, iamRepo))
 		r.Use(iam.AuditMiddleware(iamRepo))
 		r.Mount("/cmdb/assets", cmdbHandler.Routes())
-		r.Mount("/cmdb/ssh-proxies", cmdbProxyHandler.Routes())
+		r.Mount("/cmdb/ssh-proxies", proxyHandler.Routes())
 		r.Mount("/cmdb/hostkeys", hostkeyHandler.Routes())
 		r.Mount("/cmdb/sessions", sessionsHandler.Routes())
 		r.Mount("/ssh-keypairs", keypairHandler.Routes())
-		r.With(iam.RequirePermission("cmdb.asset", "write")).
+		// Connect routes: cmdb.asset:read is the baseline (must be able to
+		// see the asset) and the JIT grant gate is the actual authorization.
+		// Admins (system:admin) bypass the grant check inside RequireActiveGrant.
+		r.With(iam.RequirePermission("cmdb.asset", "read")).With(requireGrant).
 			Post("/cmdb/assets/{assetID}/terminal/ticket", terminalHandler.IssueTicket)
+		r.With(iam.RequirePermission("cmdb.asset", "read")).With(requireGrant).
+			Post("/cmdb/assets/{assetID}/rdp/ticket", guacHandler.IssueTicket)
+		r.Mount("/bastion", bastionHandler.Routes())
 		r.Mount("/aws/accounts", awsHandler.Routes())
 		r.With(iam.RequirePermission("aws.account", "read")).Get("/aws/sync/runs", awsSyncHandler.ListRuns)
 		r.With(iam.RequirePermission("aws.account", "read")).Get("/aws/sync/status", awsSyncHandler.Status)
@@ -119,6 +159,7 @@ func (s *Server) Router() http.Handler {
 
 	// WebSocket terminal uses short-lived ticket auth (see terminalHandler.IssueTicket).
 	router.Get("/ws/v1/cmdb/assets/{assetID}/terminal", terminalHandler.ServeWS)
+	router.Get("/ws/v1/cmdb/assets/{assetID}/rdp", guacHandler.ServeWS)
 
 	return router
 }

@@ -1,33 +1,56 @@
 package cmdb
 
-import "time"
+import (
+	"time"
+
+	"ops-platform/internal/sshproxy"
+)
+
+// applyLabelsUpdate folds an UpdateAssetRequest's label fields onto the
+// current value. Both Labels and Tags nil = no change. Either non-nil =
+// replace. Labels wins over Tags (Tags is the legacy compat field; older
+// clients PATCH {"tags": ...} and we want their writes to land instead of
+// silently dropping).
+func applyLabelsUpdate(current map[string]any, req UpdateAssetRequest) map[string]any {
+	if req.Labels != nil {
+		return req.Labels
+	}
+	if req.Tags != nil {
+		return req.Tags
+	}
+	return current
+}
 
 type Asset struct {
-	ID            string         `json:"id"`
-	Type          string         `json:"type"`
-	Name          string         `json:"name"`
-	Status        string         `json:"status"`
-	Env           string         `json:"env"`
-	Source        string         `json:"source"`
-	ExternalID    string         `json:"external_id,omitempty"`
-	ExternalARN   string         `json:"external_arn,omitempty"`
-	PublicIP      string         `json:"public_ip,omitempty"`
-	PrivateIP     string         `json:"private_ip,omitempty"`
-	PrivateDNS    string         `json:"private_dns,omitempty"`
-	Region        string         `json:"region,omitempty"`
-	Zone          string         `json:"zone,omitempty"`
-	AccountID     string         `json:"account_id,omitempty"`
-	InstanceType  string         `json:"instance_type,omitempty"`
-	OSImage       string         `json:"os_image,omitempty"`
-	VPCID         string         `json:"vpc_id,omitempty"`
-	SubnetID      string         `json:"subnet_id,omitempty"`
-	KeyName       string         `json:"key_name,omitempty"`
-	Owner         string         `json:"owner,omitempty"`
-	BusinessUnit  string         `json:"business_unit,omitempty"`
-	Criticality   string         `json:"criticality,omitempty"`
-	ExpiresAt     *time.Time     `json:"expires_at,omitempty"`
-	SystemTags    map[string]any `json:"system_tags,omitempty"`
-	Labels        map[string]any `json:"labels,omitempty"`
+	ID           string         `json:"id"`
+	Type         string         `json:"type"`
+	Name         string         `json:"name"`
+	Status       string         `json:"status"`
+	Env          string         `json:"env"`
+	Source       string         `json:"source"`
+	ExternalID   string         `json:"external_id,omitempty"`
+	ExternalARN  string         `json:"external_arn,omitempty"`
+	PublicIP     string         `json:"public_ip,omitempty"`
+	PrivateIP    string         `json:"private_ip,omitempty"`
+	PrivateDNS   string         `json:"private_dns,omitempty"`
+	Region       string         `json:"region,omitempty"`
+	Zone         string         `json:"zone,omitempty"`
+	AccountID    string         `json:"account_id,omitempty"`
+	InstanceType string         `json:"instance_type,omitempty"`
+	OSImage      string         `json:"os_image,omitempty"`
+	AMIName      string         `json:"ami_name,omitempty"`
+	AMIOwnerID   string         `json:"ami_owner_id,omitempty"`
+	OSFamily     string         `json:"os_family,omitempty"`
+	VPCID        string         `json:"vpc_id,omitempty"`
+	SubnetID     string         `json:"subnet_id,omitempty"`
+	KeyName      string         `json:"key_name,omitempty"`
+	Owner        string         `json:"owner,omitempty"`
+	BusinessUnit string         `json:"business_unit,omitempty"`
+	Criticality  string         `json:"criticality,omitempty"`
+	ExpiresAt    *time.Time     `json:"expires_at,omitempty"`
+	IsVPCProxy   bool           `json:"is_vpc_proxy,omitempty"`
+	SystemTags   map[string]any `json:"system_tags,omitempty"`
+	Labels       map[string]any `json:"labels,omitempty"`
 	// Tags is retained for backward compatibility; it is the union of system_tags and labels.
 	Tags      map[string]any `json:"tags,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
@@ -81,6 +104,10 @@ type UpdateAssetRequest struct {
 	Criticality  *string        `json:"criticality"`
 	ExpiresAt    *time.Time     `json:"expires_at"`
 	Labels       map[string]any `json:"labels"`
+	// Tags mirrors CreateAssetRequest.Tags for backward compatibility: older
+	// callers that send PATCH {"tags": ...} get folded into labels rather
+	// than silently dropped.
+	Tags map[string]any `json:"tags"`
 }
 
 type ListAssetsQuery struct {
@@ -93,6 +120,7 @@ type ListAssetsQuery struct {
 	Owner       string
 	Criticality string
 	Query       string
+	IsVPCProxy  *bool
 	Limit       int
 	Offset      int
 }
@@ -143,47 +171,8 @@ type UpsertAssetConnectionProfileRequest struct {
 	ProxyID        *string `json:"proxy_id"`
 }
 
-type SSHProxy struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description,omitempty"`
-	NetworkZone   string    `json:"network_zone,omitempty"`
-	Host          string    `json:"host"`
-	Port          int       `json:"port"`
-	Username      string    `json:"username"`
-	AuthType      string    `json:"auth_type"`
-	HasPassword   bool      `json:"has_password"`
-	HasPrivateKey bool      `json:"has_private_key"`
-	HasPassphrase bool      `json:"has_passphrase"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
-type UpsertSSHProxyRequest struct {
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	NetworkZone string  `json:"network_zone"`
-	Host        string  `json:"host"`
-	Port        int     `json:"port"`
-	Username    string  `json:"username"`
-	AuthType    string  `json:"auth_type"`
-	Password    *string `json:"password"`
-	PrivateKey  *string `json:"private_key"`
-	Passphrase  *string `json:"passphrase"`
-}
-
-type SSHProxyTarget struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	NetworkZone string `json:"network_zone"`
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	Username    string `json:"username"`
-	AuthType    string `json:"auth_type"`
-	Password    string `json:"-"`
-	PrivateKey  string `json:"-"`
-	Passphrase  string `json:"-"`
-}
+// SSH proxy types now live in internal/sshproxy. Removing the duplicate
+// definitions here keeps cmdb out of the proxy CRUD business.
 
 type AssetProbeSnapshot struct {
 	ID           string         `json:"id"`
@@ -255,5 +244,10 @@ type BastionProbeTarget struct {
 	Password   string          `json:"password,omitempty"`
 	PrivateKey string          `json:"private_key,omitempty"`
 	Passphrase string          `json:"passphrase,omitempty"`
-	Proxy      *SSHProxyTarget `json:"proxy,omitempty"`
+	Proxy      *sshproxy.SSHProxyTarget `json:"proxy,omitempty"`
+	// ProxyRequired is true when the connection profile has a proxy_id set.
+	// Probe code MUST fail closed if ProxyRequired is true but Proxy is nil
+	// (e.g. proxy row was deleted, decryption failed) — never silently fall
+	// back to a direct connection that bypasses the bastion.
+	ProxyRequired bool `json:"proxy_required,omitempty"`
 }

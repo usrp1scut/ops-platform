@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,8 +16,11 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 
+	"ops-platform/internal/connectivity"
 	"ops-platform/internal/iam"
+	"ops-platform/internal/platform/httpx"
 	"ops-platform/internal/sessions"
+	"ops-platform/internal/storage"
 )
 
 // SSHDialer opens an SSH client to an asset. Implemented by bastionprobe.Service.
@@ -31,19 +36,26 @@ type AssetMetaLookup interface {
 
 type Handler struct {
 	svc      *Service
+	tickets  *connectivity.TicketService
 	dialer   SSHDialer
 	sessions *sessions.Repository
 	meta     AssetMetaLookup
+	storage  *storage.Client // nil-safe: when nil, recordings are skipped
 	upgrader websocket.Upgrader
 	logger   *log.Logger
 }
 
-func NewHandler(svc *Service, dialer SSHDialer, sess *sessions.Repository, meta AssetMetaLookup) *Handler {
+// NewHandler wires the SSH terminal handler. storage may be nil when
+// recording is not configured (OPS_RECORDING_ENDPOINT unset); the handler
+// then runs sessions normally without writing a cast file.
+func NewHandler(svc *Service, tickets *connectivity.TicketService, dialer SSHDialer, sess *sessions.Repository, meta AssetMetaLookup, store *storage.Client) *Handler {
 	return &Handler{
 		svc:      svc,
+		tickets:  tickets,
 		dialer:   dialer,
 		sessions: sess,
 		meta:     meta,
+		storage:  store,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -58,20 +70,20 @@ func NewHandler(svc *Service, dialer SSHDialer, sess *sessions.Repository, meta 
 func (h *Handler) IssueTicket(w http.ResponseWriter, r *http.Request) {
 	identity, ok := iam.IdentityFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "no identity")
+		httpx.WriteError(w, http.StatusUnauthorized, "no identity")
 		return
 	}
 	assetID := chi.URLParam(r, "assetID")
 	if assetID == "" {
-		writeError(w, http.StatusBadRequest, "assetID required")
+		httpx.WriteError(w, http.StatusBadRequest, "assetID required")
 		return
 	}
-	token, expires, err := h.svc.IssueTicket(identity.User.ID, displayName(identity), assetID)
+	token, expires, err := h.tickets.IssueTicket(identity.User.ID, displayName(identity), assetID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ticket":     token,
 		"expires_at": expires,
 	})
@@ -83,22 +95,23 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	assetID := chi.URLParam(r, "assetID")
 	ticket := r.URL.Query().Get("ticket")
 	if ticket == "" {
-		writeError(w, http.StatusUnauthorized, "ticket required")
+		httpx.WriteError(w, http.StatusUnauthorized, "ticket required")
 		return
 	}
-	userID, userName, boundAsset, err := h.svc.ConsumeTicket(ticket)
+	t, err := h.tickets.ConsumeTicket(ticket)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, err.Error())
+		httpx.WriteError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	if boundAsset != assetID {
-		writeError(w, http.StatusForbidden, "ticket does not match asset")
+	if t.AssetID != assetID {
+		httpx.WriteError(w, http.StatusForbidden, "ticket does not match asset")
 		return
 	}
+	userID, userName := t.UserID, t.UserName
 
 	release, err := h.svc.AcquireSession(userID)
 	if err != nil {
-		writeError(w, http.StatusTooManyRequests, err.Error())
+		httpx.WriteError(w, http.StatusTooManyRequests, err.Error())
 		return
 	}
 	defer release()
@@ -123,7 +136,9 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		h.logger.Printf("session audit start failed: %v", sErr)
 	}
 
-	bytesIn, bytesOut, exitCode, runErr := h.runSession(r.Context(), conn, assetID, userName)
+	recorder := h.openRecorder(sessionID)
+
+	bytesIn, bytesOut, exitCode, runErr := h.runSession(r.Context(), conn, assetID, userName, recorder)
 	if runErr != nil {
 		h.logger.Printf("session ended: user=%s asset=%s err=%v", userID, assetID, runErr)
 		_ = conn.WriteJSON(map[string]any{"type": "error", "message": runErr.Error()})
@@ -142,6 +157,68 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 			BytesOut:  bytesOut,
 			Error:     endMsg,
 		})
+		// Recording upload runs on its own deadline: a multi-MB cast on a
+		// slow link can't fit in the 5s session-end window, and a missed
+		// upload silently produces a session row with no recording. The
+		// upload happens after End so the audit row is durable either way.
+		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer uploadCancel()
+		h.finalizeRecording(uploadCtx, sessionID, recorder)
+	} else if recorder != nil {
+		// Session-audit row never landed; close the recorder and drop the
+		// temp file rather than uploading an orphaned cast.
+		_, _ = recorder.Close()
+		_ = os.Remove(recorder.Path())
+	}
+}
+
+// openRecorder creates a per-session asciinema cast file when storage is
+// configured and the session has an audit row to attach the upload to. nil
+// return is the safe no-op path; the rest of the handler treats a nil
+// recorder as "recording disabled".
+func (h *Handler) openRecorder(sessionID string) *Recorder {
+	if sessionID == "" || h.storage == nil || !h.storage.IsEnabled() {
+		return nil
+	}
+	path := filepath.Join(os.TempDir(), "ops-cast-"+sessionID+".cast")
+	rec, err := NewRecorder(path, 80, 24)
+	if err != nil {
+		h.logger.Printf("recorder open failed: %v", err)
+		return nil
+	}
+	return rec
+}
+
+// finalizeRecording closes the cast file, uploads it to object storage, and
+// updates the session row with the storage key + size. All errors are logged
+// but never bubbled — a failed upload must not break the session-end audit.
+func (h *Handler) finalizeRecording(ctx context.Context, sessionID string, rec *Recorder) {
+	if rec == nil {
+		return
+	}
+	path := rec.Path()
+	size, err := rec.Close()
+	if err != nil {
+		h.logger.Printf("recorder close failed: session=%s err=%v", sessionID, err)
+	}
+	defer os.Remove(path)
+	if size == 0 || h.storage == nil || !h.storage.IsEnabled() {
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		h.logger.Printf("open cast failed: session=%s err=%v", sessionID, err)
+		return
+	}
+	defer f.Close()
+	key := "terminal/" + time.Now().UTC().Format("2006/01/02") + "/" + sessionID + ".cast"
+	obj, err := h.storage.PutObject(ctx, key, f, size, "application/x-asciicast")
+	if err != nil {
+		h.logger.Printf("upload cast failed: session=%s err=%v", sessionID, err)
+		return
+	}
+	if err := h.sessions.SetRecording(ctx, sessionID, obj.Key, obj.Size); err != nil {
+		h.logger.Printf("persist recording metadata failed: session=%s err=%v", sessionID, err)
 	}
 }
 
@@ -159,7 +236,7 @@ type inboundFrame struct {
 	Rows    int    `json:"rows,omitempty"`
 }
 
-func (h *Handler) runSession(ctx context.Context, ws *websocket.Conn, assetID, userName string) (bytesIn, bytesOut int64, exitCode *int, err error) {
+func (h *Handler) runSession(ctx context.Context, ws *websocket.Conn, assetID, userName string, recorder *Recorder) (bytesIn, bytesOut int64, exitCode *int, err error) {
 	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	client, err := h.dialer.DialAssetSSH(dialCtx, assetID)
@@ -249,6 +326,11 @@ func (h *Handler) runSession(ctx context.Context, ws *websocket.Conn, assetID, u
 			n, err := src.Read(buf)
 			if n > 0 {
 				outBytes.add(int64(n))
+				// Record what the user sees BEFORE forwarding to ws so a slow
+				// websocket send can't drop frames from the audit cast.
+				if rerr := recorder.WriteOutput(buf[:n]); rerr != nil {
+					h.logger.Printf("recorder write: %v", rerr)
+				}
 				if werr := ws.WriteJSON(map[string]any{"type": "data", "payload": string(buf[:n])}); werr != nil {
 					return
 				}
@@ -302,12 +384,3 @@ func displayName(id iam.UserIdentity) string {
 	return id.User.ID
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}

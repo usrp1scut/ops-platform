@@ -1,13 +1,13 @@
 package hostkey
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"ops-platform/internal/iam"
+	"ops-platform/internal/platform/httpx"
 )
 
 type Handler struct {
@@ -45,30 +45,30 @@ func (h *Handler) Routes() http.Handler {
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	items, err := h.repo.List(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *Handler) approveOverride(w http.ResponseWriter, r *http.Request) {
 	scope := chi.URLParam(r, "scope")
 	targetID := chi.URLParam(r, "targetID")
 	if scope != ScopeAsset && scope != ScopeProxy {
-		writeError(w, http.StatusBadRequest, "scope must be asset|proxy")
+		httpx.WriteError(w, http.StatusBadRequest, "scope must be asset|proxy")
 		return
 	}
 	identity, _ := iam.IdentityFromContext(r.Context())
 	admin := h.displayName(identity)
 	if err := h.repo.ApproveOverride(r.Context(), scope, targetID, admin, OverrideTTL); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			writeError(w, http.StatusNotFound, "host key record not found")
+			httpx.WriteError(w, http.StatusNotFound, "host key record not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"status":     "override_pending",
 		"ttl_minute": int(OverrideTTL.Minutes()),
 	})
@@ -79,21 +79,12 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	targetID := chi.URLParam(r, "targetID")
 	if err := h.repo.Delete(r.Context(), scope, targetID); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			writeError(w, http.StatusNotFound, "host key record not found")
+			httpx.WriteError(w, http.StatusNotFound, "host key record not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}

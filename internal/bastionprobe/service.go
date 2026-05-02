@@ -18,6 +18,7 @@ import (
 	"ops-platform/internal/cmdb"
 	"ops-platform/internal/config"
 	"ops-platform/internal/hostkey"
+	"ops-platform/internal/sshproxy"
 )
 
 // KeyLookup resolves an SSH key by name (typically from EC2 KeyName) to the
@@ -134,6 +135,51 @@ func (s *Service) DialAssetSSH(ctx context.Context, assetID string) (*ssh.Client
 	return s.dialSSH(ctx, target, s.cfg.ProbeTimeout)
 }
 
+// RDPResolution holds everything the guacproxy needs to open a session to an
+// RDP asset. When the asset is behind a VPC proxy, ProxyClient is non-nil and
+// the caller must open a local forwarder via ProxyClient.Dial("tcp", TargetAddr)
+// and advertise that forwarder to guacd. When ProxyClient is nil, guacd can
+// dial TargetAddr directly. Caller owns closing ProxyClient.
+type RDPResolution struct {
+	Target      cmdb.BastionProbeTarget
+	TargetAddr  string
+	ProxyClient *ssh.Client
+}
+
+// ResolveAssetRDP resolves an asset for an RDP connection. It fetches the
+// connection profile, validates protocol=rdp, and — when the asset carries a
+// VPC proxy — dials the proxy so the caller can tunnel TCP through it. The
+// returned credentials come decrypted inside Target.
+func (s *Service) ResolveAssetRDP(ctx context.Context, assetID string) (RDPResolution, error) {
+	target, err := s.repo.GetBastionProbeTarget(ctx, assetID, s.cfg.MasterKey)
+	if err != nil {
+		return RDPResolution{}, err
+	}
+	protocol := strings.ToLower(strings.TrimSpace(target.Protocol))
+	if protocol != "rdp" {
+		return RDPResolution{}, fmt.Errorf("asset protocol is %q, rdp required", target.Protocol)
+	}
+	port := target.Port
+	if port <= 0 {
+		port = 3389
+	}
+	res := RDPResolution{
+		Target:     target,
+		TargetAddr: net.JoinHostPort(target.Host, strconv.Itoa(port)),
+	}
+	if target.ProxyRequired && target.Proxy == nil {
+		return RDPResolution{}, fmt.Errorf("asset %s requires bastion proxy but none is resolved", target.AssetID)
+	}
+	if target.Proxy != nil {
+		proxyClient, err := s.dialProxy(ctx, target.Proxy, s.cfg.ProbeTimeout)
+		if err != nil {
+			return RDPResolution{}, fmt.Errorf("proxy dial: %w", err)
+		}
+		res.ProxyClient = proxyClient
+	}
+	return res, nil
+}
+
 // ProbeAsset runs a single probe for a specific asset synchronously and returns
 // the resulting snapshot. The snapshot is persisted and connection probe status
 // is updated.
@@ -178,12 +224,13 @@ func (s *Service) TestConnection(ctx context.Context, assetID string) error {
 			return errors.New(msg)
 		}
 	case "postgres":
-		conn, pingErr := s.dialPostgres(testCtx, target, s.cfg.ProbeTimeout)
+		conn, cleanup, pingErr := s.dialPostgres(testCtx, target, s.cfg.ProbeTimeout)
 		if pingErr != nil {
 			_ = s.repo.UpdateConnectionProbeStatus(ctx, assetID, "failed", pingErr.Error())
 			return pingErr
 		}
 		_ = conn.Close(ctx)
+		cleanup()
 	default:
 		msg := "unsupported protocol: " + target.Protocol
 		_ = s.repo.UpdateConnectionProbeStatus(ctx, assetID, "failed", msg)
@@ -306,6 +353,10 @@ func (s *Service) dialSSH(ctx context.Context, target cmdb.BastionProbeTarget, t
 		return nil, fmt.Errorf("unsupported protocol for ssh dial: %s", target.Protocol)
 	}
 
+	if target.ProxyRequired && target.Proxy == nil {
+		return nil, fmt.Errorf("asset %s requires bastion proxy but none is resolved", target.AssetID)
+	}
+
 	if err := s.resolveKeyCredentials(ctx, &target); err != nil {
 		return nil, err
 	}
@@ -326,7 +377,7 @@ func (s *Service) dialSSH(ctx context.Context, target cmdb.BastionProbeTarget, t
 		return ssh.Dial("tcp", addr, sshCfg)
 	}
 
-	proxyClient, err := s.dialProxy(target.Proxy, timeout)
+	proxyClient, err := s.dialProxy(ctx, target.Proxy, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("proxy dial: %w", err)
 	}
@@ -349,7 +400,10 @@ func (s *Service) dialSSH(ctx context.Context, target cmdb.BastionProbeTarget, t
 	return client, nil
 }
 
-func (s *Service) dialProxy(p *cmdb.SSHProxyTarget, timeout time.Duration) (*ssh.Client, error) {
+func (s *Service) dialProxy(ctx context.Context, p *sshproxy.SSHProxyTarget, timeout time.Duration) (*ssh.Client, error) {
+	if err := s.resolveProxyKeyCredentials(ctx, p); err != nil {
+		return nil, err
+	}
 	auth, err := buildSSHAuth(p.AuthType, p.Password, p.PrivateKey, p.Passphrase)
 	if err != nil {
 		return nil, err
@@ -366,6 +420,35 @@ func (s *Service) dialProxy(p *cmdb.SSHProxyTarget, timeout time.Duration) (*ssh
 	}
 	addr := net.JoinHostPort(p.Host, strconv.Itoa(port))
 	return ssh.Dial("tcp", addr, cfg)
+}
+
+// resolveProxyKeyCredentials mirrors resolveKeyCredentials for proxy targets.
+// Proxies created by VPC-proxy promotion carry only a key_name and rely on the
+// keypair store (the same indirection the source asset uses).
+func (s *Service) resolveProxyKeyCredentials(ctx context.Context, p *sshproxy.SSHProxyTarget) error {
+	authType := strings.ToLower(strings.TrimSpace(p.AuthType))
+	if authType != "key" {
+		return nil
+	}
+	if strings.TrimSpace(p.PrivateKey) != "" {
+		return nil
+	}
+	name := strings.TrimSpace(p.KeyName)
+	if name == "" {
+		return nil
+	}
+	if s.keys == nil {
+		return fmt.Errorf("proxy references key %q but no keypair store is configured", name)
+	}
+	pk, pass, err := s.keys.GetSecretsByName(ctx, name)
+	if err != nil {
+		return fmt.Errorf("lookup proxy keypair %q: %w", name, err)
+	}
+	p.PrivateKey = pk
+	if strings.TrimSpace(p.Passphrase) == "" {
+		p.Passphrase = pass
+	}
+	return nil
 }
 
 // resolveKeyCredentials fills in PrivateKey/Passphrase from the named keypair
@@ -491,8 +574,11 @@ func splitLines(raw string) []string {
 
 // dialPostgres connects to a PostgreSQL target. When target.Proxy is set the
 // TCP connection is tunnelled through the SSH proxy so operators can reach DBs
-// in isolated network zones.
-func (s *Service) dialPostgres(ctx context.Context, target cmdb.BastionProbeTarget, timeout time.Duration) (*pgx.Conn, error) {
+// in isolated network zones. The returned cleanup MUST be called by the caller
+// after closing the pgx.Conn — it releases the underlying SSH client used for
+// the tunnel (no-op when no proxy is involved). Skipping it leaks one SSH
+// session per probe.
+func (s *Service) dialPostgres(ctx context.Context, target cmdb.BastionProbeTarget, timeout time.Duration) (*pgx.Conn, func(), error) {
 	host := target.Host
 	port := target.Port
 	if port <= 0 {
@@ -504,7 +590,7 @@ func (s *Service) dialPostgres(ctx context.Context, target cmdb.BastionProbeTarg
 	}
 	cfg, err := pgx.ParseConfig("postgres://")
 	if err != nil {
-		return nil, err
+		return nil, func() {}, err
 	}
 	cfg.Host = host
 	cfg.Port = uint16(port)
@@ -515,30 +601,37 @@ func (s *Service) dialPostgres(ctx context.Context, target cmdb.BastionProbeTarg
 	// disable TLS for now (v1); many internal DBs don't present a cert
 	cfg.TLSConfig = nil
 
+	if target.ProxyRequired && target.Proxy == nil {
+		return nil, func() {}, fmt.Errorf("asset %s requires bastion proxy but none is resolved", target.AssetID)
+	}
+	cleanup := func() {}
 	if target.Proxy != nil {
-		proxyClient, err := s.dialProxy(target.Proxy, timeout)
+		proxyClient, err := s.dialProxy(ctx, target.Proxy, timeout)
 		if err != nil {
-			return nil, fmt.Errorf("proxy dial: %w", err)
+			return nil, func() {}, fmt.Errorf("proxy dial: %w", err)
 		}
+		cleanup = func() { _ = proxyClient.Close() }
 		cfg.DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			conn, err := proxyClient.Dial(network, addr)
-			if err != nil {
-				return nil, err
-			}
-			return conn, nil
+			return proxyClient.Dial(network, addr)
 		}
 	}
 
 	connCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return pgx.ConnectConfig(connCtx, cfg)
+	conn, err := pgx.ConnectConfig(connCtx, cfg)
+	if err != nil {
+		cleanup()
+		return nil, func() {}, err
+	}
+	return conn, cleanup, nil
 }
 
 func (s *Service) collectPostgresSnapshot(ctx context.Context, target cmdb.BastionProbeTarget) (collectedSnapshot, error) {
-	conn, err := s.dialPostgres(ctx, target, s.cfg.ProbeTimeout)
+	conn, cleanup, err := s.dialPostgres(ctx, target, s.cfg.ProbeTimeout)
 	if err != nil {
 		return collectedSnapshot{}, err
 	}
+	defer cleanup()
 	defer conn.Close(ctx)
 
 	snapshot := collectedSnapshot{raw: make(map[string]any), osName: "postgres"}

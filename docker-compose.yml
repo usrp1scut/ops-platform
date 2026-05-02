@@ -22,6 +22,12 @@ services:
     ports:
       - "6379:6379"
 
+  guacd:
+    image: guacamole/guacd:1.5.5
+    ports:
+      - "127.0.0.1:4822:4822"
+    restart: unless-stopped
+
   minio:
     image: minio/minio:RELEASE.2025-02-03T21-03-04Z
     command: server /data --console-address ":9001"
@@ -75,6 +81,13 @@ services:
       OPS_OIDC_USERINFO_URL: ${OPS_OIDC_USERINFO_URL-}
       OPS_OIDC_SCOPES: ${OPS_OIDC_SCOPES-openid,profile,email}
       OPS_OIDC_BOOTSTRAP_ADMIN_SUBS: ${OPS_OIDC_BOOTSTRAP_ADMIN_SUBS-}
+      OPS_GUACD_ADDR: ${OPS_GUACD_ADDR-guacd:4822}
+      OPS_GUAC_TUNNEL_HOST: ${OPS_GUAC_TUNNEL_HOST-ops-api}
+      OPS_RECORDING_ENDPOINT: ${OPS_RECORDING_ENDPOINT-minio:9000}
+      OPS_RECORDING_ACCESS_KEY: ${OPS_RECORDING_ACCESS_KEY-minio}
+      OPS_RECORDING_SECRET_KEY: ${OPS_RECORDING_SECRET_KEY-miniopassword}
+      OPS_RECORDING_BUCKET: ${OPS_RECORDING_BUCKET-ops-platform-recordings}
+      OPS_RECORDING_USE_SSL: ${OPS_RECORDING_USE_SSL-false}
       GOPROXY: ${GOPROXY-https://goproxy.cn,direct}
       HTTP_PROXY: ${HTTP_PROXY-}
       HTTPS_PROXY: ${HTTPS_PROXY-}
@@ -83,6 +96,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      guacd:
+        condition: service_started
 
   ops-worker:
     build:

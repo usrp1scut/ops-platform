@@ -31,6 +31,19 @@ type Config struct {
 	ProbeTimeout           time.Duration
 	ProbeConcurrency       int
 	ProbeBatchSize         int
+	GuacdAddr              string
+	GuacTunnelHost         string
+
+	// Recording storage. When RecordingEnabled is false (no endpoint configured)
+	// terminal sessions run normally but no asciinema cast is captured. The
+	// SSL/path-style flags handle MinIO-vs-AWS-S3 differences.
+	RecordingEnabled  bool
+	RecordingEndpoint string
+	RecordingAccessID string
+	RecordingSecret   string
+	RecordingBucket   string
+	RecordingRegion   string
+	RecordingUseSSL   bool
 }
 
 func Load() (Config, error) {
@@ -51,7 +64,16 @@ func Load() (Config, error) {
 		OIDCBootstrapAdminSubs: parseCSV(strings.TrimSpace(os.Getenv("OPS_OIDC_BOOTSTRAP_ADMIN_SUBS"))),
 		SyncRunOnStart:         !strings.EqualFold(strings.TrimSpace(getenv("OPS_SYNC_RUN_ON_START", "true")), "false"),
 		ProbeRunOnStart:        !strings.EqualFold(strings.TrimSpace(getenv("OPS_PROBE_RUN_ON_START", "true")), "false"),
+		GuacdAddr:              strings.TrimSpace(getenv("OPS_GUACD_ADDR", "127.0.0.1:4822")),
+		GuacTunnelHost:         strings.TrimSpace(os.Getenv("OPS_GUAC_TUNNEL_HOST")),
+		RecordingEndpoint:      strings.TrimSpace(os.Getenv("OPS_RECORDING_ENDPOINT")),
+		RecordingAccessID:      strings.TrimSpace(os.Getenv("OPS_RECORDING_ACCESS_KEY")),
+		RecordingSecret:        os.Getenv("OPS_RECORDING_SECRET_KEY"),
+		RecordingBucket:        strings.TrimSpace(getenv("OPS_RECORDING_BUCKET", "ops-platform-recordings")),
+		RecordingRegion:        strings.TrimSpace(getenv("OPS_RECORDING_REGION", "us-east-1")),
+		RecordingUseSSL:        strings.EqualFold(strings.TrimSpace(getenv("OPS_RECORDING_USE_SSL", "false")), "true"),
 	}
+	cfg.RecordingEnabled = cfg.RecordingEndpoint != "" && cfg.RecordingAccessID != "" && cfg.RecordingSecret != ""
 
 	intervalText := strings.TrimSpace(getenv("OPS_SYNC_INTERVAL", "15m"))
 	interval, err := time.ParseDuration(intervalText)
