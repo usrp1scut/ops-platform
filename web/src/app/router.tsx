@@ -3,6 +3,7 @@ import { createBrowserRouter } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { ProtectedRoute } from "./layout/ProtectedRoute";
 import { LoginPage } from "../features/auth/LoginPage";
+import { AccessPage } from "../features/access/AccessPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { ModulePlaceholder } from "../features/placeholder/ModulePlaceholder";
 import { ProfilePage } from "../features/profile/ProfilePage";
@@ -56,18 +57,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "access",
-        element: (
-          <ModulePlaceholder
-            title="Access"
-            area="Bastion"
-            permission="bastion.request:read"
-            workflows={[
-              "Request access to an asset",
-              "Review my requests and active grants",
-              "Approve, reject, and cancel pending requests",
-            ]}
-          />
-        ),
+        element: <AccessPage />,
       },
       {
         path: "connectivity",
