@@ -4,6 +4,7 @@ import { AppShell } from "./layout/AppShell";
 import { ProtectedRoute } from "./layout/ProtectedRoute";
 import { LoginPage } from "../features/auth/LoginPage";
 import { AccessPage } from "../features/access/AccessPage";
+import { AwsPage } from "../features/aws/AwsPage";
 import { AssetsPage } from "../features/cmdb/AssetsPage";
 import { IamPage } from "../features/iam/IamPage";
 import { OidcPage } from "../features/oidc/OidcPage";
@@ -68,18 +69,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "aws",
-        element: (
-          <ModulePlaceholder
-            title="AWS"
-            area="Cloud accounts"
-            permission="aws.account:read"
-            workflows={[
-              "Account list, create, update, and test",
-              "Sync status, history, and manual trigger",
-              "Role ARN, external ID, and region allowlist validation",
-            ]}
-          />
-        ),
+        element: <AwsPage />,
       },
       {
         path: "iam",

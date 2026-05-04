@@ -734,6 +734,19 @@ a {
   font-weight: 700;
 }
 
+.last-sync-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-error {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+  color: #9a3f1b;
+}
+
 .detail-list {
   margin: 0;
 }
@@ -814,6 +827,10 @@ a {
   gap: 10px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
+}
+
+.table-filter-field {
+  min-width: 160px;
 }
 
 .text-link-button {
