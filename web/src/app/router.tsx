@@ -6,6 +6,7 @@ import { LoginPage } from "../features/auth/LoginPage";
 import { AccessPage } from "../features/access/AccessPage";
 import { AssetsPage } from "../features/cmdb/AssetsPage";
 import { IamPage } from "../features/iam/IamPage";
+import { OidcPage } from "../features/oidc/OidcPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { ModulePlaceholder } from "../features/placeholder/ModulePlaceholder";
 import { ProfilePage } from "../features/profile/ProfilePage";
@@ -86,18 +87,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "oidc",
-        element: (
-          <ModulePlaceholder
-            title="OIDC"
-            area="Runtime settings"
-            permission="iam.user:write"
-            workflows={[
-              "Issuer, client, redirect, scopes, and endpoint overrides",
-              "Secret update without echoing stored values",
-              "Connection test before save",
-            ]}
-          />
-        ),
+        element: <OidcPage />,
       },
       {
         path: "profile",

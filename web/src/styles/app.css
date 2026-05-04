@@ -479,6 +479,11 @@ a {
   height: 16px;
 }
 
+.oidc-enabled-row {
+  align-self: start;
+  padding-top: 0;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
