@@ -10,7 +10,13 @@ import {
   type Asset,
   type AssetConnectionProfile,
 } from "../../api/cmdb";
-import { getSessionRecording, issueTerminalTicket, listSessions, type SessionAuditRecord } from "../../api/sessions";
+import {
+  getSessionRecording,
+  issueRdpTicket,
+  issueTerminalTicket,
+  listSessions,
+  type SessionAuditRecord,
+} from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
 import {
@@ -27,6 +33,7 @@ import {
   type SessionStatusFilter,
 } from "../../lib/sessions";
 import { useAuth } from "../auth/AuthProvider";
+import { RdpSessionPane, type LiveRDPStatus } from "./RdpSessionPane";
 import { SshTerminalPane, type LiveSSHStatus } from "./SshTerminalPane";
 
 type ActionFeedback = {
@@ -41,18 +48,23 @@ type RecordingPreviewState = {
   sessionID: string;
 };
 
-type LiveSSHSession = {
+type LaunchProtocol = "ssh" | "rdp";
+type LiveSessionStatus = LiveSSHStatus | LiveRDPStatus;
+
+type LiveSession = {
   asset: Asset;
   expiresAt: string;
   id: string;
+  kind: LaunchProtocol;
   message?: string;
-  status: LiveSSHStatus;
+  status: LiveSessionStatus;
   ticket: string;
 };
 
 type TerminalLaunchResult = {
   asset: Asset;
   expiresAt: string;
+  kind: LaunchProtocol;
   ticket: string;
 };
 
@@ -102,6 +114,10 @@ function hasSSHCredentials(asset: Asset, profile: AssetConnectionProfile) {
   return profile.has_password || profile.has_private_key || Boolean(asset.key_name);
 }
 
+function hasRDPCredentials(profile: AssetConnectionProfile) {
+  return profile.has_password;
+}
+
 function isNotFoundError(error: unknown) {
   return error instanceof ApiError && error.status === 404;
 }
@@ -109,7 +125,7 @@ function isNotFoundError(error: unknown) {
 function createLiveSessionID() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
 
-  return `ssh-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function SessionsPage() {
@@ -126,8 +142,9 @@ export function SessionsPage() {
   const [draftFilters, setDraftFilters] = useState<SessionFilters>(emptyFilters);
   const [assetQuery, setAssetQuery] = useState("");
   const [selectedAssetID, setSelectedAssetID] = useState("");
+  const [launchProtocol, setLaunchProtocol] = useState<LaunchProtocol>("ssh");
   const [launchFeedback, setLaunchFeedback] = useState<ActionFeedback | null>(null);
-  const [liveSessions, setLiveSessions] = useState<LiveSSHSession[]>([]);
+  const [liveSessions, setLiveSessions] = useState<LiveSession[]>([]);
   const [activeLiveID, setActiveLiveID] = useState("");
   const [recordingFeedback, setRecordingFeedback] = useState<ActionFeedback | null>(null);
   const [recordingPreview, setRecordingPreview] = useState<RecordingPreviewState | null>(null);
@@ -156,7 +173,7 @@ export function SessionsPage() {
     () => filterSessionsByStatus(sessionItems, filters.status),
     [filters.status, sessionItems],
   );
-  const updateLiveSessionStatus = useCallback((sessionID: string, status: LiveSSHStatus, message?: string) => {
+  const updateLiveSessionStatus = useCallback((sessionID: string, status: LiveSessionStatus, message?: string) => {
     setLiveSessions((current) =>
       current.map((session) => (session.id === sessionID ? { ...session, message, status } : session)),
     );
@@ -169,7 +186,13 @@ export function SessionsPage() {
     });
   }, []);
   const launchTerminal = useMutation({
-    mutationFn: async (assetID: string): Promise<TerminalLaunchResult> => {
+    mutationFn: async ({
+      assetID,
+      protocol,
+    }: {
+      assetID: string;
+      protocol: LaunchProtocol;
+    }): Promise<TerminalLaunchResult> => {
       const asset = await getAsset(assetID);
       let profile: AssetConnectionProfile;
 
@@ -182,19 +205,27 @@ export function SessionsPage() {
         throw error;
       }
 
-      if ((profile.protocol || "ssh") !== "ssh") {
-        throw new Error(`Terminal is only available for SSH connections. This asset uses ${profile.protocol}.`);
+      if ((profile.protocol || "ssh") !== protocol) {
+        throw new Error(
+          `${protocol.toUpperCase()} launch is only available for ${protocol} connection profiles. This asset uses ${
+            profile.protocol || "ssh"
+          }.`,
+        );
       }
-      if (!hasSSHCredentials(asset, profile)) {
+      if (protocol === "ssh" && !hasSSHCredentials(asset, profile)) {
         throw new Error("SSH connection has no saved credentials or EC2 KeyName.");
       }
+      if (protocol === "rdp" && !hasRDPCredentials(profile)) {
+        throw new Error("RDP connection has no saved password.");
+      }
 
-      const ticket = await issueTerminalTicket(assetID);
-      if (!ticket.ticket) throw new Error("No terminal ticket returned.");
+      const ticket = protocol === "ssh" ? await issueTerminalTicket(assetID) : await issueRdpTicket(assetID);
+      if (!ticket.ticket) throw new Error(`No ${protocol.toUpperCase()} ticket returned.`);
 
       return {
         asset,
         expiresAt: ticket.expires_at,
+        kind: protocol,
         ticket: ticket.ticket,
       };
     },
@@ -209,12 +240,16 @@ export function SessionsPage() {
           asset: result.asset,
           expiresAt: result.expiresAt,
           id: sessionID,
+          kind: result.kind,
           status: "connecting",
           ticket: result.ticket,
         },
       ]);
       setActiveLiveID(sessionID);
-      setLaunchFeedback({ kind: "success", message: `Terminal ticket issued for ${result.asset.name || result.asset.id}.` });
+      setLaunchFeedback({
+        kind: "success",
+        message: `${result.kind.toUpperCase()} ticket issued for ${result.asset.name || result.asset.id}.`,
+      });
     },
     onError: (error) => {
       setLaunchFeedback({
@@ -266,11 +301,11 @@ export function SessionsPage() {
     event.preventDefault();
     const assetID = selectedAssetID.trim();
     if (!assetID) {
-      setLaunchFeedback({ kind: "error", message: "Select an asset before launching terminal." });
+      setLaunchFeedback({ kind: "error", message: `Select an asset before launching ${launchProtocol.toUpperCase()}.` });
       return;
     }
 
-    launchTerminal.mutate(assetID);
+    launchTerminal.mutate({ assetID, protocol: launchProtocol });
   }
 
   return (
@@ -324,8 +359,8 @@ export function SessionsPage() {
       <article className="work-panel">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Live SSH</p>
-            <h2>Launch terminal</h2>
+            <p className="eyebrow">Live access</p>
+            <h2>Launch session</h2>
           </div>
           <button
             type="button"
@@ -348,6 +383,24 @@ export function SessionsPage() {
         ) : null}
 
         <form className="request-form" onSubmit={launchSelectedAsset}>
+          <div className="drawer-tabs" role="tablist" aria-label="Launch protocol">
+            {[
+              { label: "SSH", value: "ssh" },
+              { label: "RDP", value: "rdp" },
+            ].map((item) => (
+              <button
+                type="button"
+                className={`drawer-tab${launchProtocol === item.value ? " active" : ""}`}
+                key={item.value}
+                onClick={() => setLaunchProtocol(item.value as LaunchProtocol)}
+                role="tab"
+                aria-selected={launchProtocol === item.value}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
           <div className="form-grid">
             <label className="form-field">
               <span>Asset search</span>
@@ -383,7 +436,9 @@ export function SessionsPage() {
                 disabled={!canReadSessions || launchTerminal.isPending || !selectedAssetID}
               >
                 <Play size={16} aria-hidden="true" />
-                <span>{launchTerminal.isPending ? "Launching" : "Launch SSH"}</span>
+                <span>
+                  {launchTerminal.isPending ? "Launching" : `Launch ${launchProtocol.toUpperCase()}`}
+                </span>
               </button>
             </div>
           </div>
@@ -396,7 +451,7 @@ export function SessionsPage() {
 
         {liveSessions.length > 0 ? (
           <div className="live-session-shell">
-            <div className="live-session-tabs" role="tablist" aria-label="Live SSH sessions">
+            <div className="live-session-tabs" role="tablist" aria-label="Live sessions">
               {liveSessions.map((session) => (
                 <div className={`live-session-tab${activeLiveID === session.id ? " active" : ""}`} key={session.id}>
                   <button
@@ -406,7 +461,8 @@ export function SessionsPage() {
                     role="tab"
                     aria-selected={activeLiveID === session.id}
                   >
-                    <span>{session.asset.name || session.asset.id}</span>
+                    <span className="kind-tag">{session.kind.toUpperCase()}</span>
+                    <span className="session-label">{session.asset.name || session.asset.id}</span>
                     <span className={`status-pill ${session.status === "error" ? "warn" : "info"}`}>
                       {session.status}
                     </span>
@@ -426,20 +482,31 @@ export function SessionsPage() {
             <div className="live-session-stage">
               {liveSessions.map((session) => (
                 <div className="live-session-panel" hidden={activeLiveID !== session.id} key={session.id}>
-                  <SshTerminalPane
-                    active={activeLiveID === session.id}
-                    assetID={session.asset.id}
-                    assetName={session.asset.name || session.asset.id}
-                    onStatusChange={updateLiveSessionStatus}
-                    sessionID={session.id}
-                    ticket={session.ticket}
-                  />
+                  {session.kind === "ssh" ? (
+                    <SshTerminalPane
+                      active={activeLiveID === session.id}
+                      assetID={session.asset.id}
+                      assetName={session.asset.name || session.asset.id}
+                      onStatusChange={updateLiveSessionStatus}
+                      sessionID={session.id}
+                      ticket={session.ticket}
+                    />
+                  ) : (
+                    <RdpSessionPane
+                      active={activeLiveID === session.id}
+                      assetID={session.asset.id}
+                      assetName={session.asset.name || session.asset.id}
+                      onStatusChange={updateLiveSessionStatus}
+                      sessionID={session.id}
+                      ticket={session.ticket}
+                    />
+                  )}
                 </div>
               ))}
             </div>
           </div>
         ) : (
-          <PanelState kind="empty" message="No live terminals open." />
+          <PanelState kind="empty" message="No live sessions open." />
         )}
       </article>
 
