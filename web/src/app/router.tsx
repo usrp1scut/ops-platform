@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./layout/ProtectedRoute";
 import { LoginPage } from "../features/auth/LoginPage";
 import { AccessPage } from "../features/access/AccessPage";
 import { AssetsPage } from "../features/cmdb/AssetsPage";
+import { IamPage } from "../features/iam/IamPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { ModulePlaceholder } from "../features/placeholder/ModulePlaceholder";
 import { ProfilePage } from "../features/profile/ProfilePage";
@@ -81,18 +82,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "iam",
-        element: (
-          <ModulePlaceholder
-            title="IAM"
-            area="Identity"
-            permission="iam.user:read"
-            workflows={[
-              "User list and selected identity details",
-              "Role bind and unbind",
-              "Role permission inspection",
-            ]}
-          />
-        ),
+        element: <IamPage />,
       },
       {
         path: "oidc",

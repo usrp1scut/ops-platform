@@ -489,6 +489,10 @@ a {
   border-collapse: collapse;
 }
 
+.data-table.compact-table {
+  min-width: 760px;
+}
+
 .data-table th,
 .data-table td {
   padding: 11px 12px;
@@ -506,6 +510,10 @@ a {
 
 .data-table tbody tr:hover {
   background: #f6faf9;
+}
+
+.data-table tbody tr.selected {
+  background: #e8f6f2;
 }
 
 .asset-name-cell {
@@ -768,6 +776,39 @@ a {
   gap: 6px;
   background: #eef3ff;
   color: #234b8d;
+}
+
+.role-chip-list {
+  padding-top: 4px;
+}
+
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip-icon-button {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(22, 33, 37, 0.08);
+  color: #344644;
+}
+
+.chip-icon-button:hover {
+  background: rgba(154, 63, 27, 0.12);
+  color: #9a3f1b;
+}
+
+.role-bind-form {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
 }
 
 .text-link-button {
