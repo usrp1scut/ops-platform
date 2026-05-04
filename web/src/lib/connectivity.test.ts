@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  filterHostKeys,
+  hostKeyCounts,
+  hostKeyStatusTone,
   sshProxyCredentialLabels,
   sshProxyFormToPayload,
   sshProxyToForm,
@@ -95,5 +98,108 @@ describe("sshProxyCredentialLabels", () => {
         username: "ops",
       }),
     ).toEqual(["private key", "passphrase"]);
+  });
+});
+
+describe("filterHostKeys", () => {
+  const hostKeys = [
+    {
+      created_at: "",
+      fingerprint_sha256: "SHA256:abc",
+      first_seen_at: "",
+      host: "10.0.0.10",
+      id: "hk-1",
+      key_type: "ssh-ed25519",
+      last_seen_at: "",
+      port: 22,
+      scope: "asset" as const,
+      status: "active",
+      target_id: "asset-1",
+      target_name: "db-prod",
+      updated_at: "",
+    },
+    {
+      created_at: "",
+      fingerprint_sha256: "SHA256:def",
+      first_seen_at: "",
+      host: "10.0.0.20",
+      id: "hk-2",
+      key_type: "rsa",
+      last_seen_at: "",
+      port: 22,
+      scope: "proxy" as const,
+      status: "override_pending",
+      target_id: "proxy-1",
+      target_name: "zone-a",
+      updated_at: "",
+    },
+  ];
+
+  it("filters by scope", () => {
+    expect(filterHostKeys(hostKeys, { query: "", scope: "proxy" }).map((item) => item.id)).toEqual(["hk-2"]);
+  });
+
+  it("searches target, host, and fingerprint fields", () => {
+    expect(filterHostKeys(hostKeys, { query: "abc", scope: "all" }).map((item) => item.id)).toEqual(["hk-1"]);
+  });
+});
+
+describe("hostKeyCounts", () => {
+  it("counts pinned, override pending, and active mismatches", () => {
+    expect(
+      hostKeyCounts([
+        {
+          created_at: "",
+          fingerprint_sha256: "SHA256:abc",
+          first_seen_at: "",
+          host: "10.0.0.10",
+          id: "hk-1",
+          key_type: "ssh-ed25519",
+          last_mismatch_at: "2026-01-01T00:00:00Z",
+          last_seen_at: "",
+          port: 22,
+          scope: "asset",
+          status: "active",
+          target_id: "asset-1",
+          updated_at: "",
+        },
+        {
+          created_at: "",
+          fingerprint_sha256: "SHA256:def",
+          first_seen_at: "",
+          host: "10.0.0.20",
+          id: "hk-2",
+          key_type: "rsa",
+          last_seen_at: "",
+          port: 22,
+          scope: "proxy",
+          status: "override_pending",
+          target_id: "proxy-1",
+          updated_at: "",
+        },
+      ]),
+    ).toEqual({ mismatched: 1, pending: 1, pinned: 2 });
+  });
+});
+
+describe("hostKeyStatusTone", () => {
+  it("marks active mismatches as warnings", () => {
+    expect(
+      hostKeyStatusTone({
+        created_at: "",
+        fingerprint_sha256: "SHA256:abc",
+        first_seen_at: "",
+        host: "10.0.0.10",
+        id: "hk-1",
+        key_type: "ssh-ed25519",
+        last_mismatch_at: "2026-01-01T00:00:00Z",
+        last_seen_at: "",
+        port: 22,
+        scope: "asset",
+        status: "active",
+        target_id: "asset-1",
+        updated_at: "",
+      }),
+    ).toBe("warn");
   });
 });

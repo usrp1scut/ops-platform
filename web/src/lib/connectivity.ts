@@ -1,4 +1,4 @@
-import type { SSHProxy, SSHProxyAuthType, UpsertSSHProxyPayload } from "../api/connectivity";
+import type { HostKeyRecord, HostKeyScope, SSHProxy, SSHProxyAuthType, UpsertSSHProxyPayload } from "../api/connectivity";
 
 export type SSHProxyFormMode = "create" | "edit";
 
@@ -16,6 +16,17 @@ export type SSHProxyFormState = {
   port: string;
   privateKey: string;
   username: string;
+};
+
+export type HostKeyFilters = {
+  query: string;
+  scope: "all" | HostKeyScope;
+};
+
+export type HostKeyCounts = {
+  mismatched: number;
+  pinned: number;
+  pending: number;
 };
 
 export const emptySSHProxyForm: SSHProxyFormState = {
@@ -103,4 +114,32 @@ export function sshProxyCredentialLabels(proxy: SSHProxy) {
     proxy.has_private_key ? "private key" : "",
     proxy.has_passphrase ? "passphrase" : "",
   ].filter(Boolean);
+}
+
+export function filterHostKeys(items: HostKeyRecord[], filters: HostKeyFilters) {
+  const query = filters.query.trim().toLowerCase();
+
+  return items.filter((item) => {
+    if (filters.scope !== "all" && item.scope !== filters.scope) return false;
+    if (!query) return true;
+
+    return [item.target_name, item.target_id, item.host, item.fingerprint_sha256].some((value) =>
+      (value || "").toLowerCase().includes(query),
+    );
+  });
+}
+
+export function hostKeyCounts(items: HostKeyRecord[]): HostKeyCounts {
+  return {
+    mismatched: items.filter((item) => item.status === "active" && Boolean(item.last_mismatch_at)).length,
+    pending: items.filter((item) => item.status === "override_pending").length,
+    pinned: items.length,
+  };
+}
+
+export function hostKeyStatusTone(item: HostKeyRecord) {
+  if (item.status === "override_pending") return "info";
+  if (item.status === "active" && item.last_mismatch_at) return "warn";
+  if (item.status === "active") return "ok";
+  return "";
 }
