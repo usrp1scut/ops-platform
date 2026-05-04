@@ -377,6 +377,10 @@ a {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.form-grid .full-field {
+  grid-column: 1 / -1;
+}
+
 .form-grid.compact-grid {
   grid-template-columns: repeat(6, minmax(120px, 1fr));
 }

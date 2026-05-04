@@ -6,6 +6,7 @@ import { LoginPage } from "../features/auth/LoginPage";
 import { AccessPage } from "../features/access/AccessPage";
 import { AwsPage } from "../features/aws/AwsPage";
 import { AssetsPage } from "../features/cmdb/AssetsPage";
+import { ConnectivityPage } from "../features/connectivity/ConnectivityPage";
 import { IamPage } from "../features/iam/IamPage";
 import { OidcPage } from "../features/oidc/OidcPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
@@ -54,18 +55,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "connectivity",
-        element: (
-          <ModulePlaceholder
-            title="Connectivity"
-            area="Network"
-            permission="cmdb.asset:read"
-            workflows={[
-              "SSH proxy inventory",
-              "Host key overrides",
-              "SSH keypair management",
-            ]}
-          />
-        ),
+        element: <ConnectivityPage />,
       },
       {
         path: "aws",
