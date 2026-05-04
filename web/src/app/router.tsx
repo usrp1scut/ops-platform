@@ -1,0 +1,138 @@
+import { createBrowserRouter } from "react-router-dom";
+
+import { AppShell } from "./layout/AppShell";
+import { ProtectedRoute } from "./layout/ProtectedRoute";
+import { LoginPage } from "../features/auth/LoginPage";
+import { OverviewPage } from "../features/overview/OverviewPage";
+import { ModulePlaceholder } from "../features/placeholder/ModulePlaceholder";
+import { ProfilePage } from "../features/profile/ProfilePage";
+
+export const router = createBrowserRouter([
+  {
+    path: "/login",
+    element: <LoginPage />,
+  },
+  {
+    path: "/",
+    element: (
+      <ProtectedRoute>
+        <AppShell />
+      </ProtectedRoute>
+    ),
+    children: [
+      {
+        index: true,
+        element: <OverviewPage />,
+      },
+      {
+        path: "cmdb",
+        element: (
+          <ModulePlaceholder
+            title="CMDB"
+            area="Inventory"
+            permission="cmdb.asset:read"
+            workflows={[
+              "Asset list, search, filters, and pagination",
+              "Asset drawer, relations, connection profile, and probe state",
+              "Create, update, delete, and VPC proxy promotion flows",
+            ]}
+          />
+        ),
+      },
+      {
+        path: "sessions",
+        element: (
+          <ModulePlaceholder
+            title="Sessions"
+            area="Live access"
+            permission="cmdb.asset:read"
+            workflows={[
+              "Live sessions and audit list",
+              "Terminal and RDP ticket launch",
+              "Session replay availability and recording lookup",
+            ]}
+          />
+        ),
+      },
+      {
+        path: "access",
+        element: (
+          <ModulePlaceholder
+            title="Access"
+            area="Bastion"
+            permission="bastion.request:read"
+            workflows={[
+              "Request access to an asset",
+              "Review my requests and active grants",
+              "Approve, reject, and cancel pending requests",
+            ]}
+          />
+        ),
+      },
+      {
+        path: "connectivity",
+        element: (
+          <ModulePlaceholder
+            title="Connectivity"
+            area="Network"
+            permission="cmdb.asset:read"
+            workflows={[
+              "SSH proxy inventory",
+              "Host key overrides",
+              "SSH keypair management",
+            ]}
+          />
+        ),
+      },
+      {
+        path: "aws",
+        element: (
+          <ModulePlaceholder
+            title="AWS"
+            area="Cloud accounts"
+            permission="aws.account:read"
+            workflows={[
+              "Account list, create, update, and test",
+              "Sync status, history, and manual trigger",
+              "Role ARN, external ID, and region allowlist validation",
+            ]}
+          />
+        ),
+      },
+      {
+        path: "iam",
+        element: (
+          <ModulePlaceholder
+            title="IAM"
+            area="Identity"
+            permission="iam.user:read"
+            workflows={[
+              "User list and selected identity details",
+              "Role bind and unbind",
+              "Role permission inspection",
+            ]}
+          />
+        ),
+      },
+      {
+        path: "oidc",
+        element: (
+          <ModulePlaceholder
+            title="OIDC"
+            area="Runtime settings"
+            permission="iam.user:write"
+            workflows={[
+              "Issuer, client, redirect, scopes, and endpoint overrides",
+              "Secret update without echoing stored values",
+              "Connection test before save",
+            ]}
+          />
+        ),
+      },
+      {
+        path: "profile",
+        element: <ProfilePage />,
+      },
+    ],
+  },
+]);
