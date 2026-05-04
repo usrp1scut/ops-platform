@@ -1,8 +1,16 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Download, MonitorPlay, RefreshCw, Search, ShieldCheck, SquareTerminal, Timer, Video } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
+import { Download, MonitorPlay, Play, RefreshCw, Search, ShieldCheck, SquareTerminal, Timer, Video, X } from "lucide-react";
+import { type FormEvent, useCallback, useMemo, useState } from "react";
 
-import { getSessionRecording, listSessions, type SessionAuditRecord } from "../../api/sessions";
+import { ApiError } from "../../api/client";
+import {
+  getAsset,
+  getAssetConnectionProfile,
+  listAssets,
+  type Asset,
+  type AssetConnectionProfile,
+} from "../../api/cmdb";
+import { getSessionRecording, issueTerminalTicket, listSessions, type SessionAuditRecord } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
 import {
@@ -19,6 +27,7 @@ import {
   type SessionStatusFilter,
 } from "../../lib/sessions";
 import { useAuth } from "../auth/AuthProvider";
+import { SshTerminalPane, type LiveSSHStatus } from "./SshTerminalPane";
 
 type ActionFeedback = {
   kind: "error" | "success";
@@ -30,6 +39,21 @@ type RecordingPreviewState = {
   preview: RecordingPreview;
   rawText: string;
   sessionID: string;
+};
+
+type LiveSSHSession = {
+  asset: Asset;
+  expiresAt: string;
+  id: string;
+  message?: string;
+  status: LiveSSHStatus;
+  ticket: string;
+};
+
+type TerminalLaunchResult = {
+  asset: Asset;
+  expiresAt: string;
+  ticket: string;
 };
 
 const emptyFilters: SessionFilters = {
@@ -67,6 +91,27 @@ function downloadRecording(sessionID: string, rawText: string) {
   URL.revokeObjectURL(url);
 }
 
+function assetOptionLabel(asset: Asset) {
+  const name = asset.name || asset.id;
+  const detail = [asset.env, asset.region, asset.private_ip || asset.public_ip].filter(Boolean).join(" / ");
+
+  return detail ? `${name} (${detail})` : name;
+}
+
+function hasSSHCredentials(asset: Asset, profile: AssetConnectionProfile) {
+  return profile.has_password || profile.has_private_key || Boolean(asset.key_name);
+}
+
+function isNotFoundError(error: unknown) {
+  return error instanceof ApiError && error.status === 404;
+}
+
+function createLiveSessionID() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+
+  return `ssh-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function SessionsPage() {
   const auth = useAuth();
   const userID = auth.identity?.user.id || "";
@@ -79,10 +124,20 @@ export function SessionsPage() {
   );
   const [filters, setFilters] = useState<SessionFilters>(emptyFilters);
   const [draftFilters, setDraftFilters] = useState<SessionFilters>(emptyFilters);
+  const [assetQuery, setAssetQuery] = useState("");
+  const [selectedAssetID, setSelectedAssetID] = useState("");
+  const [launchFeedback, setLaunchFeedback] = useState<ActionFeedback | null>(null);
+  const [liveSessions, setLiveSessions] = useState<LiveSSHSession[]>([]);
+  const [activeLiveID, setActiveLiveID] = useState("");
   const [recordingFeedback, setRecordingFeedback] = useState<ActionFeedback | null>(null);
   const [recordingPreview, setRecordingPreview] = useState<RecordingPreviewState | null>(null);
   const effectiveUserID = canReadAllSessions ? filters.userID.trim() : "";
   const effectiveAssetID = filters.assetID.trim();
+  const assetSearch = useQuery({
+    queryKey: ["cmdb", "assets", "sessions-terminal-search", userID, assetQuery],
+    queryFn: () => listAssets({ limit: 30, query: assetQuery.trim() || undefined, status: "active" }),
+    enabled: canReadSessions && Boolean(userID),
+  });
   const sessions = useQuery({
     queryKey: ["sessions", userID, effectiveUserID, effectiveAssetID, filters.status],
     queryFn: () =>
@@ -94,12 +149,80 @@ export function SessionsPage() {
     enabled: canReadSessions && Boolean(userID),
     refetchInterval: 10000,
   });
+  const assetItems = assetSearch.data?.items || [];
   const sessionItems = sessions.data?.items || [];
   const counts = sessionCounts(sessionItems);
   const visibleSessions = useMemo(
     () => filterSessionsByStatus(sessionItems, filters.status),
     [filters.status, sessionItems],
   );
+  const updateLiveSessionStatus = useCallback((sessionID: string, status: LiveSSHStatus, message?: string) => {
+    setLiveSessions((current) =>
+      current.map((session) => (session.id === sessionID ? { ...session, message, status } : session)),
+    );
+  }, []);
+  const closeLiveSession = useCallback((sessionID: string) => {
+    setLiveSessions((current) => {
+      const next = current.filter((session) => session.id !== sessionID);
+      setActiveLiveID((activeID) => (activeID === sessionID ? next[0]?.id || "" : activeID));
+      return next;
+    });
+  }, []);
+  const launchTerminal = useMutation({
+    mutationFn: async (assetID: string): Promise<TerminalLaunchResult> => {
+      const asset = await getAsset(assetID);
+      let profile: AssetConnectionProfile;
+
+      try {
+        profile = await getAssetConnectionProfile(assetID);
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          throw new Error("This asset has no connection profile. Save SSH credentials in CMDB first.");
+        }
+        throw error;
+      }
+
+      if ((profile.protocol || "ssh") !== "ssh") {
+        throw new Error(`Terminal is only available for SSH connections. This asset uses ${profile.protocol}.`);
+      }
+      if (!hasSSHCredentials(asset, profile)) {
+        throw new Error("SSH connection has no saved credentials or EC2 KeyName.");
+      }
+
+      const ticket = await issueTerminalTicket(assetID);
+      if (!ticket.ticket) throw new Error("No terminal ticket returned.");
+
+      return {
+        asset,
+        expiresAt: ticket.expires_at,
+        ticket: ticket.ticket,
+      };
+    },
+    onMutate: () => {
+      setLaunchFeedback(null);
+    },
+    onSuccess: (result) => {
+      const sessionID = createLiveSessionID();
+      setLiveSessions((current) => [
+        ...current,
+        {
+          asset: result.asset,
+          expiresAt: result.expiresAt,
+          id: sessionID,
+          status: "connecting",
+          ticket: result.ticket,
+        },
+      ]);
+      setActiveLiveID(sessionID);
+      setLaunchFeedback({ kind: "success", message: `Terminal ticket issued for ${result.asset.name || result.asset.id}.` });
+    },
+    onError: (error) => {
+      setLaunchFeedback({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to launch terminal.",
+      });
+    },
+  });
   const inspectRecording = useMutation({
     mutationFn: async (session: SessionAuditRecord) => {
       const rawText = await getSessionRecording(session.id);
@@ -137,6 +260,17 @@ export function SessionsPage() {
   function resetFilters() {
     setDraftFilters(emptyFilters);
     setFilters(emptyFilters);
+  }
+
+  function launchSelectedAsset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const assetID = selectedAssetID.trim();
+    if (!assetID) {
+      setLaunchFeedback({ kind: "error", message: "Select an asset before launching terminal." });
+      return;
+    }
+
+    launchTerminal.mutate(assetID);
   }
 
   return (
@@ -186,6 +320,128 @@ export function SessionsPage() {
           <span className={`status-pill ${counts.errors > 0 ? "warn" : "ok"}`}>{counts.errors} errors</span>
         </article>
       </div>
+
+      <article className="work-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Live SSH</p>
+            <h2>Launch terminal</h2>
+          </div>
+          <button
+            type="button"
+            className="secondary-button compact"
+            onClick={() => void assetSearch.refetch()}
+            disabled={!canReadSessions || assetSearch.isFetching}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+            <span>{assetSearch.isFetching ? "Refreshing" : "Refresh assets"}</span>
+          </button>
+        </div>
+
+        {launchFeedback ? <PanelState kind={launchFeedback.kind} message={launchFeedback.message} /> : null}
+        {!canReadSessions ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
+        {canReadSessions && assetSearch.isError ? (
+          <PanelState
+            kind="error"
+            message={assetSearch.error instanceof Error ? assetSearch.error.message : "Failed to load assets."}
+          />
+        ) : null}
+
+        <form className="request-form" onSubmit={launchSelectedAsset}>
+          <div className="form-grid">
+            <label className="form-field">
+              <span>Asset search</span>
+              <input
+                type="search"
+                value={assetQuery}
+                onChange={(event) => setAssetQuery(event.target.value)}
+                placeholder="Name, IP, owner, region"
+                disabled={!canReadSessions}
+              />
+            </label>
+
+            <label className="form-field">
+              <span>Asset</span>
+              <select
+                value={selectedAssetID}
+                onChange={(event) => setSelectedAssetID(event.target.value)}
+                disabled={!canReadSessions || assetSearch.isLoading}
+              >
+                <option value="">Select an active asset</option>
+                {assetItems.map((asset) => (
+                  <option value={asset.id} key={asset.id}>
+                    {assetOptionLabel(asset)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="form-actions align-end">
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={!canReadSessions || launchTerminal.isPending || !selectedAssetID}
+              >
+                <Play size={16} aria-hidden="true" />
+                <span>{launchTerminal.isPending ? "Launching" : "Launch SSH"}</span>
+              </button>
+            </div>
+          </div>
+
+          {canReadSessions && assetSearch.isLoading ? <PanelState kind="loading" message="Loading active assets" /> : null}
+          {canReadSessions && !assetSearch.isLoading && !assetSearch.isError && assetItems.length === 0 ? (
+            <PanelState kind="empty" message="No active assets match this search." />
+          ) : null}
+        </form>
+
+        {liveSessions.length > 0 ? (
+          <div className="live-session-shell">
+            <div className="live-session-tabs" role="tablist" aria-label="Live SSH sessions">
+              {liveSessions.map((session) => (
+                <div className={`live-session-tab${activeLiveID === session.id ? " active" : ""}`} key={session.id}>
+                  <button
+                    type="button"
+                    className="live-session-tab-main"
+                    onClick={() => setActiveLiveID(session.id)}
+                    role="tab"
+                    aria-selected={activeLiveID === session.id}
+                  >
+                    <span>{session.asset.name || session.asset.id}</span>
+                    <span className={`status-pill ${session.status === "error" ? "warn" : "info"}`}>
+                      {session.status}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button compact-icon"
+                    onClick={() => closeLiveSession(session.id)}
+                    title="Close terminal"
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="live-session-stage">
+              {liveSessions.map((session) => (
+                <div className="live-session-panel" hidden={activeLiveID !== session.id} key={session.id}>
+                  <SshTerminalPane
+                    active={activeLiveID === session.id}
+                    assetID={session.asset.id}
+                    assetName={session.asset.name || session.asset.id}
+                    onStatusChange={updateLiveSessionStatus}
+                    sessionID={session.id}
+                    ticket={session.ticket}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <PanelState kind="empty" message="No live terminals open." />
+        )}
+      </article>
 
       <div className="profile-grid">
         <article className="work-panel">

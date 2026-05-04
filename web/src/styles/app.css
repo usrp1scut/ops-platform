@@ -176,6 +176,11 @@ a {
   color: #0b6f68;
 }
 
+.icon-button.compact-icon {
+  width: 32px;
+  height: 32px;
+}
+
 .page-frame {
   min-width: 0;
   padding: 28px;
@@ -423,6 +428,11 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.form-actions.align-end {
+  align-self: end;
+  padding-top: 22px;
 }
 
 .filter-panel {
@@ -763,6 +773,99 @@ a {
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.live-session-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.live-session-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.live-session-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  padding: 5px;
+  border: 1px solid #d6e0de;
+  border-radius: 8px;
+  background: #f6faf9;
+}
+
+.live-session-tab.active {
+  border-color: #21a69a;
+  background: #e8f6f2;
+}
+
+.live-session-tab-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #223330;
+  font-weight: 800;
+}
+
+.live-session-tab-main span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-session-stage {
+  border-radius: 8px;
+  background: #000000;
+  overflow: hidden;
+}
+
+.live-session-panel[hidden] {
+  display: none;
+}
+
+.live-terminal-pane {
+  position: relative;
+  min-height: 460px;
+  background: #000000;
+}
+
+.live-terminal-host {
+  min-height: 460px;
+  padding: 8px;
+}
+
+.live-terminal-host .xterm {
+  height: 100%;
+}
+
+.live-terminal-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  max-width: min(420px, 70%);
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(16, 24, 32, 0.84);
+  color: #e7f0ec;
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.live-terminal-status.connected {
+  background: rgba(15, 127, 119, 0.9);
+}
+
+.live-terminal-status.error {
+  background: rgba(154, 63, 27, 0.92);
 }
 
 .detail-list {
