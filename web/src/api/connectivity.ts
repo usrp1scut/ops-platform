@@ -40,6 +40,28 @@ export type DeleteSSHProxyResponse = {
   status: string;
 };
 
+export type SSHKeypair = {
+  created_at: string;
+  description?: string;
+  fingerprint: string;
+  has_passphrase: boolean;
+  id: string;
+  name: string;
+  updated_at: string;
+  uploaded_by?: string;
+};
+
+export type UpsertSSHKeypairPayload = {
+  description: string;
+  name: string;
+  passphrase?: string;
+  private_key: string;
+};
+
+export type DeleteSSHKeypairResponse = {
+  status: string;
+};
+
 export type HostKeyRecord = {
   created_at: string;
   fingerprint_sha256: string;
@@ -74,6 +96,10 @@ export function buildSSHProxyPath(proxyID: string) {
   return `/api/v1/cmdb/ssh-proxies/${encodeURIComponent(proxyID)}`;
 }
 
+export function buildSSHKeypairPath(keypairID: string) {
+  return `/api/v1/ssh-keypairs/${encodeURIComponent(keypairID)}`;
+}
+
 export function buildHostKeyPath(scope: HostKeyScope, targetID: string) {
   return `/api/v1/cmdb/hostkeys/${encodeURIComponent(scope)}/${encodeURIComponent(targetID)}`;
 }
@@ -102,6 +128,23 @@ export function updateSSHProxy(proxyID: string, payload: UpsertSSHProxyPayload) 
 
 export function deleteSSHProxy(proxyID: string) {
   return apiRequest<DeleteSSHProxyResponse>(buildSSHProxyPath(proxyID), {
+    method: "DELETE",
+  });
+}
+
+export function listSSHKeypairs() {
+  return apiRequest<SSHKeypair[]>("/api/v1/ssh-keypairs/");
+}
+
+export function upsertSSHKeypair(payload: UpsertSSHKeypairPayload) {
+  return apiRequest<SSHKeypair>("/api/v1/ssh-keypairs/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSSHKeypair(keypairID: string) {
+  return apiRequest<DeleteSSHKeypairResponse>(buildSSHKeypairPath(keypairID), {
     method: "DELETE",
   });
 }

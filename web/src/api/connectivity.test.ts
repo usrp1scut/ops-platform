@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHostKeyOverridePath, buildHostKeyPath, buildSSHProxyPath } from "./connectivity";
+import { buildHostKeyOverridePath, buildHostKeyPath, buildSSHKeypairPath, buildSSHProxyPath } from "./connectivity";
 
 describe("buildSSHProxyPath", () => {
   it("encodes proxy ids for detail endpoints", () => {
     expect(buildSSHProxyPath("proxy/one")).toBe("/api/v1/cmdb/ssh-proxies/proxy%2Fone");
+  });
+});
+
+describe("buildSSHKeypairPath", () => {
+  it("encodes keypair ids for delete endpoints", () => {
+    expect(buildSSHKeypairPath("ops/key one")).toBe("/api/v1/ssh-keypairs/ops%2Fkey%20one");
   });
 });
 

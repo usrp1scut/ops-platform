@@ -1,4 +1,12 @@
-import type { HostKeyRecord, HostKeyScope, SSHProxy, SSHProxyAuthType, UpsertSSHProxyPayload } from "../api/connectivity";
+import type {
+  HostKeyRecord,
+  HostKeyScope,
+  SSHKeypair,
+  SSHProxy,
+  SSHProxyAuthType,
+  UpsertSSHKeypairPayload,
+  UpsertSSHProxyPayload,
+} from "../api/connectivity";
 
 export type SSHProxyFormMode = "create" | "edit";
 
@@ -29,6 +37,13 @@ export type HostKeyCounts = {
   pending: number;
 };
 
+export type SSHKeypairFormState = {
+  description: string;
+  name: string;
+  passphrase: string;
+  privateKey: string;
+};
+
 export const emptySSHProxyForm: SSHProxyFormState = {
   authType: "password",
   description: "",
@@ -43,6 +58,13 @@ export const emptySSHProxyForm: SSHProxyFormState = {
   port: "22",
   privateKey: "",
   username: "",
+};
+
+export const emptySSHKeypairForm: SSHKeypairFormState = {
+  description: "",
+  name: "",
+  passphrase: "",
+  privateKey: "",
 };
 
 export function sshProxyToForm(proxy: SSHProxy | undefined): SSHProxyFormState {
@@ -114,6 +136,38 @@ export function sshProxyCredentialLabels(proxy: SSHProxy) {
     proxy.has_private_key ? "private key" : "",
     proxy.has_passphrase ? "passphrase" : "",
   ].filter(Boolean);
+}
+
+export function sshKeypairFormToPayload(form: SSHKeypairFormState): UpsertSSHKeypairPayload {
+  const payload: UpsertSSHKeypairPayload = {
+    description: form.description.trim(),
+    name: form.name.trim(),
+    private_key: form.privateKey,
+  };
+
+  if (form.passphrase.trim()) {
+    payload.passphrase = form.passphrase;
+  }
+
+  return payload;
+}
+
+export function validateSSHKeypairForm(form: SSHKeypairFormState) {
+  if (!form.name.trim()) return "Name is required.";
+  if (!form.privateKey.trim()) return "Private key is required.";
+
+  return "";
+}
+
+export function filterSSHKeypairs(items: SSHKeypair[], queryValue: string) {
+  const query = queryValue.trim().toLowerCase();
+  if (!query) return items;
+
+  return items.filter((item) =>
+    [item.name, item.fingerprint, item.description, item.uploaded_by].some((value) =>
+      (value || "").toLowerCase().includes(query),
+    ),
+  );
 }
 
 export function filterHostKeys(items: HostKeyRecord[], filters: HostKeyFilters) {

@@ -1,29 +1,51 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Fingerprint, Network, Plus, RefreshCw, Route, Save, Search, ShieldCheck, Trash2 } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
+import {
+  Copy,
+  Fingerprint,
+  KeyRound,
+  Network,
+  Plus,
+  RefreshCw,
+  Route,
+  Save,
+  Search,
+  ShieldCheck,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { type ChangeEvent, type FormEvent, useMemo, useState } from "react";
 
 import {
   approveHostKeyOverride,
   createSSHProxy,
+  deleteSSHKeypair,
   deleteHostKey,
   deleteSSHProxy,
   listHostKeys,
+  listSSHKeypairs,
   listSSHProxies,
   updateSSHProxy,
+  upsertSSHKeypair,
   type HostKeyRecord,
   type HostKeyScope,
+  type SSHKeypair,
   type SSHProxy,
 } from "../../api/connectivity";
 import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
 import {
   emptySSHProxyForm,
+  emptySSHKeypairForm,
+  filterSSHKeypairs,
   filterHostKeys,
   hostKeyCounts,
   hostKeyStatusTone,
+  sshKeypairFormToPayload,
   sshProxyCredentialLabels,
   sshProxyFormToPayload,
   sshProxyToForm,
+  validateSSHKeypairForm,
+  type SSHKeypairFormState,
   validateSSHProxyForm,
   type SSHProxyFormMode,
   type SSHProxyFormState,
@@ -35,7 +57,7 @@ type ActionFeedback = {
   message: string;
 };
 
-type ConnectivityTab = "proxies" | "hostkeys";
+type ConnectivityTab = "proxies" | "hostkeys" | "keypairs";
 
 function formatDateTime(value: string | undefined) {
   if (!value) return "-";
@@ -60,6 +82,14 @@ function updateForm<K extends keyof SSHProxyFormState>(
   setForm: (updater: (current: SSHProxyFormState) => SSHProxyFormState) => void,
   key: K,
   value: SSHProxyFormState[K],
+) {
+  setForm((current) => ({ ...current, [key]: value }));
+}
+
+function updateKeypairForm<K extends keyof SSHKeypairFormState>(
+  setForm: (updater: (current: SSHKeypairFormState) => SSHKeypairFormState) => void,
+  key: K,
+  value: SSHKeypairFormState[K],
 ) {
   setForm((current) => ({ ...current, [key]: value }));
 }
@@ -91,18 +121,27 @@ export function ConnectivityPage() {
   const connectivityRootKey = ["connectivity", userID] as const;
   const [formMode, setFormMode] = useState<SSHProxyFormMode>("create");
   const [form, setForm] = useState<SSHProxyFormState>(emptySSHProxyForm);
+  const [keypairForm, setKeypairForm] = useState<SSHKeypairFormState>(emptySSHKeypairForm);
   const [activeTab, setActiveTab] = useState<ConnectivityTab>("proxies");
   const [hostKeyScope, setHostKeyScope] = useState<"all" | HostKeyScope>("all");
   const [hostKeyQuery, setHostKeyQuery] = useState("");
+  const [keypairQuery, setKeypairQuery] = useState("");
   const [selectedProxyID, setSelectedProxyID] = useState("");
   const [validationError, setValidationError] = useState("");
+  const [keypairValidationError, setKeypairValidationError] = useState("");
   const [formFeedback, setFormFeedback] = useState<ActionFeedback | null>(null);
   const [deleteFeedback, setDeleteFeedback] = useState<ActionFeedback | null>(null);
   const [hostKeyFeedback, setHostKeyFeedback] = useState<ActionFeedback | null>(null);
+  const [keypairFeedback, setKeypairFeedback] = useState<ActionFeedback | null>(null);
 
   const proxies = useQuery({
     queryKey: [...connectivityRootKey, "ssh-proxies"],
     queryFn: listSSHProxies,
+    enabled: canReadAssets && Boolean(userID),
+  });
+  const keypairs = useQuery({
+    queryKey: [...connectivityRootKey, "ssh-keypairs"],
+    queryFn: listSSHKeypairs,
     enabled: canReadAssets && Boolean(userID),
   });
   const hostKeys = useQuery({
@@ -111,11 +150,16 @@ export function ConnectivityPage() {
     enabled: canReadAssets && Boolean(userID),
   });
   const proxyItems = proxies.data?.items || [];
+  const keypairItems = keypairs.data || [];
   const hostKeyItems = hostKeys.data?.items || [];
   const selectedProxy = proxyItems.find((proxy) => proxy.id === selectedProxyID);
   const zoneCount = new Set(proxyItems.map((proxy) => proxy.network_zone).filter(Boolean)).size;
   const keyAuthCount = proxyItems.filter((proxy) => proxy.auth_type === "key").length;
   const hostKeyStats = hostKeyCounts(hostKeyItems);
+  const filteredKeypairs = useMemo(
+    () => filterSSHKeypairs(keypairItems, keypairQuery),
+    [keypairItems, keypairQuery],
+  );
   const filteredHostKeys = useMemo(
     () => filterHostKeys(hostKeyItems, { query: hostKeyQuery, scope: hostKeyScope }),
     [hostKeyItems, hostKeyQuery, hostKeyScope],
@@ -169,6 +213,42 @@ export function ConnectivityPage() {
     },
   });
 
+  const uploadKeypair = useMutation({
+    mutationFn: upsertSSHKeypair,
+    onMutate: () => {
+      setKeypairFeedback(null);
+    },
+    onSuccess: async (keypair) => {
+      setKeypairForm(emptySSHKeypairForm);
+      setKeypairValidationError("");
+      setKeypairFeedback({ kind: "success", message: `SSH keypair saved: ${keypair.name}.` });
+      await queryClient.invalidateQueries({ queryKey: [...connectivityRootKey, "ssh-keypairs"] });
+    },
+    onError: (error) => {
+      setKeypairFeedback({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to save SSH keypair.",
+      });
+    },
+  });
+
+  const removeKeypair = useMutation({
+    mutationFn: deleteSSHKeypair,
+    onMutate: () => {
+      setKeypairFeedback(null);
+    },
+    onSuccess: async () => {
+      setKeypairFeedback({ kind: "success", message: "SSH keypair deleted." });
+      await queryClient.invalidateQueries({ queryKey: [...connectivityRootKey, "ssh-keypairs"] });
+    },
+    onError: (error) => {
+      setKeypairFeedback({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to delete SSH keypair.",
+      });
+    },
+  });
+
   const approveOverride = useMutation({
     mutationFn: (record: HostKeyRecord) => approveHostKeyOverride(record.scope, record.target_id),
     onMutate: () => {
@@ -208,6 +288,7 @@ export function ConnectivityPage() {
 
   function refreshConnectivity() {
     void proxies.refetch();
+    void keypairs.refetch();
     void hostKeys.refetch();
   }
 
@@ -246,9 +327,58 @@ export function ConnectivityPage() {
     updateProxy.mutate({ proxyID: selectedProxyID, payload });
   }
 
+  function submitKeypair(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const error = validateSSHKeypairForm(keypairForm);
+    setKeypairValidationError(error);
+    if (error) return;
+
+    uploadKeypair.mutate(sshKeypairFormToPayload(keypairForm));
+  }
+
+  function readKeypairFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const privateKey = typeof reader.result === "string" ? reader.result : "";
+      setKeypairForm((current) => ({
+        ...current,
+        name: current.name || file.name.replace(/\.(pem|key|txt)$/i, ""),
+        privateKey,
+      }));
+      setKeypairValidationError("");
+    };
+    reader.onerror = () => {
+      setKeypairFeedback({ kind: "error", message: `Failed to read ${file.name}.` });
+    };
+    reader.readAsText(file);
+  }
+
   function deleteSelectedProxy(proxy: SSHProxy) {
     if (!window.confirm(`Delete SSH proxy ${proxy.name}? Assets using it will lose proxy routing.`)) return;
     removeProxy.mutate(proxy.id);
+  }
+
+  function deleteKeypair(keypair: SSHKeypair) {
+    if (
+      !window.confirm(
+        `Delete keypair "${keypair.name}"? Assets referencing this KeyName will lose SSH access until re-uploaded.`,
+      )
+    ) {
+      return;
+    }
+    removeKeypair.mutate(keypair.id);
+  }
+
+  async function copyKeypairFingerprint(fingerprint: string) {
+    try {
+      await navigator.clipboard.writeText(fingerprint);
+      setKeypairFeedback({ kind: "success", message: "Fingerprint copied." });
+    } catch (_error) {
+      setKeypairFeedback({ kind: "error", message: "Failed to copy fingerprint." });
+    }
   }
 
   async function copyFingerprint(fingerprint: string) {
@@ -333,13 +463,13 @@ export function ConnectivityPage() {
 
         <article className="metric-card">
           <div className="metric-icon">
-            <ShieldCheck size={20} aria-hidden="true" />
+            <KeyRound size={20} aria-hidden="true" />
           </div>
           <div>
-            <div className="metric-label">Key auth</div>
-            <div className="metric-value">{canReadAssets ? keyAuthCount : "-"}</div>
+            <div className="metric-label">Keypairs</div>
+            <div className="metric-value">{canReadAssets ? keypairItems.length : "-"}</div>
           </div>
-          <span className="status-pill">{hostKeyStats.pending} override pending</span>
+          <span className="status-pill">{keyAuthCount} key auth proxies</span>
         </article>
       </div>
 
@@ -353,10 +483,10 @@ export function ConnectivityPage() {
             type="button"
             className="secondary-button compact"
             onClick={refreshConnectivity}
-            disabled={!canReadAssets || proxies.isFetching || hostKeys.isFetching}
+            disabled={!canReadAssets || proxies.isFetching || keypairs.isFetching || hostKeys.isFetching}
           >
             <RefreshCw size={14} aria-hidden="true" />
-            <span>{proxies.isFetching || hostKeys.isFetching ? "Refreshing" : "Refresh"}</span>
+            <span>{proxies.isFetching || keypairs.isFetching || hostKeys.isFetching ? "Refreshing" : "Refresh"}</span>
           </button>
         </div>
         <PermissionList permissions={connectivityPermissions} emptyLabel="No CMDB permissions." />
@@ -380,6 +510,15 @@ export function ConnectivityPage() {
           onClick={() => setActiveTab("hostkeys")}
         >
           Host keys
+        </button>
+        <button
+          type="button"
+          className={`drawer-tab${activeTab === "keypairs" ? " active" : ""}`}
+          role="tab"
+          aria-selected={activeTab === "keypairs"}
+          onClick={() => setActiveTab("keypairs")}
+        >
+          Keypairs
         </button>
       </div>
 
@@ -619,6 +758,205 @@ export function ConnectivityPage() {
           </form>
         </article>
       </div>
+      ) : null}
+
+      {activeTab === "keypairs" ? (
+        <div className="profile-grid">
+          <article className="work-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">SSH keypairs</p>
+                <h2>Uploaded keys</h2>
+              </div>
+              <button
+                type="button"
+                className="secondary-button compact"
+                onClick={() => void keypairs.refetch()}
+                disabled={!canReadAssets || keypairs.isFetching}
+              >
+                <RefreshCw size={14} aria-hidden="true" />
+                <span>{keypairs.isFetching ? "Refreshing" : "Refresh"}</span>
+              </button>
+            </div>
+
+            {!canReadAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
+            {!canWriteAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:write" /> : null}
+            {keypairFeedback ? <PanelState kind={keypairFeedback.kind} message={keypairFeedback.message} /> : null}
+
+            {canReadAssets && keypairs.isError ? (
+              <PanelState
+                kind="error"
+                message={keypairs.error instanceof Error ? keypairs.error.message : "Failed to load SSH keypairs."}
+              />
+            ) : null}
+
+            <div className="filter-panel">
+              <label className="form-field search-field">
+                <span>Search</span>
+                <div className="input-with-icon">
+                  <Search size={16} aria-hidden="true" />
+                  <input
+                    type="search"
+                    value={keypairQuery}
+                    onChange={(event) => setKeypairQuery(event.target.value)}
+                    placeholder="Name, fingerprint, uploader"
+                    disabled={!canReadAssets}
+                  />
+                </div>
+              </label>
+            </div>
+
+            {canReadAssets && keypairs.isLoading ? <PanelState kind="loading" message="Loading SSH keypairs" /> : null}
+
+            {canReadAssets && !keypairs.isLoading && !keypairs.isError && filteredKeypairs.length === 0 ? (
+              <PanelState kind="empty" message="No matching SSH keypairs." />
+            ) : null}
+
+            {filteredKeypairs.length > 0 ? (
+              <div className="table-wrap">
+                <table className="data-table compact-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Fingerprint</th>
+                      <th>Passphrase</th>
+                      <th>Uploaded by</th>
+                      <th>Updated</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredKeypairs.map((keypair) => (
+                      <tr key={keypair.id}>
+                        <td>
+                          <strong>{keypair.name}</strong>
+                          {keypair.description ? <div className="muted">{keypair.description}</div> : null}
+                        </td>
+                        <td>
+                          <div className="fingerprint-cell">
+                            <code>{keypair.fingerprint}</code>
+                            <button
+                              type="button"
+                              className="icon-button compact-icon"
+                              onClick={() => void copyKeypairFingerprint(keypair.fingerprint)}
+                              title="Copy fingerprint"
+                            >
+                              <Copy size={14} aria-hidden="true" />
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`status-pill ${keypair.has_passphrase ? "ok" : ""}`}>
+                            {keypair.has_passphrase ? "yes" : "no"}
+                          </span>
+                        </td>
+                        <td>{keypair.uploaded_by || "-"}</td>
+                        <td>{formatDateTime(keypair.updated_at || keypair.created_at)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="secondary-button compact"
+                            onClick={() => deleteKeypair(keypair)}
+                            disabled={!canWriteAssets || removeKeypair.isPending}
+                          >
+                            <Trash2 size={14} aria-hidden="true" />
+                            <span>Delete</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </article>
+
+          <article className="work-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Upload</p>
+                <h2>SSH keypair</h2>
+              </div>
+              <span className={`status-pill ${canWriteAssets ? "ok" : "warn"}`}>
+                {canWriteAssets ? "cmdb.asset:write" : "write required"}
+              </span>
+            </div>
+
+            {keypairValidationError ? <PanelState kind="error" message={keypairValidationError} /> : null}
+
+            <form className="request-form" onSubmit={submitKeypair}>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span>Name</span>
+                  <input
+                    value={keypairForm.name}
+                    onChange={(event) => updateKeypairForm(setKeypairForm, "name", event.target.value)}
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Private key file</span>
+                  <input
+                    type="file"
+                    accept=".pem,.key,.txt,text/plain"
+                    onChange={readKeypairFile}
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+
+                <label className="form-field full-field">
+                  <span>Description</span>
+                  <input
+                    value={keypairForm.description}
+                    onChange={(event) => updateKeypairForm(setKeypairForm, "description", event.target.value)}
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+
+                <label className="form-field full-field">
+                  <span>Private key</span>
+                  <textarea
+                    value={keypairForm.privateKey}
+                    onChange={(event) => updateKeypairForm(setKeypairForm, "privateKey", event.target.value)}
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                    rows={8}
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Passphrase</span>
+                  <input
+                    type="password"
+                    value={keypairForm.passphrase}
+                    onChange={(event) => updateKeypairForm(setKeypairForm, "passphrase", event.target.value)}
+                    placeholder="optional"
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+              </div>
+
+              <div className="form-actions">
+                <button type="submit" className="primary-button" disabled={!canWriteAssets || uploadKeypair.isPending}>
+                  <Upload size={16} aria-hidden="true" />
+                  <span>{uploadKeypair.isPending ? "Saving" : "Upload keypair"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setKeypairForm(emptySSHKeypairForm);
+                    setKeypairValidationError("");
+                  }}
+                  disabled={!canWriteAssets || uploadKeypair.isPending}
+                >
+                  Clear
+                </button>
+              </div>
+            </form>
+          </article>
+        </div>
       ) : null}
 
       {activeTab === "hostkeys" ? (

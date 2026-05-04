@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  filterSSHKeypairs,
   filterHostKeys,
   hostKeyCounts,
   hostKeyStatusTone,
+  sshKeypairFormToPayload,
   sshProxyCredentialLabels,
   sshProxyFormToPayload,
   sshProxyToForm,
+  validateSSHKeypairForm,
   validateSSHProxyForm,
   type SSHProxyFormState,
 } from "./connectivity";
@@ -98,6 +101,63 @@ describe("sshProxyCredentialLabels", () => {
         username: "ops",
       }),
     ).toEqual(["private key", "passphrase"]);
+  });
+});
+
+describe("sshKeypairFormToPayload", () => {
+  it("omits blank passphrases", () => {
+    expect(
+      sshKeypairFormToPayload({
+        description: " prod key ",
+        name: " ops-prod ",
+        passphrase: " ",
+        privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
+      }),
+    ).toEqual({
+      description: "prod key",
+      name: "ops-prod",
+      private_key: "-----BEGIN OPENSSH PRIVATE KEY-----",
+    });
+  });
+});
+
+describe("validateSSHKeypairForm", () => {
+  it("requires a name and private key", () => {
+    expect(validateSSHKeypairForm({ description: "", name: "", passphrase: "", privateKey: "" })).toBe(
+      "Name is required.",
+    );
+    expect(validateSSHKeypairForm({ description: "", name: "ops", passphrase: "", privateKey: "" })).toBe(
+      "Private key is required.",
+    );
+  });
+});
+
+describe("filterSSHKeypairs", () => {
+  const keypairs = [
+    {
+      created_at: "",
+      fingerprint: "SHA256:abc",
+      has_passphrase: true,
+      id: "key-1",
+      name: "ops-prod",
+      updated_at: "",
+      uploaded_by: "admin",
+    },
+    {
+      created_at: "",
+      description: "database access",
+      fingerprint: "SHA256:def",
+      has_passphrase: false,
+      id: "key-2",
+      name: "db-maint",
+      updated_at: "",
+    },
+  ];
+
+  it("searches keypair names, fingerprints, descriptions, and uploaders", () => {
+    expect(filterSSHKeypairs(keypairs, "abc").map((item) => item.id)).toEqual(["key-1"]);
+    expect(filterSSHKeypairs(keypairs, "database").map((item) => item.id)).toEqual(["key-2"]);
+    expect(filterSSHKeypairs(keypairs, "admin").map((item) => item.id)).toEqual(["key-1"]);
   });
 });
 
