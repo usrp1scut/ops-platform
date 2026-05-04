@@ -751,6 +751,20 @@ a {
   color: #9a3f1b;
 }
 
+.recording-preview {
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
+  padding: 14px;
+  border-radius: 8px;
+  background: #101820;
+  color: #e7f0ec;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .detail-list {
   margin: 0;
 }

@@ -10,8 +10,8 @@ import { ConnectivityPage } from "../features/connectivity/ConnectivityPage";
 import { IamPage } from "../features/iam/IamPage";
 import { OidcPage } from "../features/oidc/OidcPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
-import { ModulePlaceholder } from "../features/placeholder/ModulePlaceholder";
 import { ProfilePage } from "../features/profile/ProfilePage";
+import { SessionsPage } from "../features/sessions/SessionsPage";
 
 export const router = createBrowserRouter([
   {
@@ -36,18 +36,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "sessions",
-        element: (
-          <ModulePlaceholder
-            title="Sessions"
-            area="Live access"
-            permission="cmdb.asset:read"
-            workflows={[
-              "Live sessions and audit list",
-              "Terminal and RDP ticket launch",
-              "Session replay availability and recording lookup",
-            ]}
-          />
-        ),
+        element: <SessionsPage />,
       },
       {
         path: "access",

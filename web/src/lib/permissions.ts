@@ -10,6 +10,7 @@ export const knownPermissions = [
   "bastion.grant:write",
   "bastion.request:read",
   "bastion.request:write",
+  "bastion.session:read",
 ] as const;
 
 export type KnownPermission = (typeof knownPermissions)[number];
