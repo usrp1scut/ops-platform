@@ -4,6 +4,7 @@ import { AppShell } from "./layout/AppShell";
 import { ProtectedRoute } from "./layout/ProtectedRoute";
 import { LoginPage } from "../features/auth/LoginPage";
 import { AccessPage } from "../features/access/AccessPage";
+import { AssetsPage } from "../features/cmdb/AssetsPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { ModulePlaceholder } from "../features/placeholder/ModulePlaceholder";
 import { ProfilePage } from "../features/profile/ProfilePage";
@@ -27,18 +28,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "cmdb",
-        element: (
-          <ModulePlaceholder
-            title="CMDB"
-            area="Inventory"
-            permission="cmdb.asset:read"
-            workflows={[
-              "Asset list, search, filters, and pagination",
-              "Asset drawer, relations, connection profile, and probe state",
-              "Create, update, delete, and VPC proxy promotion flows",
-            ]}
-          />
-        ),
+        element: <AssetsPage />,
       },
       {
         path: "sessions",
