@@ -5,6 +5,13 @@ type ApiAuthConfig = {
 
 export type ApiRequestOptions = RequestInit & {
   skipAuth?: boolean;
+  // Force the response payload type. Default ("json") attempts to parse
+  // the body as JSON and falls back to the raw text when parsing fails.
+  // Use "text" when the endpoint returns a payload that is *sometimes*
+  // valid JSON but should always be treated as a string — e.g. asciicast
+  // recordings where a header-only file is technically a JSON object but
+  // the consumer needs the original NDJSON text.
+  responseType?: "json" | "text";
 };
 
 let authConfig: ApiAuthConfig = {
@@ -36,8 +43,9 @@ function shouldSendJsonContentType(body: BodyInit | null | undefined) {
   return hasRequestBody(body) && !(body instanceof FormData);
 }
 
-async function parseResponse(response: Response) {
+async function parseResponse(response: Response, responseType: "json" | "text" | undefined) {
   const text = await response.text();
+  if (responseType === "text") return text;
   if (!text) return {};
 
   try {
@@ -58,7 +66,7 @@ function errorMessage(payload: unknown) {
 }
 
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  const { skipAuth, headers: inputHeaders, ...init } = options;
+  const { skipAuth, responseType, headers: inputHeaders, ...init } = options;
   const headers = new Headers(inputHeaders);
 
   if (shouldSendJsonContentType(init.body) && !headers.has("Content-Type")) {
@@ -75,7 +83,9 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     ...init,
     headers,
   });
-  const payload = await parseResponse(response);
+  // Errors are always returned as JSON shape from the backend; only
+  // success responses respect responseType.
+  const payload = await parseResponse(response, response.ok ? responseType : undefined);
 
   if (!response.ok) {
     if (response.status === 401 && !skipAuth) {

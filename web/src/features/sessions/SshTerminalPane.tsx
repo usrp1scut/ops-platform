@@ -105,7 +105,12 @@ export function SshTerminalPane({ active, assetID, assetName, onStatusChange, se
         const ws = new WebSocket(buildTerminalWebSocketURL(assetID, ticket));
         wsRef.current = ws;
 
+        // Every WebSocket callback guards on `disposed` so that frames
+        // queued in the browser between cleanup and the actual TCP close
+        // do not write into a torn-down xterm or call setState/parent
+        // callbacks for a tab the user already closed.
         ws.onopen = () => {
+          if (disposed) return;
           terminal.write("\x1b[32mconnected\x1b[0m\r\n");
           setStatus("connected", "Connected");
           fitAndResize();
@@ -113,6 +118,7 @@ export function SshTerminalPane({ active, assetID, assetName, onStatusChange, se
         };
 
         ws.onmessage = (event) => {
+          if (disposed) return;
           const frame = frameFromMessage(event.data);
           if (!frame) return;
 
@@ -136,6 +142,7 @@ export function SshTerminalPane({ active, assetID, assetName, onStatusChange, se
         };
 
         ws.onerror = () => {
+          if (disposed) return;
           setStatus("error", "WebSocket connection error");
         };
 

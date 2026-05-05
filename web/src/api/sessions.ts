@@ -66,7 +66,11 @@ export function listSessions(options: ListSessionsOptions = {}) {
 }
 
 export function getSessionRecording(sessionID: string) {
-  return apiRequest<string>(buildSessionRecordingPath(sessionID));
+  // Asciicast files are NDJSON; in particular a session that produced no
+  // output frames is just the v2 header line — a single JSON object —
+  // and the default JSON-first parser would silently hand the caller an
+  // object instead of the raw text that parseAsciicast expects.
+  return apiRequest<string>(buildSessionRecordingPath(sessionID), { responseType: "text" });
 }
 
 export function issueTerminalTicket(assetID: string) {

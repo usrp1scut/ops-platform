@@ -60,4 +60,35 @@ describe("apiRequest", () => {
     });
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
+
+  it("returns a raw string when responseType is 'text', even when the body parses as JSON", async () => {
+    // A header-only asciicast file is technically valid JSON, so the
+    // default JSON-first parser would hand the caller an object and
+    // break callers that expect a string (e.g. parseAsciicast).
+    const headerOnlyCast = JSON.stringify({ version: 2, width: 80, height: 24 });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(headerOnlyCast, { status: 200 })));
+
+    const result = await apiRequest<string>("/api/v1/cmdb/sessions/abc/recording", {
+      responseType: "text",
+    });
+
+    expect(typeof result).toBe("string");
+    expect(result).toBe(headerOnlyCast);
+  });
+
+  it("still parses error responses as JSON when responseType is 'text'", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "recording not found" }), { status: 404 }),
+      ),
+    );
+
+    await expect(
+      apiRequest("/api/v1/cmdb/sessions/missing/recording", { responseType: "text" }),
+    ).rejects.toMatchObject({
+      message: "recording not found",
+      status: 404,
+    });
+  });
 });

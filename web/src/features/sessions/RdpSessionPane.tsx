@@ -83,7 +83,13 @@ export function RdpSessionPane({ active, assetID, assetName, onStatusChange, ses
         scroll.appendChild(display.getElement());
         clientRef.current = client;
 
+        // Both Guacamole callbacks guard on `disposed`. The cleanup below
+        // calls client.disconnect() which itself drives the client into
+        // state 5 (DISCONNECTED) and may also raise onerror — without
+        // these guards we'd setMessage / call onStatusChangeRef on a tab
+        // that the user has already closed.
         client.onstatechange = (state) => {
+          if (disposed) return;
           if (state === 3) {
             setStatus("connected", "Connected");
             return;
@@ -94,6 +100,7 @@ export function RdpSessionPane({ active, assetID, assetName, onStatusChange, ses
         };
 
         client.onerror = (error) => {
+          if (disposed) return;
           setStatus("error", error?.message || "RDP connection error");
         };
 
