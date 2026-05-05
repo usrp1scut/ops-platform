@@ -139,6 +139,7 @@ export function RdpSessionPane({ active, assetID, assetName, onStatusChange, ses
         host.focus();
         setMessage(`Connecting to ${assetNameRef.current || assetID}`);
       } catch (error) {
+        if (disposed) return;
         setStatus("error", error instanceof Error ? error.message : "Failed to open RDP.");
       }
     }

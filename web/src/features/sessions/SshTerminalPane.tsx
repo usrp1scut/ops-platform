@@ -167,6 +167,7 @@ export function SshTerminalPane({ active, assetID, assetName, onStatusChange, se
         }, 30000);
         fitAndResize();
       } catch (error) {
+        if (disposed) return;
         setStatus("error", error instanceof Error ? error.message : "Failed to open terminal.");
       }
     }

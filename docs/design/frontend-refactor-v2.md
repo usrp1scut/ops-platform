@@ -479,3 +479,98 @@ The frontend refactor is complete when:
 - deployment no longer requires editing Go files for frontend-only changes;
 - runtime OIDC and AWS settings remain database-backed and manageable from the
   portal.
+
+## 16. Post-cutover Parity Gap Register
+
+The first cutover proved that the React/Vite portal can run as the primary
+`/portal/` experience, but it also exposed a product-level risk: several
+operator workflows became more generic than the legacy portal instead of being
+organized around the job the operator is trying to complete. Further migration
+work should be driven by workflow parity, not by page-by-page visual parity.
+
+Use this register to decide the next repair batches. A gap should stay open
+until the new portal provides an equal or better path for the same operational
+task and has at least a smoke-level verification path.
+
+| Area | Legacy capability | Current new-portal state | Gap type | Impact | Priority | Repair direction | Acceptance standard |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Sessions | Live operations and audit/replay are separate mental models. Operators can focus on active access when connecting and on historical evidence when reviewing. | Live sessions, historical sessions, recording lookup, replay, SSH launch, and RDP launch are close together in one feature area. | Information architecture, workflow clarity | Operators must visually filter unrelated audit data while trying to connect or manage live access. Audit users also see live-operation controls they may not need. | P1 | Split the sessions feature into clear surfaces: Live Sessions for active connections and launch flows, Session Audit for historical records, and Recording Replay for replay/inspection. | A user can open a live SSH/RDP session without passing through audit-oriented views. A user reviewing audit history can filter, inspect, and replay recordings without live launch controls dominating the page. |
+| Assets | Asset organization supports quick navigation by grouping, hierarchy, or ownership context, making it practical to find a target and connect quickly. | The new CMDB experience is mostly table-first. Table filters are useful for inventory management, but slower for repeated connection workflows. | Workflow parity, navigation model | Frequent operators lose the fast path from asset context to connection action. This makes the new portal feel heavier even when the underlying asset CRUD is richer. | P1 | Add an asset tree or grouped navigator for quick connect. Keep the table for inventory management, but provide a task-focused connection view with protocol actions, recent assets, and possibly favorites. | From the asset tree or grouped navigator, an operator can locate a known asset and start SSH/RDP in one or two actions after selection. The table view remains available for CMDB administration. |
+| IAM | IAM is expected to affect what users can actually do, not only show users, roles, and permission details. | The new IAM UI exposes identity data, but the permission model is not yet expressed as an end-to-end operation contract across backend enforcement, API errors, and frontend affordances. | Authorization closure | A user may see controls that are not actionable, or the UI may look permission-aware without proving that protected operations are enforced consistently. | P0/P1 | Define operation-level permissions for frontend workflows, verify backend enforcement for those operations, and wire frontend affordances to the same permission names. | Protected APIs reject unauthorized calls. The frontend hides or disables unavailable actions with a clear reason. Tests cover at least representative read/write/connect/session-management permissions. |
+
+### 16.1 Gap Triage Rules
+
+- Treat workflow regressions as migration blockers when they slow down a
+  frequent operator task such as connecting to an asset, terminating a live
+  session, or reviewing a recording.
+- Treat authorization gaps as security hardening blockers when the UI exposes a
+  protected operation without a backend-enforced permission contract.
+- Prefer repairing the task model before polishing visual details. A cleaner
+  table does not replace a missing quick-connect path.
+- Keep legacy behavior only as evidence of the original workflow. The repaired
+  new portal may use a different layout if the operator can complete the same
+  task faster and with clearer feedback.
+
+### 16.2 First Repair Epics
+
+#### Epic A: Sessions task separation
+
+Goal: make live operations and audit/replay separate enough that each workflow
+has a clear home.
+
+Scope:
+
+- add separate navigation targets for live sessions and session audit;
+- keep SSH/RDP launch and active connection state in the live surface;
+- keep historical filters, recording lookup, replay, and evidence inspection in
+  the audit surface;
+- preserve shared API/query code where it represents the same backend resource,
+  but avoid sharing page-level state that mixes live and audit concerns.
+
+Suggested verification:
+
+- smoke test for opening the live sessions route after login;
+- smoke test for filtering audit history;
+- unit coverage for any query-key or state split that prevents live and audit
+  data from invalidating each other unexpectedly.
+
+#### Epic B: Asset tree and quick connect
+
+Goal: restore a fast operator path from asset context to connection action while
+keeping the CMDB table for inventory administration.
+
+Scope:
+
+- add a tree, grouped list, or left-side navigator for assets;
+- support useful grouping such as environment, account, region, VPC, owner, or
+  asset type depending on available backend fields;
+- expose SSH/RDP actions from the selected asset when the user has permission;
+- include recent or favorite assets if the backend or local state can support it
+  without changing the domain model too early.
+
+Suggested verification:
+
+- smoke test for selecting an asset and reaching a connection action;
+- permission-aware rendering test for unavailable SSH/RDP actions;
+- regression check that the CMDB table still supports search, filters, and CRUD.
+
+#### Epic C: IAM permission closure
+
+Goal: make permissions operationally meaningful across backend checks, frontend
+controls, and user feedback.
+
+Scope:
+
+- inventory each protected frontend operation and map it to a permission name;
+- verify that the backend enforces those permissions for the corresponding API
+  or WebSocket ticket flow;
+- update frontend permission helpers to gate actions consistently;
+- show clear unavailable states instead of presenting dead controls;
+- add tests for representative allowed and denied paths.
+
+Suggested verification:
+
+- backend tests for denied write/connect/session-management operations;
+- frontend tests for hidden or disabled controls when permissions are absent;
+- manual smoke with a non-admin user that can read inventory but cannot manage
+  IAM, launch sessions, or view recordings unless explicitly granted.
