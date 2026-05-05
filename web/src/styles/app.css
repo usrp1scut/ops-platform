@@ -160,6 +160,23 @@ a {
   font-weight: 700;
 }
 
+.legacy-portal-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid #cedbd8;
+  border-radius: 8px;
+  color: #4a5d59;
+  font-size: 0.85rem;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.legacy-portal-link:hover {
+  background: #f1f7f5;
+  color: #1a1a1a;
+}
+
 .icon-button {
   display: grid;
   width: 36px;

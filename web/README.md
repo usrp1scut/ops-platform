@@ -1,11 +1,11 @@
 # web/
 
 React/TypeScript/Vite frontend for the ops-platform. The build output is
-embedded into the Go API binary and served at `/portal-v2/` alongside the
-legacy classic-script portal at `/portal/`.
-
-The split lets us migrate one feature at a time without breaking operators
-who depend on the old console.
+embedded into the Go API binary and served at `/portal/`. The legacy
+classic-script console is preserved at `/portal-legacy/` for the
+post-cutover observation period; `/portal-v2/` (the staging path used
+during the migration) now 301s to `/portal/` so old bookmarks keep
+working.
 
 ## Stack
 
@@ -64,7 +64,7 @@ npm run dev -- --port 5180
 | `npm test`        | Vitest single run (used by CI)                              |
 | `npm run preview` | Serve the production `dist/` locally for smoke checks       |
 
-## Building for the embedded `/portal-v2/` mount
+## Building for the embedded `/portal/` mount
 
 The Go binary embeds `internal/httpserver/ui/v2/static/`. The build pipeline
 overlays a fresh `web/dist/` over that directory. Vite must be told to build
@@ -72,7 +72,7 @@ with the right base path so its asset URLs match the mount point:
 
 ```bash
 cd web
-MSYS_NO_PATHCONV=1 VITE_BASE=/portal-v2/ npm run build
+MSYS_NO_PATHCONV=1 VITE_BASE=/portal/ npm run build
 cp -R dist/. ../internal/httpserver/ui/v2/static/
 cd ..
 go build ./cmd/ops-api
@@ -81,7 +81,7 @@ go build ./cmd/ops-api
 `MSYS_NO_PATHCONV=1` is required on Git Bash / MSYS — without it, the shell
 rewrites `/portal/` to a Windows path and `dist/index.html` ends up
 referencing `/Program Files/Git/portal/assets/...` instead of the intended
-`/portal-v2/assets/...`. Other shells (zsh, bash on Linux/macOS, PowerShell)
+`/portal/assets/...`. Other shells (zsh, bash on Linux/macOS, PowerShell)
 do not need the prefix.
 
 The Docker build does this automatically in the `web-builder` stage — see
@@ -166,11 +166,11 @@ The CI workflow at `.github/workflows/ci.yml` runs these against an
 in-job Postgres service container. It also runs the Go test suite and
 the web typecheck/Vitest pair.
 
-To target the embedded production build (`/portal-v2/`) instead of the
+To target the embedded production build (`/portal/`) instead of the
 dev server, set:
 
 ```bash
-PLAYWRIGHT_BASE_URL=http://localhost:8080/portal-v2 PLAYWRIGHT_NO_WEBSERVER=1 npm run test:e2e
+PLAYWRIGHT_BASE_URL=http://localhost:8080/portal PLAYWRIGHT_NO_WEBSERVER=1 npm run test:e2e
 ```
 
 ## Migration status
@@ -179,5 +179,8 @@ The migration plan and per-phase deliverables live in
 `docs/design/frontend-refactor-v2.md`. The current state:
 
 - Phase 0–5 ✅ — all features parity-complete with legacy portal.
-- Phase 6 ⏳ — `/portal-v2/` is mounted alongside `/portal/`; cutover (the
-  swap) is the next planned change.
+- Phase 6 ✅ — `/portal/` now serves the React/Vite app; the legacy
+  classic-script console is preserved at `/portal-legacy/` for the
+  observation period; `/portal-v2/` 301s to the new canonical path.
+  Phase 6 cleanup (removing the legacy console after a sprint of
+  observation) is tracked separately.

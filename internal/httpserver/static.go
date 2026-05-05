@@ -23,6 +23,17 @@ func mountUIRoutes(router interface {
 	}
 	portalFileServer := http.FileServer(http.FS(portalFS))
 
+	// Cutover (PR7): /portal/ now serves the React/Vite app and the legacy
+	// classic-script console moves to /portal-legacy/. The previous
+	// /portal-v2/ alias 301s to the new canonical /portal/ so operator
+	// bookmarks created during the parallel period keep working without
+	// silently double-loading the bundle.
+	v2FS, err := webv2.FS()
+	if err != nil {
+		log.Fatalf("failed to mount portal v2 assets: %v", err)
+	}
+	newPortalHandler := newSPAHandler(v2FS)
+
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/portal/", http.StatusFound)
 	})
@@ -35,20 +46,24 @@ func mountUIRoutes(router interface {
 	router.Handle("/ui/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/portal/", http.StatusFound)
 	}))
-	router.Handle("/portal/*", http.StripPrefix("/portal/", portalFileServer))
+	router.Handle("/portal/*", http.StripPrefix("/portal", newPortalHandler))
 
-	// /portal-v2/ serves the new Vite/React app. It runs alongside the legacy
-	// /portal/ during the migration so operators can A/B and roll back without
-	// a redeploy. Cutover (PR7) will swap the routes.
-	v2FS, err := webv2.FS()
-	if err != nil {
-		log.Fatalf("failed to mount portal v2 assets: %v", err)
-	}
-	v2Handler := newSPAHandler(v2FS)
-	router.Get("/portal-v2", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/portal-v2/", http.StatusFound)
+	router.Get("/portal-legacy", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/portal-legacy/", http.StatusFound)
 	})
-	router.Handle("/portal-v2/*", http.StripPrefix("/portal-v2", v2Handler))
+	router.Handle("/portal-legacy/*", http.StripPrefix("/portal-legacy/", portalFileServer))
+
+	router.Get("/portal-v2", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/portal/", http.StatusMovedPermanently)
+	})
+	router.Handle("/portal-v2/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/portal-v2")
+		target := "/portal" + rest
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusMovedPermanently)
+	}))
 }
 
 // newSPAHandler serves a single-page application: known files are served by

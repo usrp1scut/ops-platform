@@ -12,8 +12,10 @@ This repository contains an initial implementation aligned with `docs/design/ops
 - OIDC runtime config API (manageable from web IAM page).
 - Platform bearer token auth + RBAC middleware + write-operation audit log.
 - Embedded frontend console for platform operations.
-- React/Vite portal (new) embedded at `/portal-v2/`, running in parallel
-  with the legacy console during migration. See `web/README.md` and
+- React/Vite portal embedded at `/portal/`. The legacy classic-script
+  console is preserved at `/portal-legacy/` for the post-cutover
+  observation period; `/portal-v2/` (the staging path used during the
+  migration) 301s to `/portal/`. See `web/README.md` and
   `docs/design/frontend-refactor-v2.md`.
 - GitHub Actions CI (`go test`, web typecheck/Vitest, Playwright smoke
   against an in-job Postgres + ops-api).
@@ -111,15 +113,17 @@ Service endpoint:
 
 - API: `http://localhost:8080`
 - Health: `GET /healthz`
-- User Portal (legacy classic-script): `http://localhost:8080/portal/`
-- User Portal (new React/Vite, in migration): `http://localhost:8080/portal-v2/`
+- User Portal (React/Vite): `http://localhost:8080/portal/`
+- User Portal (legacy classic-script, observation period):
+  `http://localhost:8080/portal-legacy/`
+- `/portal-v2/` (the staging path used during the migration) → 301 to
+  `/portal/`
 - Legacy `/ui/*` route is redirected to `/portal/`
 
 Both portals share the same backend, the same `localStorage` token key, and
 the same RBAC model — switching between them does not require re-login.
-Until the cutover (Phase 6 of `docs/design/frontend-refactor-v2.md`),
-`/portal/` remains the canonical entry point and `/portal-v2/` is for
-verification.
+The new `/portal/` is the canonical entry point; `/portal-legacy/` will be
+removed after a sprint of clean operation.
 
 ## Local development without Docker
 
@@ -170,7 +174,7 @@ npm run dev   # http://localhost:5173
 
    See `web/README.md` for full frontend instructions, including how to
    produce a production build that gets embedded into the Go binary at
-   `/portal-v2/`. The Docker build does this automatically via the
+   `/portal/`. The Docker build does this automatically via the
    `web-builder` stage of the root `Dockerfile`.
 
 ## API endpoints (initial)
@@ -220,15 +224,19 @@ Token is returned by `POST /auth/local/login` or `GET /auth/oidc/callback`.
 
 ## Frontend console flow
 
-Two portals are mounted in parallel during the migration:
+Cutover is complete: `/portal/` is the React/Vite console, and the legacy
+classic-script console is preserved at `/portal-legacy/` for the
+observation period.
 
-- `http://localhost:8080/portal/` — legacy classic-script console. Stable,
-  the default operational entry point until cutover.
-- `http://localhost:8080/portal-v2/` — new React/Vite console. Use this
-  to verify the migration; covers Overview, CMDB (with full asset CRUD,
-  manual probe, VPC proxy promote/demote, relations), Sessions (live SSH
-  + RDP, audit, replay preview), Access (bastion grants/requests),
-  Connectivity (SSH proxies, host keys, keypairs), AWS, IAM, and OIDC.
+- `http://localhost:8080/portal/` — React/Vite console. Covers Overview,
+  CMDB (with full asset CRUD, manual probe, VPC proxy promote/demote,
+  relations), Sessions (live SSH + RDP, audit, replay preview), Access
+  (bastion grants/requests), Connectivity (SSH proxies, host keys,
+  keypairs), AWS, IAM, and OIDC. The topbar has an `Old portal` link
+  that jumps back to `/portal-legacy/` while we observe.
+- `http://localhost:8080/portal-legacy/` — frozen copy of the classic
+  console. Used only for cross-checking suspected regressions during the
+  observation period; will be removed in a follow-up.
 
 Sign-in flow is the same on both:
 

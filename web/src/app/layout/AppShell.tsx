@@ -88,6 +88,13 @@ export function AppShell() {
             <span>Frontend migration</span>
           </div>
           <div className="topbar-user">
+            <a
+              className="legacy-portal-link"
+              href="/portal-legacy/"
+              title="Open the previous classic-script console in this tab"
+            >
+              Old portal
+            </a>
             <span className="user-name">{displayName}</span>
             <button type="button" className="icon-button" onClick={auth.logout} title="Sign out">
               <LogOut size={18} aria-hidden="true" />

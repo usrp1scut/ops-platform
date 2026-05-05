@@ -121,8 +121,13 @@ the Go API:
 
 ## Deferred Review Findings
 
-- [ ] Route base and OIDC redirect base are not yet adapted for a `/portal/`
+- [x] Route base and OIDC redirect base are not yet adapted for a `/portal/`
   production mount. The current React router has no `basename`, and OIDC login
   defaults the `next` path to `/`. This is acceptable during the Vite Phase 1
   skeleton because development runs at `/`, but it must be fixed before cutover
   when the new frontend becomes the primary `/portal/` experience.
+
+  Closed by PR2 (`web/src/lib/basename.ts`, `vite.config.ts` `VITE_BASE`,
+  React Router `basename`, OIDC `next` via `fullPath()`) and PR7
+  (cutover swap in `internal/httpserver/static.go`; the `web-builder`
+  Dockerfile stage now runs with `VITE_BASE=/portal/`).

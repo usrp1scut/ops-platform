@@ -1,10 +1,10 @@
 # Stage 1: build the React/Vite web app. The output is consumed by the Go
-# embed in stage 2 and served at /portal-v2/. Cached separately from the Go
+# embed in stage 2 and served at /portal/. Cached separately from the Go
 # layers because npm install is the slow step.
 FROM node:20-alpine AS web-builder
 WORKDIR /app/web
 
-ARG VITE_BASE=/portal-v2/
+ARG VITE_BASE=/portal/
 ENV VITE_BASE=${VITE_BASE}
 
 ARG HTTP_PROXY
@@ -22,7 +22,7 @@ RUN npm run build
 
 # Stage 2: build the Go binaries. The web build output is overlaid onto the
 # embed directory (replacing the committed placeholder.html) before go build
-# runs so /portal-v2/ serves the real React app.
+# runs so /portal/ serves the real React app.
 FROM golang:1.25-alpine AS builder
 WORKDIR /app
 
