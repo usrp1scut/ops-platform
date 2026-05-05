@@ -12,56 +12,62 @@ import { OidcPage } from "../features/oidc/OidcPage";
 import { OverviewPage } from "../features/overview/OverviewPage";
 import { ProfilePage } from "../features/profile/ProfilePage";
 import { SessionsPage } from "../features/sessions/SessionsPage";
+import { appBasename } from "../lib/basename";
 
-export const router = createBrowserRouter([
+export const router = createBrowserRouter(
+  [
+    {
+      path: "/login",
+      element: <LoginPage />,
+    },
+    {
+      path: "/",
+      element: (
+        <ProtectedRoute>
+          <AppShell />
+        </ProtectedRoute>
+      ),
+      children: [
+        {
+          index: true,
+          element: <OverviewPage />,
+        },
+        {
+          path: "cmdb",
+          element: <AssetsPage />,
+        },
+        {
+          path: "sessions",
+          element: <SessionsPage />,
+        },
+        {
+          path: "access",
+          element: <AccessPage />,
+        },
+        {
+          path: "connectivity",
+          element: <ConnectivityPage />,
+        },
+        {
+          path: "aws",
+          element: <AwsPage />,
+        },
+        {
+          path: "iam",
+          element: <IamPage />,
+        },
+        {
+          path: "oidc",
+          element: <OidcPage />,
+        },
+        {
+          path: "profile",
+          element: <ProfilePage />,
+        },
+      ],
+    },
+  ],
   {
-    path: "/login",
-    element: <LoginPage />,
+    basename: appBasename(import.meta.env.BASE_URL),
   },
-  {
-    path: "/",
-    element: (
-      <ProtectedRoute>
-        <AppShell />
-      </ProtectedRoute>
-    ),
-    children: [
-      {
-        index: true,
-        element: <OverviewPage />,
-      },
-      {
-        path: "cmdb",
-        element: <AssetsPage />,
-      },
-      {
-        path: "sessions",
-        element: <SessionsPage />,
-      },
-      {
-        path: "access",
-        element: <AccessPage />,
-      },
-      {
-        path: "connectivity",
-        element: <ConnectivityPage />,
-      },
-      {
-        path: "aws",
-        element: <AwsPage />,
-      },
-      {
-        path: "iam",
-        element: <IamPage />,
-      },
-      {
-        path: "oidc",
-        element: <OidcPage />,
-      },
-      {
-        path: "profile",
-        element: <ProfilePage />,
-      },
-    ],
-  },
-]);
+);
