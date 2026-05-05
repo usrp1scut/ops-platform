@@ -1,0 +1,26 @@
+.git
+.gitignore
+.claude
+.vscode
+.idea
+
+# Web build artifacts: produced inside the web-builder stage; sending the host
+# copy would either bloat the build context or leak a stale dist into the
+# image. Keep web/package.json and web/src/ etc.
+web/node_modules
+web/dist
+
+# Local build output that may have been copied into the embed dir during
+# development. The web-builder stage overlays a fresh build over the
+# committed placeholder.html before `go build` runs.
+internal/httpserver/ui/v2/static/index.html
+internal/httpserver/ui/v2/static/assets
+
+# Repo-level build outputs.
+bin/
+dist/
+
+# Editor / OS / log noise.
+*.log
+.DS_Store
+.env.local
