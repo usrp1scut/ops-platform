@@ -12,6 +12,9 @@ This repository contains an initial implementation aligned with `docs/design/ops
 - OIDC runtime config API (manageable from web IAM page).
 - Platform bearer token auth + RBAC middleware + write-operation audit log.
 - Embedded frontend console for platform operations.
+- React/Vite portal (new) embedded at `/portal-v2/`, running in parallel
+  with the legacy console during migration. See `web/README.md` and
+  `docs/design/frontend-refactor-v2.md`.
 - CMDB asset CRUD API.
 - AWS account onboarding API (multi-account model, assume-role/static modes).
 - AWS sync worker v1 (`ops-worker`) for EC2/VPC/SG/RDS asset ingestion.
@@ -106,8 +109,15 @@ Service endpoint:
 
 - API: `http://localhost:8080`
 - Health: `GET /healthz`
-- User Portal: `http://localhost:8080/portal/`
+- User Portal (legacy classic-script): `http://localhost:8080/portal/`
+- User Portal (new React/Vite, in migration): `http://localhost:8080/portal-v2/`
 - Legacy `/ui/*` route is redirected to `/portal/`
+
+Both portals share the same backend, the same `localStorage` token key, and
+the same RBAC model — switching between them does not require re-login.
+Until the cutover (Phase 6 of `docs/design/frontend-refactor-v2.md`),
+`/portal/` remains the canonical entry point and `/portal-v2/` is for
+verification.
 
 ## Local development without Docker
 
@@ -145,7 +155,29 @@ go run ./cmd/ops-worker
 go run ./cmd/bastion-probe
 ```
 
+6. (Optional) Run the React/Vite portal in dev mode with HMR. The Vite
+   server proxies `/api`, `/auth`, `/healthz`, and `/ws` to the Go API
+   on :8080, so you can iterate on the new portal without rebuilding the
+   Go binary:
+
+```bash
+cd web
+npm install   # first time only
+npm run dev   # http://localhost:5173
+```
+
+   See `web/README.md` for full frontend instructions, including how to
+   produce a production build that gets embedded into the Go binary at
+   `/portal-v2/`. The Docker build does this automatically via the
+   `web-builder` stage of the root `Dockerfile`.
+
 ## API endpoints (initial)
+
+This is the original v1 subset and is no longer exhaustive — the new
+endpoints added with bastion, sessions, connectivity, host keys, keypairs,
+asset relations, probe-run, and VPC proxy promote/demote are not all
+listed here. The authoritative client-facing inventory lives in
+`docs/design/frontend-migration-inventory.md`.
 
 - `GET /auth/oidc/login`
 - `GET /auth/oidc/login?next=/portal/`
@@ -186,16 +218,33 @@ Token is returned by `POST /auth/local/login` or `GET /auth/oidc/callback`.
 
 ## Frontend console flow
 
-1. Open unified portal `http://localhost:8080/portal/`.
+Two portals are mounted in parallel during the migration:
+
+- `http://localhost:8080/portal/` — legacy classic-script console. Stable,
+  the default operational entry point until cutover.
+- `http://localhost:8080/portal-v2/` — new React/Vite console. Use this
+  to verify the migration; covers Overview, CMDB (with full asset CRUD,
+  manual probe, VPC proxy promote/demote, relations), Sessions (live SSH
+  + RDP, audit, replay preview), Access (bastion grants/requests),
+  Connectivity (SSH proxies, host keys, keypairs), AWS, IAM, and OIDC.
+
+Sign-in flow is the same on both:
+
+1. Open the portal URL.
 2. Use `Local Login` (default admin) or click `OIDC Login`.
-3. Browser callback/local login saves token to `localStorage`.
-4. Use portal内导航完成 `Overview / CMDB / AWS / IAM / My Access` 全部操作。
-5. OIDC runtime config is managed from portal IAM module.
+3. Browser callback / local login saves the bearer token to
+   `localStorage` under `ops_platform_access_token`.
+4. Use the in-portal navigation. The token is shared between the two
+   portals, so switching does not require re-login.
+5. OIDC runtime config is managed from the portal's IAM module.
 
 Design references:
 
 - Core platform architecture: `docs/design/ops-platform-v0.3.md`
-- Frontend portal design: `docs/design/frontend-portal-v1.md`
+- Frontend portal design (legacy v1): `docs/design/frontend-portal-v1.md`
+- Frontend refactor (current): `docs/design/frontend-refactor-v2.md`
+- Frontend baseline inventory: `docs/design/frontend-migration-inventory.md`
+- New portal source: `web/README.md`
 
 ## CMDB x Bastion integration (v1)
 
