@@ -10,22 +10,22 @@ describe("guacamoleAssetPath", () => {
 });
 
 describe("buildRdpWebSocketURL", () => {
-  it("builds ws URLs for http pages", () => {
+  it("builds ws URLs with ticket query for http pages", () => {
     expect(
-      buildRdpWebSocketURL("asset/one", {
+      buildRdpWebSocketURL("asset/one", "ticket one", {
         host: "localhost:8080",
         protocol: "http:",
       } as Location),
-    ).toBe("ws://localhost:8080/ws/v1/cmdb/assets/asset%2Fone/rdp");
+    ).toBe("ws://localhost:8080/ws/v1/cmdb/assets/asset%2Fone/rdp?ticket=ticket+one");
   });
 
-  it("builds wss URLs for https pages", () => {
+  it("builds wss URLs with ticket query for https pages", () => {
     expect(
-      buildRdpWebSocketURL("asset one", {
+      buildRdpWebSocketURL("asset one", "ticket/one", {
         host: "ops.example.com",
         protocol: "https:",
       } as Location),
-    ).toBe("wss://ops.example.com/ws/v1/cmdb/assets/asset%20one/rdp");
+    ).toBe("wss://ops.example.com/ws/v1/cmdb/assets/asset%20one/rdp?ticket=ticket%2Fone");
   });
 });
 

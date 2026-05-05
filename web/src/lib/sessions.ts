@@ -92,7 +92,12 @@ export function parseAsciicast(text: string, sampleLimit = 4000): RecordingPrevi
     throw new Error("Recording is empty.");
   }
 
-  const header = JSON.parse(lines[0]) as { height?: number; version?: number; width?: number };
+  let header: { height?: number; version?: number; width?: number };
+  try {
+    header = JSON.parse(lines[0]) as { height?: number; version?: number; width?: number };
+  } catch {
+    throw new Error("Recording header is malformed and cannot be parsed.");
+  }
   if (header.version !== 2) {
     throw new Error(`Unsupported cast version ${header.version || "unknown"}.`);
   }

@@ -165,6 +165,10 @@ export function SessionsPage() {
       }),
     enabled: canReadSessions && Boolean(userID),
     refetchInterval: 10000,
+    // Default in TanStack Query v5 — set explicitly so the intent survives a
+    // future bump or a global QueryClient reconfiguration. Keeps the API
+    // quiet when the operator parks the tab in the background.
+    refetchIntervalInBackground: false,
   });
   const assetItems = assetSearch.data?.items || [];
   const sessionItems = sessions.data?.items || [];

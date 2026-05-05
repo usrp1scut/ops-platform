@@ -109,4 +109,10 @@ describe("parseAsciicast", () => {
     expect(() => parseAsciicast("")).toThrow("Recording is empty.");
     expect(() => parseAsciicast(JSON.stringify({ version: 1 }))).toThrow("Unsupported cast version 1.");
   });
+
+  it("rejects a malformed header instead of throwing a raw SyntaxError", () => {
+    expect(() => parseAsciicast("not json at all\n[0.1,\"o\",\"x\"]")).toThrow(
+      "Recording header is malformed and cannot be parsed.",
+    );
+  });
 });

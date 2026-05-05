@@ -36,6 +36,16 @@ export function SshTerminalPane({ active, assetID, assetName, onStatusChange, se
   const statusRef = useRef<LiveSSHStatus>("connecting");
   const terminalRef = useRef<XtermTerminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  // Mirror the props through refs so the effect below can read the latest
+  // values without needing them in its dependency list. The effect must NOT
+  // tear down the live SSH socket just because the parent re-rendered with
+  // a freshly-created callback or a renamed asset.
+  const onStatusChangeRef = useRef(onStatusChange);
+  const assetNameRef = useRef(assetName);
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+    assetNameRef.current = assetName;
+  }, [assetName, onStatusChange]);
   const [message, setMessage] = useState("Connecting");
 
   useEffect(() => {
@@ -46,7 +56,7 @@ export function SshTerminalPane({ active, assetID, assetName, onStatusChange, se
     function setStatus(status: LiveSSHStatus, nextMessage?: string) {
       statusRef.current = status;
       setMessage(nextMessage || status);
-      onStatusChange(sessionID, status, nextMessage);
+      onStatusChangeRef.current(sessionID, status, nextMessage);
     }
 
     function fitAndResize() {
@@ -90,7 +100,7 @@ export function SshTerminalPane({ active, assetID, assetName, onStatusChange, se
         terminal.open(host);
         terminalRef.current = terminal;
         fitRef.current = fit;
-        terminal.write(`Connecting to ${assetName || assetID}...\r\n`);
+        terminal.write(`Connecting to ${assetNameRef.current || assetID}...\r\n`);
 
         const ws = new WebSocket(buildTerminalWebSocketURL(assetID, ticket));
         wsRef.current = ws;
@@ -168,7 +178,7 @@ export function SshTerminalPane({ active, assetID, assetName, onStatusChange, se
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, [assetID, assetName, onStatusChange, sessionID, ticket]);
+  }, [assetID, sessionID, ticket]);
 
   useEffect(() => {
     if (!active) return;

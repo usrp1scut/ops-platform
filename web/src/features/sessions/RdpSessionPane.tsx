@@ -40,6 +40,16 @@ export function RdpSessionPane({ active, assetID, assetName, onStatusChange, ses
   const keyboardRef = useRef<GuacamoleKeyboard | null>(null);
   const mouseRef = useRef<GuacamoleMouse | null>(null);
   const statusRef = useRef<LiveRDPStatus>("connecting");
+  // Mirror the props through refs so the effect below can read the latest
+  // values without needing them in its dependency list. The effect must NOT
+  // tear down the live RDP tunnel just because the parent re-rendered with
+  // a freshly-created callback or a renamed asset.
+  const onStatusChangeRef = useRef(onStatusChange);
+  const assetNameRef = useRef(assetName);
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+    assetNameRef.current = assetName;
+  }, [assetName, onStatusChange]);
   const [message, setMessage] = useState("Connecting");
 
   useEffect(() => {
@@ -48,7 +58,7 @@ export function RdpSessionPane({ active, assetID, assetName, onStatusChange, ses
     function setStatus(status: LiveRDPStatus, nextMessage?: string) {
       statusRef.current = status;
       setMessage(nextMessage || status);
-      onStatusChange(sessionID, status, nextMessage);
+      onStatusChangeRef.current(sessionID, status, nextMessage);
     }
 
     async function openRdp() {
@@ -67,7 +77,7 @@ export function RdpSessionPane({ active, assetID, assetName, onStatusChange, ses
 
         const { height, width } = displaySize(host);
         const dpi = Math.round((window.devicePixelRatio || 1) * 96);
-        const tunnel = new Guacamole.WebSocketTunnel(buildRdpWebSocketURL(assetID));
+        const tunnel = new Guacamole.WebSocketTunnel(buildRdpWebSocketURL(assetID, ticket));
         const client = new Guacamole.Client(tunnel);
         const display = client.getDisplay();
         scroll.appendChild(display.getElement());
@@ -120,7 +130,7 @@ export function RdpSessionPane({ active, assetID, assetName, onStatusChange, ses
           }
         });
         host.focus();
-        setMessage(`Connecting to ${assetName || assetID}`);
+        setMessage(`Connecting to ${assetNameRef.current || assetID}`);
       } catch (error) {
         setStatus("error", error instanceof Error ? error.message : "Failed to open RDP.");
       }
@@ -131,7 +141,10 @@ export function RdpSessionPane({ active, assetID, assetName, onStatusChange, ses
 
     return () => {
       disposed = true;
-      keyboardRef.current && (keyboardRef.current.onkeydown = keyboardRef.current.onkeyup = null);
+      if (keyboardRef.current) {
+        keyboardRef.current.onkeydown = null;
+        keyboardRef.current.onkeyup = null;
+      }
       if (mouseRef.current) {
         mouseRef.current.onmousedown = null;
         mouseRef.current.onmousemove = null;
@@ -143,7 +156,7 @@ export function RdpSessionPane({ active, assetID, assetName, onStatusChange, ses
       mouseRef.current = null;
       if (hostRef.current) hostRef.current.innerHTML = "";
     };
-  }, [assetID, assetName, onStatusChange, sessionID, ticket]);
+  }, [assetID, sessionID, ticket]);
 
   useEffect(() => {
     if (!active) return;

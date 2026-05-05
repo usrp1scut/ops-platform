@@ -64,10 +64,21 @@ export function guacamoleAssetPath(base = "/") {
   return `${prefix}vendor/guacamole/guacamole-common.min.js`;
 }
 
-export function buildRdpWebSocketURL(assetID: string, locationLike: LocationLike = window.location) {
+export function buildRdpWebSocketURL(
+  assetID: string,
+  ticket: string,
+  locationLike: LocationLike = window.location,
+) {
+  // Mirroring the SSH terminal endpoint: the ticket goes in the URL query so
+  // the backend can authenticate the WebSocket at handshake time and reject
+  // bad tickets before the Guacamole tunnel is opened. The same ticket is
+  // also included in the Guacamole connect parameters (see
+  // buildRdpConnectionParams) for the in-band auth path; both layers
+  // accepting the same value is intentional.
   const protocol = locationLike.protocol === "https:" ? "wss:" : "ws:";
+  const params = new URLSearchParams({ ticket });
 
-  return `${protocol}//${locationLike.host}/ws/v1/cmdb/assets/${encodeURIComponent(assetID)}/rdp`;
+  return `${protocol}//${locationLike.host}/ws/v1/cmdb/assets/${encodeURIComponent(assetID)}/rdp?${params}`;
 }
 
 export function buildRdpConnectionParams(params: RdpConnectionParams) {
