@@ -145,10 +145,11 @@ helpers produce. Pure helpers in `lib/` are tested in isolation.
 ### End-to-end (Playwright)
 
 The smoke suite under `e2e/` drives the real app with a real backend.
-It starts a dedicated Vite dev server on port 5174 (so it does not
-fight a developer's own `npm run dev` on 5173) and uses the
-system-installed Chrome (set via `channel: "chrome"`) instead of a
-pinned Chromium binary.
+It starts a dedicated Vite dev server on port 30174 (so it does not
+fight a developer's own `npm run dev` on 5173, and stays out of the
+Windows default dynamic port range 1024-15000 to avoid flaky reuse
+between runs) and uses the system-installed Chrome (set via
+`channel: "chrome"`) instead of a pinned Chromium binary.
 
 ```bash
 # Terminal 1: backend

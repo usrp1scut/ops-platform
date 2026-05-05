@@ -5,16 +5,19 @@ import {
   Database,
   Eye,
   FilterX,
+  MonitorPlay,
   Pencil,
   Play,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
+  SquareTerminal,
   Trash2,
   X,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { ApiError } from "../../api/client";
 import {
@@ -46,6 +49,7 @@ import {
 } from "../../api/cmdb";
 import { PanelState } from "../../components/PanelState";
 import { formatAssetRange, nextAssetOffset, previousAssetOffset } from "../../lib/assets";
+import { buildLaunchSearch, isConnectableAsset, type LaunchProtocol } from "../../lib/launch";
 import { useAuth } from "../auth/AuthProvider";
 import { AssetForm } from "./AssetForm";
 
@@ -899,10 +903,19 @@ function FilterSelect({
 export function AssetsPage() {
   const auth = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const identity = auth.identity;
   const userID = identity?.user.id || "";
   const canReadAssets = auth.can("cmdb.asset:read");
   const canWriteAssets = auth.can("cmdb.asset:write");
+
+  function connectAsset(asset: Asset, protocol: LaunchProtocol) {
+    // Hand the actual launch off to the Sessions page so the live tabs
+    // render in the same place no matter how the operator started the
+    // session. This mirrors the legacy classic-script portal where the
+    // CMDB Connect button always materialised on the Sessions view.
+    navigate(`/sessions${buildLaunchSearch({ assetID: asset.id, protocol })}`);
+  }
   const [filters, setFilters] = useState<AssetFilters>(initialFilters);
   const [offset, setOffset] = useState(0);
   const [selectedAssetID, setSelectedAssetID] = useState("");
@@ -1423,21 +1436,47 @@ export function AssetsPage() {
                       <span className={`status-pill ${sourceTone(asset.source)}`}>{asset.source || "manual"}</span>
                     </td>
                     <td>
-                      <button
-                        type="button"
-                        className="secondary-button compact"
-                        onClick={(event) => {
-                          detailTriggerRef.current = event.currentTarget;
-                          saveConnection.reset();
-                          testConnection.reset();
-                          setActiveDrawerTab("summary");
-                          setSelectedAssetID(asset.id);
-                        }}
-                        aria-label={`View details for ${asset.name || asset.id}`}
-                      >
-                        <Eye size={14} aria-hidden="true" />
-                        <span>Details</span>
-                      </button>
+                      <div className="request-actions">
+                        {isConnectableAsset(asset) ? (
+                          <>
+                            <button
+                              type="button"
+                              className="secondary-button compact"
+                              onClick={() => connectAsset(asset, "ssh")}
+                              aria-label={`Open SSH session to ${asset.name || asset.id}`}
+                              title="Open SSH terminal in Sessions"
+                            >
+                              <SquareTerminal size={14} aria-hidden="true" />
+                              <span>SSH</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button compact"
+                              onClick={() => connectAsset(asset, "rdp")}
+                              aria-label={`Open RDP session to ${asset.name || asset.id}`}
+                              title="Open RDP session in Sessions"
+                            >
+                              <MonitorPlay size={14} aria-hidden="true" />
+                              <span>RDP</span>
+                            </button>
+                          </>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="secondary-button compact"
+                          onClick={(event) => {
+                            detailTriggerRef.current = event.currentTarget;
+                            saveConnection.reset();
+                            testConnection.reset();
+                            setActiveDrawerTab("summary");
+                            setSelectedAssetID(asset.id);
+                          }}
+                          aria-label={`View details for ${asset.name || asset.id}`}
+                        >
+                          <Eye size={14} aria-hidden="true" />
+                          <span>Details</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -792,6 +792,103 @@ a {
   white-space: pre-wrap;
 }
 
+.asset-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 12px;
+  border: 1px solid #e2ebe8;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fafdfc;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.asset-tree details {
+  border: 0;
+}
+
+.asset-tree summary {
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 0;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.asset-tree summary code {
+  font-weight: 500;
+}
+
+.asset-tree-env > summary {
+  font-size: 0.95rem;
+}
+
+.asset-tree-vpc > summary {
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding-left: 14px;
+}
+
+.asset-tree-members {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 6px 28px;
+}
+
+.asset-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: #1a1a1a;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+
+.asset-tree-row:hover:not(:disabled) {
+  background: #f1f7f5;
+  border-color: #cedbd8;
+}
+
+.asset-tree-row:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.asset-tree-row.bastion .asset-tree-name {
+  font-weight: 600;
+}
+
+.asset-tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-tree-addr {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+  color: #4a5d59;
+  white-space: nowrap;
+}
+
+.status-pill.tiny {
+  padding: 1px 6px;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
 .live-session-shell {
   display: grid;
   gap: 12px;

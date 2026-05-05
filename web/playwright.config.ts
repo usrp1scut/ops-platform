@@ -6,16 +6,19 @@ declare const process: { env: Record<string, string | undefined> };
 
 // The smoke suite assumes the Go API is running on :8080 (docker compose
 // or `go run ./cmd/ops-api`). Playwright auto-starts the Vite dev server
-// on a dedicated port (5174) so it does not clash with a developer's own
-// `npm run dev` instance on 5173.
+// on a dedicated port (30174) so it does not clash with a developer's own
+// `npm run dev` instance on 5173. The port is intentionally above 15000
+// to avoid Windows' default dynamic port range (1024-15000), which can
+// transiently reserve a low port from an outbound connection and make a
+// fixed mid-range port flaky between runs.
 //
 // Override PLAYWRIGHT_BASE_URL to point at e.g. the embedded
-// http://localhost:8080/portal-v2/ build instead, which exercises the
+// http://localhost:8080/portal/ build instead, which exercises the
 // production SPA path. In that mode set PLAYWRIGHT_NO_WEBSERVER=1 so
 // Playwright does not spin up Vite.
 
 const isCI = !!process.env.CI;
-const port = Number(process.env.PLAYWRIGHT_VITE_PORT || 5174);
+const port = Number(process.env.PLAYWRIGHT_VITE_PORT || 30174);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
 const skipWebServer = process.env.PLAYWRIGHT_NO_WEBSERVER === "1";
 

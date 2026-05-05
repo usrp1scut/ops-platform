@@ -1,6 +1,18 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Download, MonitorPlay, Play, RefreshCw, Search, ShieldCheck, SquareTerminal, Timer, Video, X } from "lucide-react";
-import { type FormEvent, useCallback, useMemo, useState } from "react";
+import {
+  Download,
+  MonitorPlay,
+  Play,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  SquareTerminal,
+  Timer,
+  Video,
+  X,
+} from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../../api/client";
 import {
@@ -19,6 +31,13 @@ import {
 } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
+import {
+  buildAssetTree,
+  filterConnectableAssets,
+  isConnectableAsset,
+  parseLaunchParams,
+  type AssetTreeEnv,
+} from "../../lib/launch";
 import {
   filterSessionsByStatus,
   formatBytes,
@@ -148,11 +167,21 @@ export function SessionsPage() {
   const [activeLiveID, setActiveLiveID] = useState("");
   const [recordingFeedback, setRecordingFeedback] = useState<ActionFeedback | null>(null);
   const [recordingPreview, setRecordingPreview] = useState<RecordingPreviewState | null>(null);
+  const [sidebarSearch, setSidebarSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
   const effectiveUserID = canReadAllSessions ? filters.userID.trim() : "";
   const effectiveAssetID = filters.assetID.trim();
   const assetSearch = useQuery({
     queryKey: ["cmdb", "assets", "sessions-terminal-search", userID, assetQuery],
     queryFn: () => listAssets({ limit: 30, query: assetQuery.trim() || undefined, status: "active" }),
+    enabled: canReadSessions && Boolean(userID),
+  });
+  const sidebarAssets = useQuery({
+    // Mirrors the legacy /portal sidebar: pull a wide window of assets
+    // and group them client-side. limit:500 matches the classic-script
+    // portal so behaviour stays consistent for fleets up to that size.
+    queryKey: ["cmdb", "assets", "sessions-sidebar", userID],
+    queryFn: () => listAssets({ limit: 500 }),
     enabled: canReadSessions && Boolean(userID),
   });
   const sessions = useQuery({
@@ -176,6 +205,16 @@ export function SessionsPage() {
   const visibleSessions = useMemo(
     () => filterSessionsByStatus(sessionItems, filters.status),
     [filters.status, sessionItems],
+  );
+  const sidebarItems = sidebarAssets.data?.items || [];
+  const connectableAssets = useMemo(() => sidebarItems.filter(isConnectableAsset), [sidebarItems]);
+  const filteredConnectables = useMemo(
+    () => filterConnectableAssets(connectableAssets, sidebarSearch),
+    [connectableAssets, sidebarSearch],
+  );
+  const assetTree: AssetTreeEnv[] = useMemo(
+    () => buildAssetTree(filteredConnectables),
+    [filteredConnectables],
   );
   const updateLiveSessionStatus = useCallback((sessionID: string, status: LiveSessionStatus, message?: string) => {
     setLiveSessions((current) =>
@@ -312,6 +351,28 @@ export function SessionsPage() {
     launchTerminal.mutate({ assetID, protocol: launchProtocol });
   }
 
+  function quickLaunch(asset: Asset) {
+    launchTerminal.mutate({ assetID: asset.id, protocol: launchProtocol });
+  }
+
+  // Auto-launch when the operator arrives via /sessions?launch=...&protocol=...
+  // (e.g. from the CMDB list's Connect button). The ref keeps each
+  // (asset, protocol) tuple from re-firing on subsequent renders, and the
+  // params are cleared after the mutation is started so a refresh does not
+  // re-trigger the launch.
+  const consumedLaunchKeyRef = useRef("");
+  useEffect(() => {
+    if (!canReadSessions || !userID) return;
+    const spec = parseLaunchParams(searchParams);
+    if (!spec) return;
+    const key = `${spec.assetID}|${spec.protocol}`;
+    if (consumedLaunchKeyRef.current === key) return;
+    consumedLaunchKeyRef.current = key;
+    setLaunchProtocol(spec.protocol);
+    launchTerminal.mutate({ assetID: spec.assetID, protocol: spec.protocol });
+    setSearchParams({}, { replace: true });
+  }, [canReadSessions, userID, searchParams, launchTerminal, setSearchParams]);
+
   return (
     <section className="page-section">
       <div className="page-header">
@@ -359,6 +420,107 @@ export function SessionsPage() {
           <span className={`status-pill ${counts.errors > 0 ? "warn" : "ok"}`}>{counts.errors} errors</span>
         </article>
       </div>
+
+      <article className="work-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Quick launch</p>
+            <h2>Connectable assets</h2>
+          </div>
+          <button
+            type="button"
+            className="secondary-button compact"
+            onClick={() => void sidebarAssets.refetch()}
+            disabled={!canReadSessions || sidebarAssets.isFetching}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+            <span>{sidebarAssets.isFetching ? "Refreshing" : "Refresh"}</span>
+          </button>
+        </div>
+
+        {!canReadSessions ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
+        {canReadSessions && sidebarAssets.isError ? (
+          <PanelState
+            kind="error"
+            message={sidebarAssets.error instanceof Error ? sidebarAssets.error.message : "Failed to load assets."}
+          />
+        ) : null}
+
+        <label className="form-field search-field">
+          <span>Search</span>
+          <div className="input-with-icon">
+            <Search size={16} aria-hidden="true" />
+            <input
+              type="search"
+              value={sidebarSearch}
+              onChange={(event) => setSidebarSearch(event.target.value)}
+              placeholder="Name, IP, env, VPC, type"
+              disabled={!canReadSessions}
+            />
+          </div>
+        </label>
+
+        {canReadSessions && sidebarAssets.isLoading ? (
+          <PanelState kind="loading" message="Loading connectable assets" />
+        ) : null}
+
+        {canReadSessions && !sidebarAssets.isLoading && !sidebarAssets.isError && assetTree.length === 0 ? (
+          <PanelState kind="empty" message="No connectable assets match this filter." />
+        ) : null}
+
+        {assetTree.length > 0 ? (
+          <div className="asset-tree">
+            {assetTree.map((env) => (
+              <details className="asset-tree-env" key={env.envName} open>
+                <summary>
+                  <span>env · {env.envName}</span>
+                  <span className="muted">({env.total})</span>
+                </summary>
+                {env.vpcs.map((vpc) => (
+                  <details
+                    className="asset-tree-vpc"
+                    key={`${env.envName}::${vpc.vpcKey}`}
+                    open
+                  >
+                    <summary>
+                      <span>
+                        vpc · <code>{vpc.vpcLabel}</code>
+                      </span>
+                      <span className="muted">({vpc.count})</span>
+                    </summary>
+                    <div className="asset-tree-members">
+                      {[...vpc.bastions, ...vpc.members].map((asset) => {
+                        const addr = asset.public_ip || asset.private_ip || asset.private_dns;
+                        return (
+                          <button
+                            type="button"
+                            key={asset.id}
+                            className={`asset-tree-row${asset.is_vpc_proxy ? " bastion" : ""}`}
+                            onClick={() => quickLaunch(asset)}
+                            disabled={launchTerminal.isPending}
+                            title={`Launch ${launchProtocol.toUpperCase()} to ${asset.name || asset.id}`}
+                          >
+                            {asset.is_vpc_proxy ? (
+                              <span className="status-pill ok tiny">bastion</span>
+                            ) : null}
+                            <span className="asset-tree-name">{asset.name || asset.id}</span>
+                            {addr ? <span className="asset-tree-addr">{addr}</span> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </details>
+                ))}
+              </details>
+            ))}
+          </div>
+        ) : null}
+
+        <p className="muted">
+          Click a row to launch <strong>{launchProtocol.toUpperCase()}</strong>. Switch the protocol in the
+          panel below before clicking to start an RDP session instead.
+        </p>
+      </article>
 
       <article className="work-panel">
         <div className="panel-header">
