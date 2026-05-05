@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-test:
+    name: Go test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: go test
+        run: go test ./...
+
+  web-unit:
+    name: Web typecheck + Vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  e2e:
+    name: Playwright smoke
+    runs-on: ubuntu-latest
+    needs: [go-test, web-unit]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ops
+          POSTGRES_PASSWORD: ops
+          POSTGRES_DB: ops_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ops -d ops_platform"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      OPS_DATABASE_URL: postgres://ops:ops@localhost:5432/ops_platform?sslmode=disable
+      OPS_MASTER_KEY: "01234567890123456789012345678901"
+      OPS_LOCAL_ADMIN_USERNAME: admin
+      OPS_LOCAL_ADMIN_PASSWORD: admin123456
+      OPS_HTTP_ADDR: ":8080"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install Chrome for Playwright
+        working-directory: web
+        run: npx playwright install chrome --with-deps
+
+      - name: Run database migrations
+        run: go run ./cmd/migrate
+
+      - name: Build and start ops-api
+        run: |
+          go build -o /tmp/ops-api ./cmd/ops-api
+          /tmp/ops-api > /tmp/ops-api.log 2>&1 &
+          echo $! > /tmp/ops-api.pid
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/healthz; then
+              echo
+              echo "ops-api is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ops-api failed to come up"
+          tail -100 /tmp/ops-api.log
+          exit 1
+
+      - name: Run Playwright smoke
+        working-directory: web
+        env:
+          CI: "true"
+        run: npm run test:e2e
+
+      - name: Stop ops-api
+        if: always()
+        run: |
+          if [ -f /tmp/ops-api.pid ]; then
+            kill "$(cat /tmp/ops-api.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report
+          retention-days: 7
+
+      - name: Upload ops-api log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-api-log
+          path: /tmp/ops-api.log
+          retention-days: 7

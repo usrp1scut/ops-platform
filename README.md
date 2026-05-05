@@ -15,6 +15,8 @@ This repository contains an initial implementation aligned with `docs/design/ops
 - React/Vite portal (new) embedded at `/portal-v2/`, running in parallel
   with the legacy console during migration. See `web/README.md` and
   `docs/design/frontend-refactor-v2.md`.
+- GitHub Actions CI (`go test`, web typecheck/Vitest, Playwright smoke
+  against an in-job Postgres + ops-api).
 - CMDB asset CRUD API.
 - AWS account onboarding API (multi-account model, assume-role/static modes).
 - AWS sync worker v1 (`ops-worker`) for EC2/VPC/SG/RDS asset ingestion.

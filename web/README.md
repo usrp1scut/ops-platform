@@ -131,6 +131,8 @@ Guarded actions follow the pattern:
 
 ## Running smoke tests
 
+### Unit (Vitest)
+
 ```bash
 npm test                          # all tests
 npm test -- --run src/lib         # only lib helpers
@@ -139,6 +141,37 @@ npm test -- --run src/api/cmdb    # only cmdb api client
 
 Vitest mocks `fetch` per case and asserts the URL/method/body the API
 helpers produce. Pure helpers in `lib/` are tested in isolation.
+
+### End-to-end (Playwright)
+
+The smoke suite under `e2e/` drives the real app with a real backend.
+It starts a dedicated Vite dev server on port 5174 (so it does not
+fight a developer's own `npm run dev` on 5173) and uses the
+system-installed Chrome (set via `channel: "chrome"`) instead of a
+pinned Chromium binary.
+
+```bash
+# Terminal 1: backend
+docker compose up -d postgres
+go run ./cmd/migrate
+go run ./cmd/ops-api          # listens on :8080
+
+# Terminal 2: smoke
+cd web
+npm run test:e2e              # headless
+npm run test:e2e:ui           # Playwright UI mode for debugging
+```
+
+The CI workflow at `.github/workflows/ci.yml` runs these against an
+in-job Postgres service container. It also runs the Go test suite and
+the web typecheck/Vitest pair.
+
+To target the embedded production build (`/portal-v2/`) instead of the
+dev server, set:
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:8080/portal-v2 PLAYWRIGHT_NO_WEBSERVER=1 npm run test:e2e
+```
 
 ## Migration status
 
