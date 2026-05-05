@@ -138,6 +138,76 @@ export type ListAssetsOptions = {
   type?: string;
 };
 
+export type CreateAssetPayload = {
+  type: string;
+  name: string;
+  account_id?: string;
+  business_unit?: string;
+  criticality?: string;
+  env?: string;
+  expires_at?: string;
+  external_arn?: string;
+  external_id?: string;
+  instance_type?: string;
+  labels?: Record<string, unknown>;
+  os_image?: string;
+  owner?: string;
+  private_dns?: string;
+  private_ip?: string;
+  public_ip?: string;
+  region?: string;
+  source?: string;
+  status?: string;
+  subnet_id?: string;
+  vpc_id?: string;
+  zone?: string;
+};
+
+export type UpdateAssetPayload = {
+  account_id?: string;
+  business_unit?: string;
+  criticality?: string;
+  env?: string;
+  expires_at?: string;
+  instance_type?: string;
+  labels?: Record<string, unknown>;
+  name?: string;
+  os_image?: string;
+  owner?: string;
+  private_dns?: string;
+  private_ip?: string;
+  public_ip?: string;
+  region?: string;
+  status?: string;
+  subnet_id?: string;
+  vpc_id?: string;
+  zone?: string;
+};
+
+export type DeleteStatusResponse = {
+  status: string;
+};
+
+export type PromoteVPCProxyOptions = {
+  auth_type?: string;
+  username?: string;
+};
+
+export type PromotedVPCProxySummary = {
+  auth_type: string;
+  host: string;
+  id: string;
+  name: string;
+  network_zone?: string;
+  port: number;
+  username: string;
+};
+
+export type PromoteVPCProxyResult = {
+  asset: Asset;
+  proxy: PromotedVPCProxySummary;
+};
+
 export function buildAssetsQuery(options: ListAssetsOptions = {}) {
   const params = new URLSearchParams();
 
@@ -175,6 +245,22 @@ export function buildAssetProbePath(assetID: string) {
 
 export function buildAssetRelationsPath(assetID: string) {
   return `${buildAssetPath(assetID)}/relations`;
+}
+
+export function buildAssetRelationDeletePath(assetID: string, relationID: string) {
+  return `${buildAssetRelationsPath(assetID)}/${encodeURIComponent(relationID)}`;
+}
+
+export function buildAssetProbeRunPath(assetID: string) {
+  return `${buildAssetPath(assetID)}/probe/run`;
+}
+
+export function buildAssetVPCProxyPromotePath(assetID: string) {
+  return `${buildAssetPath(assetID)}/promote-vpc-proxy`;
+}
+
+export function buildAssetVPCProxyDemotePath(assetID: string) {
+  return `${buildAssetPath(assetID)}/demote-vpc-proxy`;
 }
 
 export function listAssets(options: ListAssetsOptions = {}) {
@@ -216,4 +302,51 @@ export function listAssetRelations(assetID: string) {
 
 export function listAssetFacets() {
   return apiRequest<AssetFacets>("/api/v1/cmdb/assets/facets");
+}
+
+export function createAsset(payload: CreateAssetPayload) {
+  return apiRequest<Asset>("/api/v1/cmdb/assets", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAsset(assetID: string, payload: UpdateAssetPayload) {
+  return apiRequest<Asset>(buildAssetPath(assetID), {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteAsset(assetID: string) {
+  return apiRequest<DeleteStatusResponse>(buildAssetPath(assetID), {
+    method: "DELETE",
+  });
+}
+
+export function runAssetProbe(assetID: string) {
+  return apiRequest<AssetProbeSnapshot>(buildAssetProbeRunPath(assetID), {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function promoteAssetToVPCProxy(assetID: string, options: PromoteVPCProxyOptions = {}) {
+  return apiRequest<PromoteVPCProxyResult>(buildAssetVPCProxyPromotePath(assetID), {
+    method: "POST",
+    body: JSON.stringify(options),
+  });
+}
+
+export function demoteAssetVPCProxy(assetID: string) {
+  return apiRequest<DeleteStatusResponse>(buildAssetVPCProxyDemotePath(assetID), {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function deleteAssetRelation(assetID: string, relationID: string) {
+  return apiRequest<DeleteStatusResponse>(buildAssetRelationDeletePath(assetID, relationID), {
+    method: "DELETE",
+  });
 }

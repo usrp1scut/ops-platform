@@ -1,28 +1,58 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Database, Eye, FilterX, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Database,
+  Eye,
+  FilterX,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+  X,
+} from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError } from "../../api/client";
 import {
+  createAsset,
+  deleteAsset,
+  deleteAssetRelation,
+  demoteAssetVPCProxy,
   getAsset,
   getAssetConnectionProfile,
   getLatestAssetProbe,
   listAssetRelations,
   listAssetFacets,
   listAssets,
+  promoteAssetToVPCProxy,
+  runAssetProbe,
   testAssetConnection,
+  updateAsset,
   updateAssetConnectionProfile,
   type Asset,
   type AssetConnectionProfile,
   type AssetConnectionTestResult,
   type AssetProbeSnapshot,
   type AssetRelation,
+  type CreateAssetPayload,
   type ListAssetsOptions,
+  type PromoteVPCProxyOptions,
   type UpdateAssetConnectionProfilePayload,
+  type UpdateAssetPayload,
 } from "../../api/cmdb";
 import { PanelState } from "../../components/PanelState";
 import { formatAssetRange, nextAssetOffset, previousAssetOffset } from "../../lib/assets";
 import { useAuth } from "../auth/AuthProvider";
+import { AssetForm } from "./AssetForm";
+
+type ActionFeedback = {
+  kind: "error" | "success";
+  message: string;
+};
 
 const pageSize = 25;
 const focusableSelector = [
@@ -259,14 +289,22 @@ function CodeValue({ value }: { value: string | undefined }) {
 }
 
 function RelationsSection({
+  canWrite,
   currentAssetID,
+  deleteError,
+  deletingID,
   error,
   isLoading,
+  onDelete,
   relations,
 }: {
+  canWrite: boolean;
   currentAssetID: string;
+  deleteError: unknown;
+  deletingID: string;
   error: unknown;
   isLoading: boolean;
+  onDelete: (relation: AssetRelation) => void;
   relations: AssetRelation[] | undefined;
 }) {
   const missing = isNotFound(error);
@@ -284,6 +322,13 @@ function RelationsSection({
         <PanelState kind="error" message={error instanceof Error ? error.message : "Failed to load relations."} />
       ) : null}
 
+      {deleteError ? (
+        <PanelState
+          kind="error"
+          message={deleteError instanceof Error ? deleteError.message : "Failed to remove relation."}
+        />
+      ) : null}
+
       {!isLoading && !error && items.length === 0 ? <PanelState kind="empty" message="No relations." /> : null}
 
       {items.length > 0 ? (
@@ -292,6 +337,7 @@ function RelationsSection({
             const from = relationAssetLabel(relation.from_name, relation.from_asset_id, relation.from_type);
             const to = relationAssetLabel(relation.to_name, relation.to_asset_id, relation.to_type);
             const currentIsFrom = relation.from_asset_id === currentAssetID;
+            const isDeleting = deletingID === relation.id;
             return (
               <article className="request-row" key={relation.id}>
                 <div className="request-main">
@@ -303,7 +349,22 @@ function RelationsSection({
                       <span className={!currentIsFrom ? "relation-current" : ""}>{to.title}</span>
                     </p>
                   </div>
-                  <span className={`status-pill ${sourceTone(relation.source)}`}>{relation.source || "manual"}</span>
+                  <div className="request-status-actions">
+                    <span className={`status-pill ${sourceTone(relation.source)}`}>
+                      {relation.source || "manual"}
+                    </span>
+                    {canWrite ? (
+                      <button
+                        type="button"
+                        className="secondary-button compact"
+                        onClick={() => onDelete(relation)}
+                        disabled={isDeleting}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                        <span>{isDeleting ? "Removing" : "Forget"}</span>
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="request-meta">
                   <span>{from.detail}</span>
@@ -320,12 +381,20 @@ function RelationsSection({
 }
 
 function ProbeSection({
+  canWrite,
   error,
   isLoading,
+  isRunning,
+  onRun,
+  runError,
   snapshot,
 }: {
+  canWrite: boolean;
   error: unknown;
   isLoading: boolean;
+  isRunning: boolean;
+  onRun: () => void;
+  runError: unknown;
   snapshot: AssetProbeSnapshot | undefined;
 }) {
   const missing = isNotFound(error);
@@ -333,7 +402,20 @@ function ProbeSection({
 
   return (
     <section className="drawer-section">
-      <h3>Probe</h3>
+      <div className="drawer-section-header">
+        <h3>Probe</h3>
+        {canWrite ? (
+          <button
+            type="button"
+            className="secondary-button compact"
+            onClick={onRun}
+            disabled={isRunning || isLoading}
+          >
+            <Play size={14} aria-hidden="true" />
+            <span>{isRunning ? "Probing" : "Run probe now"}</span>
+          </button>
+        ) : null}
+      </div>
 
       {isLoading ? <PanelState kind="loading" message="Loading latest probe" /> : null}
 
@@ -341,6 +423,10 @@ function ProbeSection({
 
       {error && !missing ? (
         <PanelState kind="error" message={error instanceof Error ? error.message : "Failed to load latest probe."} />
+      ) : null}
+
+      {runError ? (
+        <PanelState kind="error" message={runError instanceof Error ? runError.message : "Probe run failed."} />
       ) : null}
 
       {snapshot ? (
@@ -378,6 +464,69 @@ function ProbeSection({
             <div className="muted">No software inventory.</div>
           )}
         </>
+      ) : null}
+    </section>
+  );
+}
+
+function VPCProxyControl({
+  asset,
+  canWrite,
+  feedback,
+  isDemoting,
+  isPromoting,
+  onDemote,
+  onPromote,
+}: {
+  asset: Asset;
+  canWrite: boolean;
+  feedback: ActionFeedback | null;
+  isDemoting: boolean;
+  isPromoting: boolean;
+  onDemote: () => void;
+  onPromote: () => void;
+}) {
+  const isProxy = Boolean(asset.is_vpc_proxy);
+
+  return (
+    <section className="drawer-section">
+      <div className="drawer-section-header">
+        <h3>VPC proxy</h3>
+        <span className={`status-pill ${isProxy ? "ok" : ""}`}>{isProxy ? "promoted" : "regular asset"}</span>
+      </div>
+
+      {feedback ? <PanelState kind={feedback.kind} message={feedback.message} /> : null}
+
+      <p className="muted">
+        {isProxy
+          ? "This asset acts as an SSH bastion. Demoting removes its SSH proxy registration but keeps the asset record."
+          : "Promote this asset to an SSH bastion proxy so other assets in the same VPC can connect through it."}
+      </p>
+
+      {canWrite ? (
+        <div className="form-actions">
+          {isProxy ? (
+            <button
+              type="button"
+              className="secondary-button compact"
+              onClick={onDemote}
+              disabled={isDemoting || isPromoting}
+            >
+              <ArrowDownToLine size={14} aria-hidden="true" />
+              <span>{isDemoting ? "Demoting" : "Demote"}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="primary-button compact"
+              onClick={onPromote}
+              disabled={isPromoting || isDemoting}
+            >
+              <ArrowUpFromLine size={14} aria-hidden="true" />
+              <span>{isPromoting ? "Promoting" : "Promote"}</span>
+            </button>
+          )}
+        </div>
       ) : null}
     </section>
   );
@@ -758,6 +907,11 @@ export function AssetsPage() {
   const [offset, setOffset] = useState(0);
   const [selectedAssetID, setSelectedAssetID] = useState("");
   const [activeDrawerTab, setActiveDrawerTab] = useState<DrawerTab>("summary");
+  const [creating, setCreating] = useState(false);
+  const [editingAsset, setEditingAsset] = useState(false);
+  const [assetFeedback, setAssetFeedback] = useState<ActionFeedback | null>(null);
+  const [vpcProxyFeedback, setVpcProxyFeedback] = useState<ActionFeedback | null>(null);
+  const [deletingRelationID, setDeletingRelationID] = useState("");
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerPanelRef = useRef<HTMLElement | null>(null);
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -810,6 +964,131 @@ export function AssetsPage() {
       await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "connection", userID, assetID] });
     },
   });
+  const createAssetMutation = useMutation({
+    mutationFn: (payload: CreateAssetPayload) => createAsset(payload),
+    onMutate: () => {
+      setAssetFeedback(null);
+    },
+    onSuccess: async (asset) => {
+      setCreating(false);
+      setAssetFeedback({ kind: "success", message: `Asset created: ${asset.name || asset.id}.` });
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "list"] });
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "facets"] });
+      setActiveDrawerTab("summary");
+      setEditingAsset(false);
+      setSelectedAssetID(asset.id);
+    },
+    onError: (error) => {
+      setAssetFeedback({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to create asset.",
+      });
+    },
+  });
+  const updateAssetMutation = useMutation({
+    mutationFn: ({ assetID, payload }: { assetID: string; payload: UpdateAssetPayload }) =>
+      updateAsset(assetID, payload),
+    onMutate: () => {
+      setAssetFeedback(null);
+    },
+    onSuccess: async (asset, variables) => {
+      setEditingAsset(false);
+      setAssetFeedback({ kind: "success", message: `Asset updated: ${asset.name || asset.id}.` });
+      queryClient.setQueryData(["cmdb", "assets", "detail", userID, variables.assetID], asset);
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "list"] });
+    },
+    onError: (error) => {
+      setAssetFeedback({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to update asset.",
+      });
+    },
+  });
+  const deleteAssetMutation = useMutation({
+    mutationFn: (assetID: string) => deleteAsset(assetID),
+    onMutate: () => {
+      setAssetFeedback(null);
+    },
+    onSuccess: async (_result, assetID) => {
+      setSelectedAssetID("");
+      setEditingAsset(false);
+      setAssetFeedback({ kind: "success", message: "Asset deleted." });
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "list"] });
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "facets"] });
+      queryClient.removeQueries({ queryKey: ["cmdb", "assets", "detail", userID, assetID] });
+    },
+    onError: (error) => {
+      setAssetFeedback({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to delete asset.",
+      });
+    },
+  });
+  const runProbeMutation = useMutation({
+    mutationFn: (assetID: string) => runAssetProbe(assetID),
+    onSuccess: (snapshot, assetID) => {
+      queryClient.setQueryData(["cmdb", "assets", "probe", "latest", userID, assetID], snapshot);
+    },
+    onSettled: async (_result, _error, assetID) => {
+      if (!assetID) return;
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "probe", "latest", userID, assetID] });
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "connection", userID, assetID] });
+    },
+  });
+  const promoteVPCProxyMutation = useMutation({
+    mutationFn: ({ assetID, options }: { assetID: string; options: PromoteVPCProxyOptions }) =>
+      promoteAssetToVPCProxy(assetID, options),
+    onMutate: () => {
+      setVpcProxyFeedback(null);
+    },
+    onSuccess: async (result, variables) => {
+      setVpcProxyFeedback({
+        kind: "success",
+        message: `Promoted to SSH proxy: ${result.proxy.name}.`,
+      });
+      queryClient.setQueryData(["cmdb", "assets", "detail", userID, variables.assetID], result.asset);
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "list"] });
+      await queryClient.invalidateQueries({ queryKey: ["connectivity"] });
+    },
+    onError: (error) => {
+      setVpcProxyFeedback({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to promote VPC proxy.",
+      });
+    },
+  });
+  const demoteVPCProxyMutation = useMutation({
+    mutationFn: (assetID: string) => demoteAssetVPCProxy(assetID),
+    onMutate: () => {
+      setVpcProxyFeedback(null);
+    },
+    onSuccess: async (_result, assetID) => {
+      setVpcProxyFeedback({ kind: "success", message: "VPC proxy demoted." });
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "list"] });
+      await queryClient.invalidateQueries({ queryKey: ["cmdb", "assets", "detail", userID, assetID] });
+      await queryClient.invalidateQueries({ queryKey: ["connectivity"] });
+    },
+    onError: (error) => {
+      setVpcProxyFeedback({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to demote VPC proxy.",
+      });
+    },
+  });
+  const deleteRelationMutation = useMutation({
+    mutationFn: ({ assetID, relationID }: { assetID: string; relationID: string }) =>
+      deleteAssetRelation(assetID, relationID),
+    onMutate: ({ relationID }) => {
+      setDeletingRelationID(relationID);
+    },
+    onSettled: async (_result, _error, variables) => {
+      setDeletingRelationID("");
+      if (!variables) return;
+      await queryClient.invalidateQueries({
+        queryKey: ["cmdb", "assets", "relations", userID, variables.assetID],
+      });
+    },
+  });
   const items = assets.data?.items || [];
   const total = assets.data?.total || 0;
   const range = formatAssetRange(total, offset, items.length);
@@ -839,6 +1118,45 @@ export function AssetsPage() {
   function closeAssetDetail() {
     setSelectedAssetID("");
   }
+
+  function confirmDeleteAsset(asset: Asset) {
+    if (
+      !window.confirm(
+        `Delete asset "${asset.name || asset.id}"? Connection profile, probe history, and relations will be removed.`,
+      )
+    ) {
+      return;
+    }
+    deleteAssetMutation.mutate(asset.id);
+  }
+
+  function confirmDemoteVPCProxy(asset: Asset) {
+    if (
+      !window.confirm(
+        `Demote "${asset.name || asset.id}" from SSH proxy? Assets routed through it will lose proxy connectivity.`,
+      )
+    ) {
+      return;
+    }
+    demoteVPCProxyMutation.mutate(asset.id);
+  }
+
+  function confirmDeleteRelation(assetID: string, relation: AssetRelation) {
+    if (!window.confirm(`Forget the "${relation.relation_type || "relation"}" link?`)) return;
+    deleteRelationMutation.mutate({ assetID, relationID: relation.id });
+  }
+
+  useEffect(() => {
+    setEditingAsset(false);
+    setVpcProxyFeedback(null);
+    saveConnection.reset();
+    testConnection.reset();
+    runProbeMutation.reset();
+    promoteVPCProxyMutation.reset();
+    demoteVPCProxyMutation.reset();
+    // Intentionally only depend on selectedAssetID — the mutation refs are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAssetID]);
 
   useEffect(() => {
     if (!selectedAssetID) return;
@@ -902,11 +1220,51 @@ export function AssetsPage() {
           <p className="eyebrow">Inventory</p>
           <h1>CMDB assets</h1>
         </div>
-        <span className={`status-pill ${canReadAssets ? "ok" : "warn"}`}>
-          <ShieldCheck size={14} aria-hidden="true" />
-          {canReadAssets ? "cmdb.asset:read" : "Needs cmdb.asset:read"}
-        </span>
+        <div className="request-actions">
+          <span className={`status-pill ${canReadAssets ? "ok" : "warn"}`}>
+            <ShieldCheck size={14} aria-hidden="true" />
+            {canReadAssets ? "cmdb.asset:read" : "Needs cmdb.asset:read"}
+          </span>
+          {canWriteAssets ? (
+            <button
+              type="button"
+              className="primary-button compact"
+              onClick={() => {
+                setCreating((current) => !current);
+                setAssetFeedback(null);
+                createAssetMutation.reset();
+              }}
+            >
+              <Plus size={14} aria-hidden="true" />
+              <span>{creating ? "Hide form" : "New asset"}</span>
+            </button>
+          ) : null}
+        </div>
       </div>
+
+      {assetFeedback ? <PanelState kind={assetFeedback.kind} message={assetFeedback.message} /> : null}
+
+      {creating && canWriteAssets ? (
+        <article className="work-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Create</p>
+              <h2>New asset</h2>
+            </div>
+            <span className="status-pill">cmdb.asset:write</span>
+          </div>
+          <AssetForm
+            mode="create"
+            onCancel={() => {
+              setCreating(false);
+              createAssetMutation.reset();
+            }}
+            onSubmitCreate={(payload) => createAssetMutation.mutate(payload)}
+            submitError={createAssetMutation.error}
+            submitting={createAssetMutation.isPending}
+          />
+        </article>
+      ) : null}
 
       <article className="work-panel">
         <div className="panel-header">
@@ -1141,15 +1499,43 @@ export function AssetsPage() {
                 <h2 id="asset-detail-title">{selectedAsset?.name || "Asset details"}</h2>
                 <p className="muted">{selectedAsset?.external_id || selectedAssetID}</p>
               </div>
-              <button
-                type="button"
-                className="icon-button"
-                onClick={closeAssetDetail}
-                title="Close"
-                ref={closeButtonRef}
-              >
-                <X size={18} aria-hidden="true" />
-              </button>
+              <div className="request-actions">
+                {canWriteAssets && selectedAsset ? (
+                  <>
+                    <button
+                      type="button"
+                      className="secondary-button compact"
+                      onClick={() => {
+                        setActiveDrawerTab("summary");
+                        setEditingAsset((current) => !current);
+                        updateAssetMutation.reset();
+                      }}
+                      disabled={updateAssetMutation.isPending}
+                    >
+                      <Pencil size={14} aria-hidden="true" />
+                      <span>{editingAsset ? "Cancel edit" : "Edit"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button compact"
+                      onClick={() => confirmDeleteAsset(selectedAsset)}
+                      disabled={deleteAssetMutation.isPending}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      <span>{deleteAssetMutation.isPending ? "Deleting" : "Delete"}</span>
+                    </button>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={closeAssetDetail}
+                  title="Close"
+                  ref={closeButtonRef}
+                >
+                  <X size={18} aria-hidden="true" />
+                </button>
+              </div>
             </header>
 
             <div className="drawer-body">
@@ -1189,7 +1575,26 @@ export function AssetsPage() {
                     role="tabpanel"
                     aria-labelledby={`asset-detail-tab-${activeDrawerTab}`}
                   >
-                    {activeDrawerTab === "summary" ? (
+                    {activeDrawerTab === "summary" && editingAsset ? (
+                      <section className="drawer-section">
+                        <h3>Edit asset</h3>
+                        <AssetForm
+                          asset={selectedAsset}
+                          mode="edit"
+                          onCancel={() => {
+                            setEditingAsset(false);
+                            updateAssetMutation.reset();
+                          }}
+                          onSubmitUpdate={(payload) =>
+                            updateAssetMutation.mutate({ assetID: selectedAsset.id, payload })
+                          }
+                          submitError={updateAssetMutation.error}
+                          submitting={updateAssetMutation.isPending}
+                        />
+                      </section>
+                    ) : null}
+
+                    {activeDrawerTab === "summary" && !editingAsset ? (
                       <>
                         <section className="drawer-section">
                           <h3>Summary</h3>
@@ -1274,31 +1679,58 @@ export function AssetsPage() {
                     ) : null}
 
                     {activeDrawerTab === "connection" ? (
-                      <ConnectionSection
-                        asset={selectedAsset}
-                        canWrite={canWriteAssets}
-                        error={assetConnection.error}
-                        isLoading={assetConnection.isLoading}
-                        isSaving={saveConnection.isPending}
-                        isTesting={testConnection.isPending}
-                        onSave={(payload) => saveConnection.mutateAsync({ assetID: selectedAsset.id, payload })}
-                        onTest={() => testConnection.mutateAsync(selectedAsset.id)}
-                        profile={assetConnection.data}
-                        saveError={saveConnection.error}
-                        testError={testConnection.error}
-                        testResult={testConnection.data}
-                      />
+                      <>
+                        <VPCProxyControl
+                          asset={selectedAsset}
+                          canWrite={canWriteAssets}
+                          feedback={vpcProxyFeedback}
+                          isDemoting={demoteVPCProxyMutation.isPending}
+                          isPromoting={promoteVPCProxyMutation.isPending}
+                          onDemote={() => confirmDemoteVPCProxy(selectedAsset)}
+                          onPromote={() =>
+                            promoteVPCProxyMutation.mutate({ assetID: selectedAsset.id, options: {} })
+                          }
+                        />
+                        <ConnectionSection
+                          asset={selectedAsset}
+                          canWrite={canWriteAssets}
+                          error={assetConnection.error}
+                          isLoading={assetConnection.isLoading}
+                          isSaving={saveConnection.isPending}
+                          isTesting={testConnection.isPending}
+                          onSave={(payload) =>
+                            saveConnection.mutateAsync({ assetID: selectedAsset.id, payload })
+                          }
+                          onTest={() => testConnection.mutateAsync(selectedAsset.id)}
+                          profile={assetConnection.data}
+                          saveError={saveConnection.error}
+                          testError={testConnection.error}
+                          testResult={testConnection.data}
+                        />
+                      </>
                     ) : null}
 
                     {activeDrawerTab === "probe" ? (
-                      <ProbeSection error={assetProbe.error} isLoading={assetProbe.isLoading} snapshot={assetProbe.data} />
+                      <ProbeSection
+                        canWrite={canWriteAssets}
+                        error={assetProbe.error}
+                        isLoading={assetProbe.isLoading}
+                        isRunning={runProbeMutation.isPending}
+                        onRun={() => runProbeMutation.mutate(selectedAsset.id)}
+                        runError={runProbeMutation.error}
+                        snapshot={assetProbe.data}
+                      />
                     ) : null}
 
                     {activeDrawerTab === "relations" ? (
                       <RelationsSection
+                        canWrite={canWriteAssets}
                         currentAssetID={selectedAsset.id}
+                        deleteError={deleteRelationMutation.error}
+                        deletingID={deletingRelationID}
                         error={assetRelations.error}
                         isLoading={assetRelations.isLoading}
+                        onDelete={(relation) => confirmDeleteRelation(selectedAsset.id, relation)}
                         relations={assetRelations.data}
                       />
                     ) : null}

@@ -5,7 +5,11 @@ import {
   buildAssetConnectionTestPath,
   buildAssetPath,
   buildAssetProbePath,
+  buildAssetProbeRunPath,
+  buildAssetRelationDeletePath,
   buildAssetRelationsPath,
+  buildAssetVPCProxyDemotePath,
+  buildAssetVPCProxyPromotePath,
   buildAssetsQuery,
 } from "./cmdb";
 
@@ -60,5 +64,35 @@ describe("buildAssetProbePath", () => {
 describe("buildAssetRelationsPath", () => {
   it("builds relation endpoints from encoded asset ids", () => {
     expect(buildAssetRelationsPath("asset?one")).toBe("/api/v1/cmdb/assets/asset%3Fone/relations");
+  });
+});
+
+describe("buildAssetRelationDeletePath", () => {
+  it("encodes both asset and relation ids", () => {
+    expect(buildAssetRelationDeletePath("asset/one", "rel two")).toBe(
+      "/api/v1/cmdb/assets/asset%2Fone/relations/rel%20two",
+    );
+  });
+});
+
+describe("buildAssetProbeRunPath", () => {
+  it("builds probe-run endpoints from encoded asset ids", () => {
+    expect(buildAssetProbeRunPath("asset/one")).toBe("/api/v1/cmdb/assets/asset%2Fone/probe/run");
+  });
+});
+
+describe("buildAssetVPCProxyPromotePath", () => {
+  it("builds promote endpoints from encoded asset ids", () => {
+    expect(buildAssetVPCProxyPromotePath("asset one")).toBe(
+      "/api/v1/cmdb/assets/asset%20one/promote-vpc-proxy",
+    );
+  });
+});
+
+describe("buildAssetVPCProxyDemotePath", () => {
+  it("builds demote endpoints from encoded asset ids", () => {
+    expect(buildAssetVPCProxyDemotePath("asset:one")).toBe(
+      "/api/v1/cmdb/assets/asset%3Aone/demote-vpc-proxy",
+    );
   });
 });
