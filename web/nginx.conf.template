@@ -1,0 +1,87 @@
+# nginx config for the standalone web image. Two responsibilities:
+#   1. Serve the Vite build as a single-page app — every non-asset path
+#      falls back to /index.html so React Router takes over.
+#   2. Reverse-proxy the API surface to ops-api. Keeping these on the same
+#      origin avoids CORS and credential gymnastics; ops-api sees the
+#      client IP via X-Forwarded-For.
+#
+# OPS_API_UPSTREAM is substituted at container start by the nginx:alpine
+# envsubst entrypoint (see /etc/nginx/templates loader).
+
+upstream ops_api {
+    server ${OPS_API_UPSTREAM};
+    keepalive 32;
+}
+
+server {
+    listen       80 default_server;
+    server_name  _;
+
+    # Hide nginx version + ban clickjacking by default.
+    server_tokens off;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    # JSON API surface.
+    location ^~ /api/ {
+        proxy_pass         http://ops_api;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    # OIDC / local auth callbacks.
+    location ^~ /auth/ {
+        proxy_pass         http://ops_api;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
+    # Liveness probe — surface ops-api's status directly so an LB can
+    # probe `http://web/healthz` and still cover the backend.
+    location = /healthz {
+        proxy_pass         http://ops_api/healthz;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+    }
+
+    # WebSocket terminal / RDP. Long-lived; upgrade headers required.
+    location ^~ /ws/ {
+        proxy_pass          http://ops_api;
+        proxy_http_version  1.1;
+        proxy_set_header    Upgrade           $http_upgrade;
+        proxy_set_header    Connection        "upgrade";
+        proxy_set_header    Host              $host;
+        proxy_set_header    X-Real-IP         $remote_addr;
+        proxy_set_header    X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header    X-Forwarded-Proto $scheme;
+        proxy_read_timeout  3600s;
+        proxy_send_timeout  3600s;
+        proxy_buffering     off;
+    }
+
+    # Hashed Vite assets are content-addressed; cache forever.
+    location ~* \.(?:js|css|woff2?|svg|png|jpg|jpeg|gif|ico|webp)$ {
+        try_files $uri =404;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # SPA fallback — every other path is a React Router route.
+    location / {
+        try_files $uri $uri/ /index.html;
+        # Index itself must NOT be aggressively cached: it carries the
+        # current bundle hash references and changes on every deploy.
+        add_header Cache-Control "no-cache" always;
+    }
+}

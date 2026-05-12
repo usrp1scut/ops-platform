@@ -1,0 +1,12 @@
+node_modules
+dist
+.vite
+playwright-report
+test-results
+.git
+.gitignore
+.dockerignore
+Dockerfile
+README.md
+e2e
+*.log

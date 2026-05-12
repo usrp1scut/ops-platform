@@ -145,6 +145,27 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Standalone frontend image. Builds the Vite/React SPA and serves it
+  # behind nginx, reverse-proxying the API surface to ops-api so the
+  # frontend can scale and roll independently. The all-in-one ops-api
+  # binary still serves /portal/ from its embed for dev workflows.
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_BASE: ${VITE_BASE-/}
+        OPS_API_UPSTREAM: ${OPS_API_UPSTREAM-ops-api:8080}
+        HTTP_PROXY: ${HTTP_PROXY-}
+        HTTPS_PROXY: ${HTTPS_PROXY-}
+    environment:
+      OPS_API_UPSTREAM: ${OPS_API_UPSTREAM-ops-api:8080}
+    ports:
+      - "8081:80"
+    depends_on:
+      ops-api:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   pgdata:
   miniodata:
