@@ -194,6 +194,57 @@ function networkText(asset: Asset) {
   return [asset.public_ip, asset.private_ip].filter(Boolean).join(" / ") || "-";
 }
 
+// User-facing label for raw AWS resource type identifiers. The backend
+// enums (`aws_ec2_instance` etc.) leak otherwise — operators shouldn't
+// have to read snake_case API strings to know what they're looking at.
+const FRIENDLY_TYPES: Record<string, string> = {
+  aws_ec2_instance: "EC2 instance",
+  aws_rds_instance: "RDS instance",
+  aws_vpc: "VPC",
+  aws_security_group: "Security group",
+  aws_subnet: "Subnet",
+  aws_elb: "Load balancer",
+  aws_s3_bucket: "S3 bucket",
+  aws_iam_role: "IAM role",
+  aws_iam_user: "IAM user",
+  aws_account: "AWS account",
+  manual: "Manual host",
+};
+function friendlyType(asset: Asset): string {
+  const raw = (asset.type || "manual").toLowerCase();
+  return FRIENDLY_TYPES[raw] || asset.type || "Manual host";
+}
+
+// supportsTerminal narrows isConnectableAsset for the action column:
+// SSH/RDP only render for resource types that actually have a shell or
+// remote-desktop surface. RDS is connectable in the launch sense (DB) but
+// shouldn't expose SSH/RDP buttons in the asset table.
+function supportsTerminal(asset: Asset): boolean {
+  const t = (asset.type || "").toLowerCase();
+  return t === "aws_ec2_instance" || t === "manual" || t === "host" || t === "vm" || t === "";
+}
+
+// Best-effort connectivity hint derived from list-row data only. Probe
+// state and saved-profile details would require an extra API; this column
+// surfaces what we already have (bastion role, network-primitive flag,
+// connectability heuristic) so the table conveys more than just AWS state.
+function connectivityHint(asset: Asset): { label: string; tone: "ok" | "info" | "warn" | "" } {
+  if (asset.is_vpc_proxy) return { label: "Bastion", tone: "ok" };
+  if (!isConnectableAsset(asset)) return { label: "—", tone: "" };
+  const t = (asset.type || "").toLowerCase();
+  if (t === "aws_rds_instance") return { label: "DB target", tone: "info" };
+  return { label: "Connectable", tone: "" };
+}
+
+// Compact "Region · Account" string. Both are short; collapsing them into
+// one column reclaims width for IP/DNS/Actions on table-heavy pages.
+function regionAccountCell(asset: Asset): { region: string; sub: string } {
+  return {
+    region: asset.region || "-",
+    sub: [asset.zone, asset.account_id].filter(Boolean).join(" · "),
+  };
+}
+
 function facetOptions(values: string[] | undefined, selected: string) {
   const set = new Set(values || []);
   if (selected) set.add(selected);
@@ -916,6 +967,17 @@ export function AssetsPage() {
     // CMDB Connect button always materialised on the Sessions view.
     navigate(`/sessions${buildLaunchSearch({ assetID: asset.id, protocol })}`);
   }
+  // CMDB inventory is a wide-table page; opt the section into the
+  // fullwidth shell so the table can use the available width and Actions
+  // stop getting clipped on standard monitors. Sessions Live mode uses a
+  // separate `workspace-mode` class — they coexist without conflict.
+  useEffect(() => {
+    document.body.classList.add("fullwidth-mode");
+    return () => {
+      document.body.classList.remove("fullwidth-mode");
+    };
+  }, []);
+
   const [filters, setFilters] = useState<AssetFilters>(initialFilters);
   const [offset, setOffset] = useState(0);
   const [selectedAssetID, setSelectedAssetID] = useState("");
@@ -1279,27 +1341,87 @@ export function AssetsPage() {
         </article>
       ) : null}
 
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Assets</p>
-            <h2>Inventory</h2>
-          </div>
-          <div className="panel-actions">
-            <span className="status-pill">
-              <Database size={14} aria-hidden="true" />
-              {range}
-            </span>
-            <button
-              type="button"
-              className="secondary-button compact"
-              onClick={() => void assets.refetch()}
-              disabled={!canReadAssets || assets.isFetching}
-            >
-              <RefreshCw size={14} aria-hidden="true" />
-              <span>{assets.isFetching ? "Refreshing" : "Refresh"}</span>
+      <article className="work-panel assets-panel">
+        {/* Inner header collapses into a single toolbar row: search wide,
+            5 facet selects, the bastion toggle, count pill, refresh.
+            Drops the redundant "Assets / Inventory" eyebrow since the page
+            header already names this section. */}
+        <div className="assets-toolbar">
+          <label className="form-field search-field assets-toolbar-search">
+            <span className="sr-only">Search</span>
+            <div className="input-with-icon">
+              <Search size={16} aria-hidden="true" />
+              <input
+                type="search"
+                value={filters.query}
+                onChange={(event) => updateFilter("query", event.target.value)}
+                placeholder="Search name, ID, IP, DNS"
+                disabled={!canReadAssets}
+              />
+            </div>
+          </label>
+
+          <FilterSelect
+            label="Env"
+            value={filters.env}
+            options={facetOptions(facets.data?.envs, filters.env)}
+            onChange={(value) => updateFilter("env", value)}
+          />
+          <FilterSelect
+            label="Type"
+            value={filters.type}
+            options={facetOptions(facets.data?.types, filters.type)}
+            onChange={(value) => updateFilter("type", value)}
+          />
+          <FilterSelect
+            label="Status"
+            value={filters.status}
+            options={facetOptions(facets.data?.statuses, filters.status)}
+            onChange={(value) => updateFilter("status", value)}
+          />
+          <FilterSelect
+            label="Source"
+            value={filters.source}
+            options={facetOptions(facets.data?.sources, filters.source)}
+            onChange={(value) => updateFilter("source", value)}
+          />
+          <FilterSelect
+            label="Region"
+            value={filters.region}
+            options={facetOptions(facets.data?.regions, filters.region)}
+            onChange={(value) => updateFilter("region", value)}
+          />
+          <label className="assets-toolbar-toggle">
+            <input
+              type="checkbox"
+              checked={filters.includeBastions}
+              onChange={(event) => updateFilter("includeBastions", event.target.checked)}
+              disabled={!canReadAssets}
+            />
+            <span>Include VPC proxies</span>
+          </label>
+
+          <div className="assets-toolbar-spacer" />
+
+          {activeFilterCount > 0 ? (
+            <button type="button" className="secondary-button compact" onClick={resetFilters}>
+              <FilterX size={14} aria-hidden="true" />
+              <span>Reset {activeFilterCount}</span>
             </button>
-          </div>
+          ) : null}
+          <span className="status-pill">
+            <Database size={14} aria-hidden="true" />
+            {range}
+          </span>
+          <button
+            type="button"
+            className="secondary-button compact"
+            onClick={() => void assets.refetch()}
+            disabled={!canReadAssets || assets.isFetching}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+            <span>{assets.isFetching ? "Refreshing" : "Refresh"}</span>
+          </button>
         </div>
 
         {!canReadAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
@@ -1318,74 +1440,6 @@ export function AssetsPage() {
           />
         ) : null}
 
-        <div className="filter-panel">
-          <label className="form-field search-field">
-            <span>Search</span>
-            <div className="input-with-icon">
-              <Search size={16} aria-hidden="true" />
-              <input
-                type="search"
-                value={filters.query}
-                onChange={(event) => updateFilter("query", event.target.value)}
-                placeholder="Name, ID, IP, DNS"
-                disabled={!canReadAssets}
-              />
-            </div>
-          </label>
-
-          <div className="form-grid compact-grid">
-            <FilterSelect
-              label="Env"
-              value={filters.env}
-              options={facetOptions(facets.data?.envs, filters.env)}
-              onChange={(value) => updateFilter("env", value)}
-            />
-            <FilterSelect
-              label="Type"
-              value={filters.type}
-              options={facetOptions(facets.data?.types, filters.type)}
-              onChange={(value) => updateFilter("type", value)}
-            />
-            <FilterSelect
-              label="Status"
-              value={filters.status}
-              options={facetOptions(facets.data?.statuses, filters.status)}
-              onChange={(value) => updateFilter("status", value)}
-            />
-            <FilterSelect
-              label="Source"
-              value={filters.source}
-              options={facetOptions(facets.data?.sources, filters.source)}
-              onChange={(value) => updateFilter("source", value)}
-            />
-            <FilterSelect
-              label="Region"
-              value={filters.region}
-              options={facetOptions(facets.data?.regions, filters.region)}
-              onChange={(value) => updateFilter("region", value)}
-            />
-            <label className="toggle-row">
-              <input
-                type="checkbox"
-                checked={filters.includeBastions}
-                onChange={(event) => updateFilter("includeBastions", event.target.checked)}
-                disabled={!canReadAssets}
-              />
-              <span>Include VPC proxies</span>
-            </label>
-          </div>
-
-          {activeFilterCount > 0 ? (
-            <div className="filter-summary">
-              <span className="status-pill info">{activeFilterCount} active</span>
-              <button type="button" className="secondary-button compact" onClick={resetFilters}>
-                <FilterX size={14} aria-hidden="true" />
-                <span>Reset</span>
-              </button>
-            </div>
-          ) : null}
-        </div>
-
         {canReadAssets && assets.isLoading ? <PanelState kind="loading" message="Loading assets" /> : null}
 
         {canReadAssets && !assets.isLoading && !assets.isError && items.length === 0 ? (
@@ -1397,89 +1451,103 @@ export function AssetsPage() {
 
         {items.length > 0 ? (
           <div className="table-wrap">
-            <table className="data-table">
+            <table className="data-table assets-table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Type</th>
+                  <th>Asset</th>
+                  <th>Kind</th>
+                  <th>Address</th>
                   <th>Env</th>
-                  <th>Status</th>
+                  <th>Region · Account</th>
+                  <th>State</th>
+                  <th>Connectivity</th>
                   <th>Owner</th>
-                  <th>Region</th>
-                  <th>Network</th>
-                  <th>Source</th>
-                  <th>Actions</th>
+                  <th className="col-actions">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((asset) => (
-                  <tr key={asset.id}>
-                    <td>
-                      <div className="asset-name-cell">
-                        <strong>{asset.name || asset.id}</strong>
-                        {asset.is_vpc_proxy ? <span className="status-pill ok">VPC proxy</span> : null}
-                      </div>
-                      {asset.private_dns ? <div className="muted">{asset.private_dns}</div> : null}
-                    </td>
-                    <td>{asset.type || "-"}</td>
-                    <td>{asset.env || "default"}</td>
-                    <td>
-                      <span className={`status-pill ${statusTone(asset.status)}`}>{asset.status || "unknown"}</span>
-                    </td>
-                    <td>{asset.owner || "-"}</td>
-                    <td>
-                      <code>{asset.region || "-"}</code>
-                      {asset.zone ? <div className="muted">{asset.zone}</div> : null}
-                    </td>
-                    <td>{networkText(asset)}</td>
-                    <td>
-                      <span className={`status-pill ${sourceTone(asset.source)}`}>{asset.source || "manual"}</span>
-                    </td>
-                    <td>
-                      <div className="request-actions">
-                        {isConnectableAsset(asset) ? (
-                          <>
-                            <button
-                              type="button"
-                              className="secondary-button compact"
-                              onClick={() => connectAsset(asset, "ssh")}
-                              aria-label={`Open SSH session to ${asset.name || asset.id}`}
-                              title="Open SSH terminal in Sessions"
-                            >
-                              <SquareTerminal size={14} aria-hidden="true" />
-                              <span>SSH</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary-button compact"
-                              onClick={() => connectAsset(asset, "rdp")}
-                              aria-label={`Open RDP session to ${asset.name || asset.id}`}
-                              title="Open RDP session in Sessions"
-                            >
-                              <MonitorPlay size={14} aria-hidden="true" />
-                              <span>RDP</span>
-                            </button>
-                          </>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="secondary-button compact"
-                          onClick={(event) => {
-                            detailTriggerRef.current = event.currentTarget;
-                            saveConnection.reset();
-                            testConnection.reset();
-                            setActiveDrawerTab("summary");
-                            setSelectedAssetID(asset.id);
-                          }}
-                          aria-label={`View details for ${asset.name || asset.id}`}
-                        >
-                          <Eye size={14} aria-hidden="true" />
-                          <span>Details</span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {items.map((asset) => {
+                  const region = regionAccountCell(asset);
+                  const conn = connectivityHint(asset);
+                  const showTerminal = supportsTerminal(asset);
+                  return (
+                    <tr key={asset.id}>
+                      <td>
+                        <div className="asset-name-cell">
+                          <strong>{asset.name || asset.id}</strong>
+                          {asset.is_vpc_proxy ? <span className="status-pill ok tiny">bastion</span> : null}
+                        </div>
+                        {asset.private_dns ? <div className="muted small">{asset.private_dns}</div> : null}
+                      </td>
+                      <td className="nowrap">{friendlyType(asset)}</td>
+                      <td>
+                        {asset.public_ip ? <div><code>{asset.public_ip}</code> <span className="muted">pub</span></div> : null}
+                        {asset.private_ip ? <div><code>{asset.private_ip}</code> <span className="muted">priv</span></div> : null}
+                        {!asset.public_ip && !asset.private_ip ? <span className="muted">—</span> : null}
+                      </td>
+                      <td className="nowrap">{asset.env || "default"}</td>
+                      <td className="nowrap">
+                        <code>{region.region}</code>
+                        {region.sub ? <div className="muted small">{region.sub}</div> : null}
+                      </td>
+                      <td className="nowrap">
+                        <span className={`status-pill ${statusTone(asset.status)}`}>{asset.status || "unknown"}</span>
+                      </td>
+                      <td className="nowrap">
+                        {conn.tone ? (
+                          <span className={`status-pill ${conn.tone}`}>{conn.label}</span>
+                        ) : (
+                          <span className="muted">{conn.label}</span>
+                        )}
+                        <div className="muted small">{(asset.source || "manual")}</div>
+                      </td>
+                      <td className="nowrap">{asset.owner || <span className="muted">—</span>}</td>
+                      <td className="col-actions">
+                        <div className="request-actions">
+                          {showTerminal ? (
+                            <>
+                              <button
+                                type="button"
+                                className="secondary-button compact"
+                                onClick={() => connectAsset(asset, "ssh")}
+                                aria-label={`Open SSH session to ${asset.name || asset.id}`}
+                                title="Open SSH terminal in Sessions"
+                              >
+                                <SquareTerminal size={14} aria-hidden="true" />
+                                <span>SSH</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button compact"
+                                onClick={() => connectAsset(asset, "rdp")}
+                                aria-label={`Open RDP session to ${asset.name || asset.id}`}
+                                title="Open RDP session in Sessions"
+                              >
+                                <MonitorPlay size={14} aria-hidden="true" />
+                                <span>RDP</span>
+                              </button>
+                            </>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="secondary-button compact"
+                            onClick={(event) => {
+                              detailTriggerRef.current = event.currentTarget;
+                              saveConnection.reset();
+                              testConnection.reset();
+                              setActiveDrawerTab("summary");
+                              setSelectedAssetID(asset.id);
+                            }}
+                            aria-label={`View details for ${asset.name || asset.id}`}
+                          >
+                            <Eye size={14} aria-hidden="true" />
+                            <span>Details</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

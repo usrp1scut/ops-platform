@@ -901,15 +901,20 @@ a {
   padding-bottom: 2px;
 }
 
+/* Compact terminal-tab style. The legacy big card form was carrying very
+ * little signal (kind / name / status / close) but eating 60+ px of
+ * vertical real estate. Single-line tabs put the same info in 32 px and
+ * let the terminal canvas use the room. */
 .live-session-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  max-width: 320px;
-  padding: 5px;
+  gap: 4px;
+  max-width: 280px;
+  padding: 0 4px 0 8px;
   border: 1px solid #d6e0de;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #f6faf9;
+  height: 30px;
 }
 
 .live-session-tab.active {
@@ -920,23 +925,34 @@ a {
 .live-session-tab-main {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 32px;
+  gap: 6px;
   min-width: 0;
+  height: 100%;
+  padding: 0;
   border: 0;
   background: transparent;
   color: #223330;
-  font-weight: 800;
+  font-weight: 600;
+  font-size: 12.5px;
 }
 
 .kind-tag {
   flex: 0 0 auto;
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
   background: #dfecea;
   color: #344644;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+/* The status pill inside a tab shrinks to a small dot + label. */
+.live-session-tab .status-pill {
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .live-session-tab-main .session-label {
@@ -949,6 +965,27 @@ a {
   border-radius: 8px;
   background: #000000;
   overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* In workspace mode the live shell is itself a flex column so the stage
+ * stretches to fill what's left after the tab strip. */
+.sessions-page.live-mode .live-session-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.sessions-page.live-mode .live-session-panel,
+.sessions-page.live-mode .live-session-panel:not([hidden]) {
+  height: 100%;
+}
+.sessions-page.live-mode .live-terminal-pane,
+.sessions-page.live-mode .live-terminal-host {
+  height: 100%;
+  min-height: 0;
 }
 
 .live-session-panel[hidden] {
@@ -1327,4 +1364,341 @@ a {
   .detail-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ========== Sessions workspace (legacy-style 2-col layout) ==========
+ * Restored from the classic /portal layout: a left rail of connectable
+ * assets feeds a right pane that hosts the live session tabs + terminal
+ * canvas. Switching to Audit mode hides the rail and surfaces the
+ * filters + records table where the workspace was.
+ *
+ * Workspace mode (Sessions Live) escapes the centered .page-section
+ * width cap and the .page-frame padding so the terminal can fill the
+ * viewport. Toggled via body.workspace-mode (set by SessionsPage on the
+ * Live route, cleared on unmount and on Audit).
+ */
+body.workspace-mode .page-frame {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+body.workspace-mode .main-frame {
+  height: 100vh;
+  min-height: 0;
+}
+.sessions-page.live-mode {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  padding: 16px 16px 0;
+  gap: 12px;
+  display: flex;
+  flex-direction: column;
+}
+.sessions-page.live-mode .sessions-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
+/* Sessions header: title left, mode tabs middle, summary + actions right.
+ * Single row, wraps on narrow screens. */
+.sessions-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.sessions-header > h1 {
+  margin: 0;
+  flex: 0 0 auto;
+}
+.sessions-header > .sessions-mode-tabs {
+  flex: 0 0 auto;
+}
+.sessions-header > .sessions-summary {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted, #6f7c80);
+}
+.sessions-header > .sessions-summary strong {
+  color: var(--text, #1f2a2c);
+  font-weight: 700;
+}
+.sessions-header > .sessions-summary .status-pill.tiny {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.sessions-header > .sessions-header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sessions-mode-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border, #1f242c);
+  border-radius: 8px;
+  background: var(--surface, #11141a);
+}
+.sessions-mode-tab {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted, #8b94a3);
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.sessions-mode-tab:hover { color: var(--text, #e6e8eb); background: rgba(255, 255, 255, 0.04); }
+.sessions-mode-tab.active {
+  color: var(--text, #e6e8eb);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sessions-workspace {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  min-height: 0;
+}
+@media (max-width: 900px) {
+  .sessions-workspace { grid-template-columns: 1fr; }
+}
+
+.sessions-rail {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface, #11141a);
+  border: 1px solid var(--border, #1f242c);
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 0;
+}
+.sessions-rail-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border, #1f242c);
+  background: rgba(255, 255, 255, 0.015);
+}
+.sessions-rail-search {
+  flex: 1;
+  min-width: 0;
+}
+.sessions-rail-search input {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  color: var(--text, #e6e8eb);
+  padding: 4px 6px;
+  font-size: 13px;
+}
+.sessions-rail-search input:focus { outline: none; }
+.sessions-rail-tree {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px;
+  font-size: 12.5px;
+}
+.sessions-rail-tree .asset-tree { padding: 0; }
+.sessions-rail-footer {
+  border-top: 1px solid var(--border, #1f242c);
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.015);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sessions-rail-footer .drawer-tabs { width: 100%; }
+.sessions-rail-footer .small { font-size: 11.5px; margin: 0; }
+
+.sessions-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.sessions-pane > .live-session-shell { flex: 1; min-height: 0; }
+.sessions-pane-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 24px;
+  border: 1px dashed var(--border, #1f242c);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.012);
+  min-height: 240px;
+}
+.sessions-pane-empty h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.sessions-pane-empty p { margin: 0; max-width: 460px; }
+
+/* ========== Sessions toast (floating, doesn't shift terminal) ========== */
+.sessions-pane { position: relative; }
+.sessions-toast {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  max-width: min(420px, 70%);
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(16, 24, 32, 0.92);
+  color: #e7f0ec;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: sessions-toast-in 140ms ease-out;
+}
+.sessions-toast.success { border-left: 3px solid #21a69a; }
+.sessions-toast.error   { border-left: 3px solid #e26161; }
+.sessions-toast-close {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+.sessions-toast-close:hover { opacity: 1; }
+@keyframes sessions-toast-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Asset rail: tighter rows, two-line hierarchy (name + secondary line). */
+.sessions-rail .asset-tree-row {
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 12.5px;
+  width: 100%;
+}
+.sessions-rail .asset-tree-name { font-weight: 600; }
+.sessions-rail .asset-tree-addr {
+  font-size: 11px;
+  color: var(--text-muted, #6f7c80);
+  margin-left: auto;
+}
+.sessions-rail .asset-tree-row.bastion .asset-tree-name::before {
+  content: "•";
+  color: #21a69a;
+  font-weight: 900;
+  margin-right: 4px;
+}
+
+/* ========== Fullwidth mode (Assets table, future wide pages) ==========
+ * Lighter sibling of workspace-mode: drops the section max-width and
+ * shrinks the page-frame padding so wide tables can use the screen,
+ * but keeps the section as a normal grid stack (scrolls, not flex-100h).
+ */
+body.fullwidth-mode .page-frame { padding: 20px 24px; }
+body.fullwidth-mode .page-section { width: 100%; max-width: none; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* CMDB inventory: single-row toolbar replaces the stacked filter panel.
+ * Search input grows; facet selects stay narrow; toggle, count, reset,
+ * refresh sit at the right. Wraps gracefully on narrow viewports. */
+.assets-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 4px;
+}
+/* The facet picker renders as <label.form-field>. In the toolbar we want
+ * tighter vertical metrics than the default form-field grid spacing. */
+.assets-toolbar > .form-field {
+  flex: 0 0 auto;
+  min-width: 140px;
+  gap: 3px;
+  font-weight: 600;
+  font-size: 11.5px;
+}
+.assets-toolbar > .form-field > span {
+  color: var(--text-muted, #6b7d7b);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.assets-toolbar > .form-field select,
+.assets-toolbar > .form-field input {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-weight: 500;
+  font-size: 13px;
+}
+.assets-toolbar-search {
+  flex: 1 1 280px;
+  min-width: 240px;
+  margin-bottom: 0;
+}
+.assets-toolbar-search .input-with-icon input {
+  min-height: 34px;
+}
+.assets-toolbar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-muted, #6b7d7b);
+  white-space: nowrap;
+}
+.assets-toolbar-spacer { flex: 1 1 auto; }
+.assets-toolbar .status-pill { white-space: nowrap; }
+
+/* Assets table: nowrap on short columns so Region isn't broken across
+ * lines, and a sensible min-width so Actions doesn't get clipped on
+ * standard monitors. The container's overflow-x:auto handles the rare
+ * narrow viewport. */
+.data-table.assets-table {
+  min-width: 1200px;
+}
+.data-table.assets-table .nowrap,
+.data-table.assets-table .col-actions { white-space: nowrap; }
+.data-table.assets-table td.col-actions { text-align: right; }
+.data-table.assets-table .request-actions {
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+.data-table .muted.small { font-size: 11.5px; }
+.data-table .status-pill.tiny {
+  padding: 1px 6px;
+  font-size: 10.5px;
 }

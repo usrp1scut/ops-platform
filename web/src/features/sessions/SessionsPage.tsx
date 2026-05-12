@@ -169,6 +169,54 @@ export function SessionsPage() {
   const [recordingPreview, setRecordingPreview] = useState<RecordingPreviewState | null>(null);
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
+  // Top-level Live | Audit toggle. Mirrors the legacy /portal layout where
+  // Live and Audit feel like separate operator tools rather than two
+  // sections of one stacked page. Persisted to the URL so deep-links and
+  // back/forward navigation work across the two surfaces.
+  const sessionsMode: "live" | "audit" = searchParams.get("mode") === "audit" ? "audit" : "live";
+
+  // In Live mode the Sessions page becomes a real workspace: drop the
+  // page-frame padding + .page-section width cap so the terminal can fill
+  // the viewport. Driven by a body class so we can override the shell-level
+  // padding rules from a leaf component without prop-drilling. Cleaned up
+  // on unmount or when the user switches to Audit so other pages aren't
+  // affected.
+  useEffect(() => {
+    if (sessionsMode !== "live") {
+      document.body.classList.remove("workspace-mode");
+      return;
+    }
+    document.body.classList.add("workspace-mode");
+    return () => {
+      document.body.classList.remove("workspace-mode");
+    };
+  }, [sessionsMode]);
+
+  // launchFeedback is a transient confirmation ("ticket issued",
+  // "permission denied", etc). In a workspace it should not push the
+  // terminal down — auto-dismiss after a few seconds and render it as a
+  // floating toast instead of a structural panel. Errors stay slightly
+  // longer so the operator has time to read.
+  useEffect(() => {
+    if (!launchFeedback) return;
+    const ttl = launchFeedback.kind === "error" ? 8000 : 4000;
+    const t = window.setTimeout(() => setLaunchFeedback(null), ttl);
+    return () => window.clearTimeout(t);
+  }, [launchFeedback]);
+  const setSessionsMode = useCallback(
+    (next: "live" | "audit") => {
+      setSearchParams(
+        (current) => {
+          const params = new URLSearchParams(current);
+          if (next === "live") params.delete("mode");
+          else params.set("mode", next);
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const effectiveUserID = canReadAllSessions ? filters.userID.trim() : "";
   const effectiveAssetID = filters.assetID.trim();
   const assetSearch = useQuery({
@@ -373,309 +421,379 @@ export function SessionsPage() {
     setSearchParams({}, { replace: true });
   }, [canReadSessions, userID, searchParams, launchTerminal, setSearchParams]);
 
-  return (
-    <section className="page-section">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Live access</p>
-          <h1>Sessions</h1>
-        </div>
-        <span className={`status-pill ${canReadSessions ? "ok" : "warn"}`}>
-          <ShieldCheck size={14} aria-hidden="true" />
-          {canReadSessions ? "cmdb.asset:read" : "Needs cmdb.asset:read"}
-        </span>
+  // ---- Sidebar (asset rail) reusable block ----
+  // Used in Live mode as the left rail. Mirrors the legacy /portal sidebar:
+  // search box, env/vpc/asset tree, click-to-launch behaviour. Protocol
+  // toggle lives at the bottom so SSH/RDP choice travels with the rail.
+  const railSearch = (
+    <div className="sessions-rail-header">
+      <div className="input-with-icon sessions-rail-search">
+        <Search size={14} aria-hidden="true" />
+        <input
+          type="search"
+          value={sidebarSearch}
+          onChange={(event) => setSidebarSearch(event.target.value)}
+          placeholder="Search name / ip / vpc"
+          disabled={!canReadSessions}
+        />
       </div>
+      <button
+        type="button"
+        className="icon-button compact-icon"
+        onClick={() => void sidebarAssets.refetch()}
+        disabled={!canReadSessions || sidebarAssets.isFetching}
+        title={sidebarAssets.isFetching ? "Refreshing" : "Refresh"}
+        aria-label="Refresh assets"
+      >
+        <RefreshCw size={14} aria-hidden="true" />
+      </button>
+    </div>
+  );
 
-      <div className="metric-grid">
-        <article className="metric-card">
-          <div className="metric-icon">
-            <SquareTerminal size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Shown</div>
-            <div className="metric-value">{canReadSessions ? visibleSessions.length : "-"}</div>
-          </div>
-          <span className="status-pill">{counts.total} loaded</span>
-        </article>
-
-        <article className="metric-card">
-          <div className="metric-icon">
-            <Timer size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Active now</div>
-            <div className="metric-value">{canReadSessions ? counts.active : "-"}</div>
-          </div>
-          <span className="status-pill">{counts.closed} closed</span>
-        </article>
-
-        <article className="metric-card">
-          <div className="metric-icon">
-            <Video size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Recordings</div>
-            <div className="metric-value">{canReadSessions ? counts.recordings : "-"}</div>
-          </div>
-          <span className={`status-pill ${counts.errors > 0 ? "warn" : "ok"}`}>{counts.errors} errors</span>
-        </article>
-      </div>
-
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Quick launch</p>
-            <h2>Connectable assets</h2>
-          </div>
-          <button
-            type="button"
-            className="secondary-button compact"
-            onClick={() => void sidebarAssets.refetch()}
-            disabled={!canReadSessions || sidebarAssets.isFetching}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-            <span>{sidebarAssets.isFetching ? "Refreshing" : "Refresh"}</span>
-          </button>
-        </div>
-
-        {!canReadSessions ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
-        {canReadSessions && sidebarAssets.isError ? (
-          <PanelState
-            kind="error"
-            message={sidebarAssets.error instanceof Error ? sidebarAssets.error.message : "Failed to load assets."}
-          />
-        ) : null}
-
-        <label className="form-field search-field">
-          <span>Search</span>
-          <div className="input-with-icon">
-            <Search size={16} aria-hidden="true" />
-            <input
-              type="search"
-              value={sidebarSearch}
-              onChange={(event) => setSidebarSearch(event.target.value)}
-              placeholder="Name, IP, env, VPC, type"
-              disabled={!canReadSessions}
-            />
-          </div>
-        </label>
-
-        {canReadSessions && sidebarAssets.isLoading ? (
-          <PanelState kind="loading" message="Loading connectable assets" />
-        ) : null}
-
-        {canReadSessions && !sidebarAssets.isLoading && !sidebarAssets.isError && assetTree.length === 0 ? (
-          <PanelState kind="empty" message="No connectable assets match this filter." />
-        ) : null}
-
-        {assetTree.length > 0 ? (
-          <div className="asset-tree">
-            {assetTree.map((env) => (
-              <details className="asset-tree-env" key={env.envName} open>
-                <summary>
-                  <span>env · {env.envName}</span>
-                  <span className="muted">({env.total})</span>
-                </summary>
-                {env.vpcs.map((vpc) => (
-                  <details
-                    className="asset-tree-vpc"
-                    key={`${env.envName}::${vpc.vpcKey}`}
-                    open
-                  >
-                    <summary>
-                      <span>
-                        vpc · <code>{vpc.vpcLabel}</code>
-                      </span>
-                      <span className="muted">({vpc.count})</span>
-                    </summary>
-                    <div className="asset-tree-members">
-                      {[...vpc.bastions, ...vpc.members].map((asset) => {
-                        const addr = asset.public_ip || asset.private_ip || asset.private_dns;
-                        return (
-                          <button
-                            type="button"
-                            key={asset.id}
-                            className={`asset-tree-row${asset.is_vpc_proxy ? " bastion" : ""}`}
-                            onClick={() => quickLaunch(asset)}
-                            disabled={launchTerminal.isPending}
-                            title={`Launch ${launchProtocol.toUpperCase()} to ${asset.name || asset.id}`}
-                          >
-                            {asset.is_vpc_proxy ? (
-                              <span className="status-pill ok tiny">bastion</span>
-                            ) : null}
-                            <span className="asset-tree-name">{asset.name || asset.id}</span>
-                            {addr ? <span className="asset-tree-addr">{addr}</span> : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </details>
-                ))}
-              </details>
-            ))}
-          </div>
-        ) : null}
-
-        <p className="muted">
-          Click a row to launch <strong>{launchProtocol.toUpperCase()}</strong>. Switch the protocol in the
-          panel below before clicking to start an RDP session instead.
-        </p>
-      </article>
-
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Live access</p>
-            <h2>Launch session</h2>
-          </div>
-          <button
-            type="button"
-            className="secondary-button compact"
-            onClick={() => void assetSearch.refetch()}
-            disabled={!canReadSessions || assetSearch.isFetching}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-            <span>{assetSearch.isFetching ? "Refreshing" : "Refresh assets"}</span>
-          </button>
-        </div>
-
-        {launchFeedback ? <PanelState kind={launchFeedback.kind} message={launchFeedback.message} /> : null}
-        {!canReadSessions ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
-        {canReadSessions && assetSearch.isError ? (
-          <PanelState
-            kind="error"
-            message={assetSearch.error instanceof Error ? assetSearch.error.message : "Failed to load assets."}
-          />
-        ) : null}
-
-        <form className="request-form" onSubmit={launchSelectedAsset}>
-          <div className="drawer-tabs" role="tablist" aria-label="Launch protocol">
-            {[
-              { label: "SSH", value: "ssh" },
-              { label: "RDP", value: "rdp" },
-            ].map((item) => (
-              <button
-                type="button"
-                className={`drawer-tab${launchProtocol === item.value ? " active" : ""}`}
-                key={item.value}
-                onClick={() => setLaunchProtocol(item.value as LaunchProtocol)}
-                role="tab"
-                aria-selected={launchProtocol === item.value}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="form-grid">
-            <label className="form-field">
-              <span>Asset search</span>
-              <input
-                type="search"
-                value={assetQuery}
-                onChange={(event) => setAssetQuery(event.target.value)}
-                placeholder="Name, IP, owner, region"
-                disabled={!canReadSessions}
-              />
-            </label>
-
-            <label className="form-field">
-              <span>Asset</span>
-              <select
-                value={selectedAssetID}
-                onChange={(event) => setSelectedAssetID(event.target.value)}
-                disabled={!canReadSessions || assetSearch.isLoading}
-              >
-                <option value="">Select an active asset</option>
-                {assetItems.map((asset) => (
-                  <option value={asset.id} key={asset.id}>
-                    {assetOptionLabel(asset)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="form-actions align-end">
-              <button
-                type="submit"
-                className="primary-button"
-                disabled={!canReadSessions || launchTerminal.isPending || !selectedAssetID}
-              >
-                <Play size={16} aria-hidden="true" />
-                <span>
-                  {launchTerminal.isPending ? "Launching" : `Launch ${launchProtocol.toUpperCase()}`}
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {canReadSessions && assetSearch.isLoading ? <PanelState kind="loading" message="Loading active assets" /> : null}
-          {canReadSessions && !assetSearch.isLoading && !assetSearch.isError && assetItems.length === 0 ? (
-            <PanelState kind="empty" message="No active assets match this search." />
-          ) : null}
-        </form>
-
-        {liveSessions.length > 0 ? (
-          <div className="live-session-shell">
-            <div className="live-session-tabs" role="tablist" aria-label="Live sessions">
-              {liveSessions.map((session) => (
-                <div className={`live-session-tab${activeLiveID === session.id ? " active" : ""}`} key={session.id}>
-                  <button
-                    type="button"
-                    className="live-session-tab-main"
-                    onClick={() => setActiveLiveID(session.id)}
-                    role="tab"
-                    aria-selected={activeLiveID === session.id}
-                  >
-                    <span className="kind-tag">{session.kind.toUpperCase()}</span>
-                    <span className="session-label">{session.asset.name || session.asset.id}</span>
-                    <span className={`status-pill ${session.status === "error" ? "warn" : "info"}`}>
-                      {session.status}
+  const railTree = (
+    <div className="sessions-rail-tree">
+      {!canReadSessions ? (
+        <PanelState kind="permission" message="Permission required: cmdb.asset:read" />
+      ) : null}
+      {canReadSessions && sidebarAssets.isError ? (
+        <PanelState
+          kind="error"
+          message={sidebarAssets.error instanceof Error ? sidebarAssets.error.message : "Failed to load assets."}
+        />
+      ) : null}
+      {canReadSessions && sidebarAssets.isLoading ? (
+        <PanelState kind="loading" message="Loading connectable assets" />
+      ) : null}
+      {canReadSessions && !sidebarAssets.isLoading && !sidebarAssets.isError && assetTree.length === 0 ? (
+        <PanelState kind="empty" message="No connectable assets match this filter." />
+      ) : null}
+      {assetTree.length > 0 ? (
+        <div className="asset-tree">
+          {assetTree.map((env) => (
+            <details className="asset-tree-env" key={env.envName} open>
+              <summary>
+                <span>env · {env.envName}</span>
+                <span className="muted">({env.total})</span>
+              </summary>
+              {env.vpcs.map((vpc) => (
+                <details
+                  className="asset-tree-vpc"
+                  key={`${env.envName}::${vpc.vpcKey}`}
+                  open
+                >
+                  <summary>
+                    <span>
+                      vpc · <code>{vpc.vpcLabel}</code>
                     </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button compact-icon"
-                    onClick={() => closeLiveSession(session.id)}
-                    title="Close terminal"
-                  >
-                    <X size={14} aria-hidden="true" />
-                  </button>
-                </div>
+                    <span className="muted">({vpc.count})</span>
+                  </summary>
+                  <div className="asset-tree-members">
+                    {[...vpc.bastions, ...vpc.members].map((asset) => {
+                      const addr = asset.public_ip || asset.private_ip || asset.private_dns;
+                      return (
+                        <button
+                          type="button"
+                          key={asset.id}
+                          className={`asset-tree-row${asset.is_vpc_proxy ? " bastion" : ""}`}
+                          onClick={() => quickLaunch(asset)}
+                          disabled={launchTerminal.isPending}
+                          title={`Launch ${launchProtocol.toUpperCase()} to ${asset.name || asset.id}`}
+                        >
+                          {asset.is_vpc_proxy ? (
+                            <span className="status-pill ok tiny">bastion</span>
+                          ) : null}
+                          <span className="asset-tree-name">{asset.name || asset.id}</span>
+                          {addr ? <span className="asset-tree-addr">{addr}</span> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </details>
               ))}
-            </div>
+            </details>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 
-            <div className="live-session-stage">
-              {liveSessions.map((session) => (
-                <div className="live-session-panel" hidden={activeLiveID !== session.id} key={session.id}>
-                  {session.kind === "ssh" ? (
-                    <SshTerminalPane
-                      active={activeLiveID === session.id}
-                      assetID={session.asset.id}
-                      assetName={session.asset.name || session.asset.id}
-                      onStatusChange={updateLiveSessionStatus}
-                      sessionID={session.id}
-                      ticket={session.ticket}
-                    />
-                  ) : (
-                    <RdpSessionPane
-                      active={activeLiveID === session.id}
-                      assetID={session.asset.id}
-                      assetName={session.asset.name || session.asset.id}
-                      onStatusChange={updateLiveSessionStatus}
-                      sessionID={session.id}
-                      ticket={session.ticket}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
+  const railProtocol = (
+    <div className="sessions-rail-footer">
+      <div className="drawer-tabs" role="tablist" aria-label="Launch protocol">
+        {[
+          { label: "SSH", value: "ssh" },
+          { label: "RDP", value: "rdp" },
+        ].map((item) => (
+          <button
+            type="button"
+            className={`drawer-tab${launchProtocol === item.value ? " active" : ""}`}
+            key={item.value}
+            onClick={() => setLaunchProtocol(item.value as LaunchProtocol)}
+            role="tab"
+            aria-selected={launchProtocol === item.value}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <p className="muted small">Click a rail row to launch <strong>{launchProtocol.toUpperCase()}</strong>.</p>
+    </div>
+  );
+
+  return (
+    <section className={`page-section sessions-page${sessionsMode === "live" ? " live-mode" : " audit-mode"}`}>
+      <div className="page-header sessions-header">
+        <h1>Sessions</h1>
+        <div className="sessions-mode-tabs" role="tablist" aria-label="Sessions mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sessionsMode === "live"}
+            className={`sessions-mode-tab${sessionsMode === "live" ? " active" : ""}`}
+            onClick={() => setSessionsMode("live")}
+          >
+            Live
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sessionsMode === "audit"}
+            className={`sessions-mode-tab${sessionsMode === "audit" ? " active" : ""}`}
+            onClick={() => setSessionsMode("audit")}
+          >
+            Audit
+          </button>
+        </div>
+        {sessionsMode === "live" ? (
+          // Compact summary bar — the operator's quick read on session
+          // state without consuming three big cards' worth of vertical
+          // space above the terminal.
+          <div className="sessions-summary">
+            <span><strong>{canReadSessions ? counts.active : "-"}</strong> active</span>
+            <span className="muted">·</span>
+            <span><strong>{canReadSessions ? counts.closed : "-"}</strong> closed</span>
+            <span className="muted">·</span>
+            <span><strong>{canReadSessions ? counts.recordings : "-"}</strong> recordings</span>
+            {counts.errors > 0 ? (
+              <>
+                <span className="muted">·</span>
+                <span className="status-pill warn tiny">{counts.errors} errors</span>
+              </>
+            ) : null}
           </div>
-        ) : (
-          <PanelState kind="empty" message="No live sessions open." />
-        )}
-      </article>
+        ) : null}
+        <div className="sessions-header-actions">
+          <span className={`status-pill ${canReadSessions ? "ok" : "warn"}`}>
+            <ShieldCheck size={14} aria-hidden="true" />
+            {canReadSessions ? "cmdb.asset:read" : "Needs cmdb.asset:read"}
+          </span>
+        </div>
+      </div>
 
+      {sessionsMode === "audit" ? (
+        <div className="metric-grid">
+          <article className="metric-card">
+            <div className="metric-icon">
+              <SquareTerminal size={20} aria-hidden="true" />
+            </div>
+            <div>
+              <div className="metric-label">Shown</div>
+              <div className="metric-value">{canReadSessions ? visibleSessions.length : "-"}</div>
+            </div>
+            <span className="status-pill">{counts.total} loaded</span>
+          </article>
+
+          <article className="metric-card">
+            <div className="metric-icon">
+              <Timer size={20} aria-hidden="true" />
+            </div>
+            <div>
+              <div className="metric-label">Active now</div>
+              <div className="metric-value">{canReadSessions ? counts.active : "-"}</div>
+            </div>
+            <span className="status-pill">{counts.closed} closed</span>
+          </article>
+
+          <article className="metric-card">
+            <div className="metric-icon">
+              <Video size={20} aria-hidden="true" />
+            </div>
+            <div>
+              <div className="metric-label">Recordings</div>
+              <div className="metric-value">{canReadSessions ? counts.recordings : "-"}</div>
+            </div>
+            <span className={`status-pill ${counts.errors > 0 ? "warn" : "ok"}`}>{counts.errors} errors</span>
+          </article>
+        </div>
+      ) : null}
+
+      {sessionsMode === "live" ? (
+        <div className="sessions-workspace">
+          <aside className="sessions-rail" aria-label="Connectable assets">
+            {railSearch}
+            {railTree}
+            {railProtocol}
+          </aside>
+          <div className="sessions-pane">
+            {launchFeedback ? (
+              <div className={`sessions-toast ${launchFeedback.kind}`} role="status">
+                <span>{launchFeedback.message}</span>
+                <button
+                  type="button"
+                  className="sessions-toast-close"
+                  onClick={() => setLaunchFeedback(null)}
+                  aria-label="Dismiss"
+                >
+                  ×
+                </button>
+              </div>
+            ) : null}
+            {liveSessions.length > 0 ? (
+              <div className="live-session-shell">
+                <div className="live-session-tabs" role="tablist" aria-label="Live sessions">
+                  {liveSessions.map((session) => (
+                    <div className={`live-session-tab${activeLiveID === session.id ? " active" : ""}`} key={session.id}>
+                      <button
+                        type="button"
+                        className="live-session-tab-main"
+                        onClick={() => setActiveLiveID(session.id)}
+                        role="tab"
+                        aria-selected={activeLiveID === session.id}
+                      >
+                        <span className="kind-tag">{session.kind.toUpperCase()}</span>
+                        <span className="session-label">{session.asset.name || session.asset.id}</span>
+                        <span className={`status-pill ${session.status === "error" ? "warn" : "info"}`}>
+                          {session.status}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button compact-icon"
+                        onClick={() => closeLiveSession(session.id)}
+                        title="Close terminal"
+                      >
+                        <X size={14} aria-hidden="true" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="live-session-stage">
+                  {liveSessions.map((session) => (
+                    <div className="live-session-panel" hidden={activeLiveID !== session.id} key={session.id}>
+                      {session.kind === "ssh" ? (
+                        <SshTerminalPane
+                          active={activeLiveID === session.id}
+                          assetID={session.asset.id}
+                          assetName={session.asset.name || session.asset.id}
+                          onStatusChange={updateLiveSessionStatus}
+                          sessionID={session.id}
+                          ticket={session.ticket}
+                        />
+                      ) : (
+                        <RdpSessionPane
+                          active={activeLiveID === session.id}
+                          assetID={session.asset.id}
+                          assetName={session.asset.name || session.asset.id}
+                          onStatusChange={updateLiveSessionStatus}
+                          sessionID={session.id}
+                          ticket={session.ticket}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="sessions-pane-empty">
+                <h3>No active sessions</h3>
+                <p className="muted">
+                  Pick an asset from the left rail to open a new session, or use the form below to launch by ID.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {sessionsMode === "live" ? (
+        <article className="work-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Live access</p>
+              <h2>Launch by ID</h2>
+            </div>
+            <button
+              type="button"
+              className="secondary-button compact"
+              onClick={() => void assetSearch.refetch()}
+              disabled={!canReadSessions || assetSearch.isFetching}
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+              <span>{assetSearch.isFetching ? "Refreshing" : "Refresh assets"}</span>
+            </button>
+          </div>
+
+          {!canReadSessions ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
+          {canReadSessions && assetSearch.isError ? (
+            <PanelState
+              kind="error"
+              message={assetSearch.error instanceof Error ? assetSearch.error.message : "Failed to load assets."}
+            />
+          ) : null}
+
+          <form className="request-form" onSubmit={launchSelectedAsset}>
+            <div className="form-grid">
+              <label className="form-field">
+                <span>Asset search</span>
+                <input
+                  type="search"
+                  value={assetQuery}
+                  onChange={(event) => setAssetQuery(event.target.value)}
+                  placeholder="Name, IP, owner, region"
+                  disabled={!canReadSessions}
+                />
+              </label>
+
+              <label className="form-field">
+                <span>Asset</span>
+                <select
+                  value={selectedAssetID}
+                  onChange={(event) => setSelectedAssetID(event.target.value)}
+                  disabled={!canReadSessions || assetSearch.isLoading}
+                >
+                  <option value="">Select an active asset</option>
+                  {assetItems.map((asset) => (
+                    <option value={asset.id} key={asset.id}>
+                      {assetOptionLabel(asset)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="form-actions align-end">
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={!canReadSessions || launchTerminal.isPending || !selectedAssetID}
+                >
+                  <Play size={16} aria-hidden="true" />
+                  <span>
+                    {launchTerminal.isPending ? "Launching" : `Launch ${launchProtocol.toUpperCase()}`}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {canReadSessions && assetSearch.isLoading ? <PanelState kind="loading" message="Loading active assets" /> : null}
+            {canReadSessions && !assetSearch.isLoading && !assetSearch.isError && assetItems.length === 0 ? (
+              <PanelState kind="empty" message="No active assets match this search." />
+            ) : null}
+          </form>
+        </article>
+      ) : null}
+
+      {sessionsMode === "audit" ? (
+        <>
       <div className="profile-grid">
         <article className="work-panel">
           <div className="panel-header">
@@ -902,6 +1020,8 @@ export function SessionsPage() {
             {recordingPreview.preview.outputSample || "Recording contains no stdout frames."}
           </pre>
         </article>
+      ) : null}
+        </>
       ) : null}
     </section>
   );

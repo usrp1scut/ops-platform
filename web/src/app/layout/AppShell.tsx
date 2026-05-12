@@ -85,7 +85,7 @@ export function AppShell() {
         <header className="topbar">
           <div className="topbar-status">
             <Activity size={18} aria-hidden="true" />
-            <span>Frontend migration</span>
+            <span>Operations console</span>
           </div>
           <div className="topbar-user">
             <a
