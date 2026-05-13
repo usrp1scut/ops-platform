@@ -168,6 +168,11 @@ export function SessionsPage() {
   const [recordingFeedback, setRecordingFeedback] = useState<ActionFeedback | null>(null);
   const [recordingPreview, setRecordingPreview] = useState<RecordingPreviewState | null>(null);
   const [sidebarSearch, setSidebarSearch] = useState("");
+  // "Launch by ID" used to live as a bottom panel under the terminal,
+  // squeezing the terminal whenever it appeared. It now lives in a
+  // dialog opened from the header — invoked only when the operator
+  // can't (or doesn't want to) find the asset in the rail.
+  const [launchByIdOpen, setLaunchByIdOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   // Top-level Live | Audit toggle. Mirrors the legacy /portal layout where
   // Live and Audit feel like separate operator tools rather than two
@@ -425,28 +430,53 @@ export function SessionsPage() {
   // Used in Live mode as the left rail. Mirrors the legacy /portal sidebar:
   // search box, env/vpc/asset tree, click-to-launch behaviour. Protocol
   // toggle lives at the bottom so SSH/RDP choice travels with the rail.
+  // Rail header now hosts everything that drives the launch: protocol
+  // toggle, search, refresh. Previously the SSH/RDP toggle was at the
+  // rail bottom and Refresh was hidden in the page-wide Launch panel,
+  // far from the asset list. Co-locating them removes that disconnect
+  // and frees vertical space in the pane.
   const railSearch = (
     <div className="sessions-rail-header">
-      <div className="input-with-icon sessions-rail-search">
-        <Search size={14} aria-hidden="true" />
-        <input
-          type="search"
-          value={sidebarSearch}
-          onChange={(event) => setSidebarSearch(event.target.value)}
-          placeholder="Search name / ip / vpc"
-          disabled={!canReadSessions}
-        />
+      <div className="sessions-rail-protocol drawer-tabs" role="tablist" aria-label="Launch protocol">
+        {[
+          { label: "SSH", value: "ssh" },
+          { label: "RDP", value: "rdp" },
+        ].map((item) => (
+          <button
+            type="button"
+            className={`drawer-tab${launchProtocol === item.value ? " active" : ""}`}
+            key={item.value}
+            onClick={() => setLaunchProtocol(item.value as LaunchProtocol)}
+            role="tab"
+            aria-selected={launchProtocol === item.value}
+            title={`Click a row to launch ${item.label} to the asset`}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
-      <button
-        type="button"
-        className="icon-button compact-icon"
-        onClick={() => void sidebarAssets.refetch()}
-        disabled={!canReadSessions || sidebarAssets.isFetching}
-        title={sidebarAssets.isFetching ? "Refreshing" : "Refresh"}
-        aria-label="Refresh assets"
-      >
-        <RefreshCw size={14} aria-hidden="true" />
-      </button>
+      <div className="sessions-rail-searchrow">
+        <div className="input-with-icon sessions-rail-search">
+          <Search size={14} aria-hidden="true" />
+          <input
+            type="search"
+            value={sidebarSearch}
+            onChange={(event) => setSidebarSearch(event.target.value)}
+            placeholder="Search name / ip / vpc"
+            disabled={!canReadSessions}
+          />
+        </div>
+        <button
+          type="button"
+          className="icon-button compact-icon"
+          onClick={() => void sidebarAssets.refetch()}
+          disabled={!canReadSessions || sidebarAssets.isFetching}
+          title={sidebarAssets.isFetching ? "Refreshing" : "Refresh"}
+          aria-label="Refresh assets"
+        >
+          <RefreshCw size={14} aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 
@@ -490,6 +520,14 @@ export function SessionsPage() {
                   <div className="asset-tree-members">
                     {[...vpc.bastions, ...vpc.members].map((asset) => {
                       const addr = asset.public_ip || asset.private_ip || asset.private_dns;
+                      // Secondary line builds 'ip · env · type' so a
+                      // long list of biz-01 assets becomes scannable by
+                      // address + env at a glance, not just by row order.
+                      const secondaryParts: string[] = [];
+                      if (addr) secondaryParts.push(addr);
+                      if (asset.env) secondaryParts.push(asset.env);
+                      const typeLabel = (asset.type || "").replace(/^aws_/, "");
+                      if (typeLabel) secondaryParts.push(typeLabel);
                       return (
                         <button
                           type="button"
@@ -499,11 +537,13 @@ export function SessionsPage() {
                           disabled={launchTerminal.isPending}
                           title={`Launch ${launchProtocol.toUpperCase()} to ${asset.name || asset.id}`}
                         >
-                          {asset.is_vpc_proxy ? (
-                            <span className="status-pill ok tiny">bastion</span>
+                          <div className="asset-tree-row-primary">
+                            {asset.is_vpc_proxy ? <span className="asset-tree-bastion" aria-label="bastion" /> : null}
+                            <span className="asset-tree-name">{asset.name || asset.id}</span>
+                          </div>
+                          {secondaryParts.length > 0 ? (
+                            <div className="asset-tree-row-secondary">{secondaryParts.join(" · ")}</div>
                           ) : null}
-                          <span className="asset-tree-name">{asset.name || asset.id}</span>
-                          {addr ? <span className="asset-tree-addr">{addr}</span> : null}
                         </button>
                       );
                     })}
@@ -517,28 +557,9 @@ export function SessionsPage() {
     </div>
   );
 
-  const railProtocol = (
-    <div className="sessions-rail-footer">
-      <div className="drawer-tabs" role="tablist" aria-label="Launch protocol">
-        {[
-          { label: "SSH", value: "ssh" },
-          { label: "RDP", value: "rdp" },
-        ].map((item) => (
-          <button
-            type="button"
-            className={`drawer-tab${launchProtocol === item.value ? " active" : ""}`}
-            key={item.value}
-            onClick={() => setLaunchProtocol(item.value as LaunchProtocol)}
-            role="tab"
-            aria-selected={launchProtocol === item.value}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      <p className="muted small">Click a rail row to launch <strong>{launchProtocol.toUpperCase()}</strong>.</p>
-    </div>
-  );
+  // (railProtocol removed: SSH/RDP toggle moved into railSearch header
+  //  so protocol choice sits with search + refresh, not as a separate
+  //  bottom strip that looked disconnected from the asset list.)
 
   return (
     <section className={`page-section sessions-page${sessionsMode === "live" ? " live-mode" : " audit-mode"}`}>
@@ -564,29 +585,32 @@ export function SessionsPage() {
             Audit
           </button>
         </div>
-        {sessionsMode === "live" ? (
-          // Compact summary bar — the operator's quick read on session
-          // state without consuming three big cards' worth of vertical
-          // space above the terminal.
-          <div className="sessions-summary">
-            <span><strong>{canReadSessions ? counts.active : "-"}</strong> active</span>
-            <span className="muted">·</span>
-            <span><strong>{canReadSessions ? counts.closed : "-"}</strong> closed</span>
-            <span className="muted">·</span>
-            <span><strong>{canReadSessions ? counts.recordings : "-"}</strong> recordings</span>
-            {counts.errors > 0 ? (
-              <>
-                <span className="muted">·</span>
-                <span className="status-pill warn tiny">{counts.errors} errors</span>
-              </>
-            ) : null}
-          </div>
-        ) : null}
+        {/* Stats moved out of the header (was mixed with mode tabs and
+            permission pill, hard to scan). On Live they live in the
+            terminal's status corner contextually; on Audit they're the
+            metric grid below. Header carries identity + actions only. */}
         <div className="sessions-header-actions">
-          <span className={`status-pill ${canReadSessions ? "ok" : "warn"}`}>
+          {sessionsMode === "live" && counts.errors > 0 ? (
+            <span className="status-pill warn tiny" title="Session errors waiting in Audit">
+              {counts.errors} errors
+            </span>
+          ) : null}
+          <span className={`status-pill ${canReadSessions ? "ok" : "warn"}`} title="Required permission">
             <ShieldCheck size={14} aria-hidden="true" />
-            {canReadSessions ? "cmdb.asset:read" : "Needs cmdb.asset:read"}
+            {canReadAllSessions ? "all sessions" : canReadSessions ? "own sessions" : "no access"}
           </span>
+          {sessionsMode === "live" ? (
+            <button
+              type="button"
+              className="secondary-button compact"
+              onClick={() => setLaunchByIdOpen(true)}
+              disabled={!canReadSessions}
+              title="Launch a session by typing the asset ID"
+            >
+              <Play size={14} aria-hidden="true" />
+              <span>Launch by ID</span>
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -632,7 +656,6 @@ export function SessionsPage() {
           <aside className="sessions-rail" aria-label="Connectable assets">
             {railSearch}
             {railTree}
-            {railProtocol}
           </aside>
           <div className="sessions-pane">
             {launchFeedback ? (
@@ -651,20 +674,33 @@ export function SessionsPage() {
             {liveSessions.length > 0 ? (
               <div className="live-session-shell">
                 <div className="live-session-tabs" role="tablist" aria-label="Live sessions">
-                  {liveSessions.map((session) => (
-                    <div className={`live-session-tab${activeLiveID === session.id ? " active" : ""}`} key={session.id}>
+                  {liveSessions.map((session) => {
+                    const tabTitle = session.message
+                      ? `${session.asset.name || session.asset.id} — ${session.status}: ${session.message}`
+                      : `${session.asset.name || session.asset.id} — ${session.status}`;
+                    const errorBlurb = session.status === "error" && session.message
+                      ? session.message.length > 40
+                        ? session.message.slice(0, 40) + "…"
+                        : session.message
+                      : "";
+                    return (
+                    <div className={`live-session-tab${activeLiveID === session.id ? " active" : ""}${session.status === "error" ? " error" : ""}`} key={session.id}>
                       <button
                         type="button"
                         className="live-session-tab-main"
                         onClick={() => setActiveLiveID(session.id)}
                         role="tab"
                         aria-selected={activeLiveID === session.id}
+                        title={tabTitle}
                       >
                         <span className="kind-tag">{session.kind.toUpperCase()}</span>
                         <span className="session-label">{session.asset.name || session.asset.id}</span>
                         <span className={`status-pill ${session.status === "error" ? "warn" : "info"}`}>
                           {session.status}
                         </span>
+                        {errorBlurb ? (
+                          <span className="live-session-tab-err">{errorBlurb}</span>
+                        ) : null}
                       </button>
                       <button
                         type="button"
@@ -675,7 +711,8 @@ export function SessionsPage() {
                         <X size={14} aria-hidden="true" />
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <div className="live-session-stage">
                   {liveSessions.map((session) => (
@@ -715,62 +752,90 @@ export function SessionsPage() {
         </div>
       ) : null}
 
-      {sessionsMode === "live" ? (
-        <article className="work-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Live access</p>
-              <h2>Launch by ID</h2>
+      {sessionsMode === "live" && launchByIdOpen ? (
+        <div className="sessions-launch-modal" role="dialog" aria-modal="true" aria-label="Launch session by asset ID">
+          <button
+            type="button"
+            className="sessions-launch-backdrop"
+            aria-label="Close"
+            onClick={() => setLaunchByIdOpen(false)}
+          />
+          <div className="sessions-launch-card">
+            <div className="sessions-launch-head">
+              <div>
+                <p className="eyebrow">Live access</p>
+                <h2>Launch by ID</h2>
+              </div>
+              <button
+                type="button"
+                className="icon-button compact-icon"
+                onClick={() => setLaunchByIdOpen(false)}
+                title="Close"
+                aria-label="Close"
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
             </div>
-            <button
-              type="button"
-              className="secondary-button compact"
-              onClick={() => void assetSearch.refetch()}
-              disabled={!canReadSessions || assetSearch.isFetching}
+
+            {canReadSessions && assetSearch.isError ? (
+              <PanelState
+                kind="error"
+                message={assetSearch.error instanceof Error ? assetSearch.error.message : "Failed to load assets."}
+              />
+            ) : null}
+
+            <form
+              className="request-form"
+              onSubmit={(event) => {
+                launchSelectedAsset(event);
+                setLaunchByIdOpen(false);
+              }}
             >
-              <RefreshCw size={14} aria-hidden="true" />
-              <span>{assetSearch.isFetching ? "Refreshing" : "Refresh assets"}</span>
-            </button>
-          </div>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span>Asset search</span>
+                  <input
+                    type="search"
+                    value={assetQuery}
+                    onChange={(event) => setAssetQuery(event.target.value)}
+                    placeholder="Name, IP, owner, region"
+                    disabled={!canReadSessions}
+                    autoFocus
+                  />
+                </label>
 
-          {!canReadSessions ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
-          {canReadSessions && assetSearch.isError ? (
-            <PanelState
-              kind="error"
-              message={assetSearch.error instanceof Error ? assetSearch.error.message : "Failed to load assets."}
-            />
-          ) : null}
+                <label className="form-field">
+                  <span>Asset</span>
+                  <select
+                    value={selectedAssetID}
+                    onChange={(event) => setSelectedAssetID(event.target.value)}
+                    disabled={!canReadSessions || assetSearch.isLoading}
+                  >
+                    <option value="">Select an active asset</option>
+                    {assetItems.map((asset) => (
+                      <option value={asset.id} key={asset.id}>
+                        {assetOptionLabel(asset)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
 
-          <form className="request-form" onSubmit={launchSelectedAsset}>
-            <div className="form-grid">
-              <label className="form-field">
-                <span>Asset search</span>
-                <input
-                  type="search"
-                  value={assetQuery}
-                  onChange={(event) => setAssetQuery(event.target.value)}
-                  placeholder="Name, IP, owner, region"
-                  disabled={!canReadSessions}
-                />
-              </label>
+              {canReadSessions && assetSearch.isLoading ? (
+                <PanelState kind="loading" message="Loading active assets" />
+              ) : null}
+              {canReadSessions && !assetSearch.isLoading && !assetSearch.isError && assetItems.length === 0 ? (
+                <PanelState kind="empty" message="No active assets match this search." />
+              ) : null}
 
-              <label className="form-field">
-                <span>Asset</span>
-                <select
-                  value={selectedAssetID}
-                  onChange={(event) => setSelectedAssetID(event.target.value)}
-                  disabled={!canReadSessions || assetSearch.isLoading}
+              <div className="sessions-launch-foot">
+                <button
+                  type="button"
+                  className="secondary-button compact"
+                  onClick={() => setLaunchByIdOpen(false)}
                 >
-                  <option value="">Select an active asset</option>
-                  {assetItems.map((asset) => (
-                    <option value={asset.id} key={asset.id}>
-                      {assetOptionLabel(asset)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="form-actions align-end">
+                  Cancel
+                </button>
                 <button
                   type="submit"
                   className="primary-button"
@@ -782,14 +847,9 @@ export function SessionsPage() {
                   </span>
                 </button>
               </div>
-            </div>
-
-            {canReadSessions && assetSearch.isLoading ? <PanelState kind="loading" message="Loading active assets" /> : null}
-            {canReadSessions && !assetSearch.isLoading && !assetSearch.isError && assetItems.length === 0 ? (
-              <PanelState kind="empty" message="No active assets match this search." />
-            ) : null}
-          </form>
-        </article>
+            </form>
+          </div>
+        </div>
       ) : null}
 
       {sessionsMode === "audit" ? (

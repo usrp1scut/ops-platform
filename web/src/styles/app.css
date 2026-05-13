@@ -1702,3 +1702,142 @@ body.fullwidth-mode .page-section { width: 100%; max-width: none; }
   padding: 1px 6px;
   font-size: 10.5px;
 }
+
+/* ========== Sessions Live polish (2nd pass) ==========
+ * Addresses post-restart UX review: launch-by-id moved out of pane to a
+ * modal, rail header carries protocol+search+refresh together, asset
+ * rows go two-line, session tab surfaces error blurb, terminal gets
+ * sensible inner padding.
+ */
+
+/* Rail header carries everything that drives the launch. Two rows: a
+ * narrow protocol segmented control on top, then search + refresh. */
+.sessions-rail-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sessions-rail-protocol {
+  width: 100%;
+  display: inline-flex;
+  gap: 2px;
+}
+.sessions-rail-protocol .drawer-tab {
+  flex: 1 1 0;
+  text-align: center;
+}
+.sessions-rail-searchrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sessions-rail-search {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Two-line asset row. Primary line: bastion mark + name. Secondary:
+ * a thin "addr · env · type" string that breaks the biz-01 fog. */
+.sessions-rail .asset-tree-row {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 1px;
+  align-items: start;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+.asset-tree-row-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+.asset-tree-row-secondary {
+  font-size: 11px;
+  color: var(--text-muted, #6b7d7b);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asset-tree-bastion {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #21a69a;
+  flex: 0 0 auto;
+}
+
+/* Session tab: when status === error, surface the message snippet inline.
+ * Tooltip on the tab carries the full message. */
+.live-session-tab.error {
+  border-color: #f0c5c5;
+  background: #fdeeee;
+}
+.live-session-tab.error .status-pill { background: #fee; color: #983939; }
+.live-session-tab-err {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: #983939;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Terminal interior padding. Was 8px — content read as "glued to edge".
+ * 14px gives the canvas room to breathe without losing density. */
+.sessions-page.live-mode .live-terminal-host,
+.live-terminal-host { padding: 14px 16px; }
+
+/* Launch by ID modal. Sized small (it's just a 2-field form), uses the
+ * same backdrop/card pattern as the AssetsPage drawer but centered. */
+.sessions-launch-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sessions-launch-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(8, 12, 18, 0.66);
+  cursor: pointer;
+}
+.sessions-launch-card {
+  position: relative;
+  z-index: 1;
+  width: min(92vw, 520px);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #dbe5e3;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+}
+.sessions-launch-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sessions-launch-head h2 { margin: 0; font-size: 18px; }
+.sessions-launch-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
