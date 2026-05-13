@@ -374,7 +374,14 @@ func (s *Service) dialSSH(ctx context.Context, target cmdb.BastionProbeTarget, t
 	addr := net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
 
 	if target.Proxy == nil {
-		return ssh.Dial("tcp", addr, sshCfg)
+		// Wrap with the target address so handshake failures (most often
+		// "EOF" from a port that isn't actually sshd) tell the operator
+		// *which* host:port to investigate without a DB dig.
+		client, err := ssh.Dial("tcp", addr, sshCfg)
+		if err != nil {
+			return nil, fmt.Errorf("ssh.Dial %s: %w", addr, err)
+		}
+		return client, nil
 	}
 
 	proxyClient, err := s.dialProxy(ctx, target.Proxy, timeout)
@@ -419,7 +426,14 @@ func (s *Service) dialProxy(ctx context.Context, p *sshproxy.SSHProxyTarget, tim
 		port = 22
 	}
 	addr := net.JoinHostPort(p.Host, strconv.Itoa(port))
-	return ssh.Dial("tcp", addr, cfg)
+	// Same address-in-error treatment as dialSSH. dialProxy errors are
+	// wrapped further upstream as "proxy dial: ...", so a typical EOF
+	// surfaces as `proxy dial: ssh.Dial 10.x.x.x:22: ssh: handshake failed: EOF`.
+	client, err := ssh.Dial("tcp", addr, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("ssh.Dial %s: %w", addr, err)
+	}
+	return client, nil
 }
 
 // resolveProxyKeyCredentials mirrors resolveKeyCredentials for proxy targets.
