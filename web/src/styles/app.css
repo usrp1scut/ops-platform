@@ -693,8 +693,13 @@ a {
 
 .drawer-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  overflow-x: auto;
+  /* .drawer-body is a CSS grid; an item with overflow != visible gets an
+     automatic minimum size of 0, which collapsed this row to its 2px
+     padding and clipped the tab buttons. Wrap instead of x-scroll and
+     pin a min-height so the row always reserves space for the tabs. */
+  min-height: 30px;
   padding-bottom: 2px;
 }
 
