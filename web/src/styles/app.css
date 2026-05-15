@@ -1841,3 +1841,380 @@ body.fullwidth-mode .page-section { width: 100%; max-width: none; }
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ========== AWS page ==========
+ * Mirrors the Assets fullwidth pattern: a single toolbar row carries
+ * stats + actions (Refresh / Run sync / Add account) so the accounts
+ * table starts immediately below at full width. The Add/Edit form
+ * lives in a modal — see .aws-modal — so the table is never squeezed.
+ */
+.aws-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid #dbe5e3;
+  border-radius: 10px;
+  background: #ffffff;
+}
+.aws-toolbar-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  flex: 1 1 auto;
+}
+.aws-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.aws-stat strong { font-size: 14px; }
+.aws-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.aws-accounts-table { min-width: 1100px; }
+
+.aws-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.aws-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(8, 12, 18, 0.66);
+  cursor: pointer;
+}
+.aws-modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(94vw, 720px);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #dbe5e3;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+}
+.aws-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.aws-modal-head h2 { margin: 0; font-size: 18px; }
+.aws-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* ========== Access page ==========
+ * Capability strip + Mine/Approve sub-tabs, with the create-request form
+ * lifted into a modal so the page is request-list-first.
+ */
+.access-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid #dbe5e3;
+  border-radius: 10px;
+  background: #ffffff;
+}
+.access-toolbar-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  flex: 1 1 auto;
+}
+.access-cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.access-cap svg.ok { color: #16a34a; }
+.access-cap svg.warn { color: #d97706; }
+.access-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.access-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 4px;
+  background: #f1f4f3;
+  border-radius: 10px;
+  width: fit-content;
+}
+.access-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #44524f;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.access-tab:hover { background: rgba(255, 255, 255, 0.6); }
+.access-tab.active {
+  background: #ffffff;
+  color: #0f1715;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.access-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: #d97706;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.access-perms-summary {
+  border: 1px solid #dbe5e3;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 14px;
+}
+.access-perms-summary > summary {
+  cursor: pointer;
+  font-weight: 500;
+  list-style: none;
+}
+.access-perms-summary > summary::-webkit-details-marker { display: none; }
+.access-perms-summary[open] > summary { margin-bottom: 10px; }
+.access-perms-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 720px) {
+  .access-perms-grid { grid-template-columns: 1fr; }
+}
+
+.access-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.access-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(8, 12, 18, 0.66);
+  cursor: pointer;
+}
+.access-modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(94vw, 640px);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #dbe5e3;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+}
+.access-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.access-modal-head h2 { margin: 0; font-size: 18px; }
+.access-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* ========== Connectivity page ==========
+ * Same fullwidth-toolbar-+-modal pattern as Assets/AWS. Two modals
+ * because two profile-grids collapsed (SSH proxy form, SSH keypair form).
+ */
+.connectivity-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid #dbe5e3;
+  border-radius: 10px;
+  background: #ffffff;
+}
+.connectivity-toolbar-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  flex: 1 1 auto;
+}
+.connectivity-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.connectivity-stat strong { font-size: 14px; }
+.connectivity-stat .warn-text { color: #d97706; }
+.connectivity-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.connectivity-proxies-table { min-width: 1080px; }
+
+.connectivity-perms-summary {
+  border: 1px solid #dbe5e3;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 14px;
+}
+.connectivity-perms-summary > summary {
+  cursor: pointer;
+  font-weight: 500;
+  list-style: none;
+}
+.connectivity-perms-summary > summary::-webkit-details-marker { display: none; }
+.connectivity-perms-summary[open] > summary { margin-bottom: 10px; }
+
+.connectivity-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.connectivity-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(8, 12, 18, 0.66);
+  cursor: pointer;
+}
+.connectivity-modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(94vw, 720px);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #dbe5e3;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+}
+.connectivity-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.connectivity-modal-head h2 { margin: 0; font-size: 18px; }
+.connectivity-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* ========== IAM page ==========
+ * Slim toolbar replaces the 3-card metric grid. Users|Selected
+ * profile-grid stays — it's a legitimate master-detail. Effective
+ * permissions panel demoted to a bottom details element.
+ */
+.iam-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid #dbe5e3;
+  border-radius: 10px;
+  background: #ffffff;
+}
+.iam-toolbar-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  flex: 1 1 auto;
+}
+.iam-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.iam-stat strong { font-size: 14px; }
+.iam-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.iam-perms-summary {
+  border: 1px solid #dbe5e3;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 14px;
+}
+.iam-perms-summary > summary {
+  cursor: pointer;
+  font-weight: 500;
+  list-style: none;
+}
+.iam-perms-summary > summary::-webkit-details-marker { display: none; }
+.iam-perms-summary[open] > summary { margin-bottom: 10px; }

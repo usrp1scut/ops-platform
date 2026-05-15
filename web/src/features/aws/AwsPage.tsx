@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cloud, CloudCog, PlugZap, Plus, RefreshCw, Save, ShieldCheck, Zap } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
+import { Cloud, CloudCog, Plus, RefreshCw, Save, ShieldCheck, X, Zap } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   createAwsAccount,
@@ -135,6 +135,14 @@ export function AwsPage() {
   const [testFeedback, setTestFeedback] = useState<TestFeedback | null>(null);
   const [syncFeedback, setSyncFeedback] = useState<ActionFeedback | null>(null);
   const [syncRunStatus, setSyncRunStatus] = useState<"" | AwsSyncRunStatus>("");
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+
+  useEffect(() => {
+    document.body.classList.add("fullwidth-mode");
+    return () => {
+      document.body.classList.remove("fullwidth-mode");
+    };
+  }, []);
 
   const accounts = useQuery({
     queryKey: [...awsRootKey, "accounts"],
@@ -170,6 +178,7 @@ export function AwsPage() {
       setForm(emptyAwsAccountForm);
       setSelectedAccountID(account.id);
       setFormMode("edit");
+      setAccountModalOpen(false);
       setFormFeedback({ kind: "success", message: `AWS account added: ${account.account_id}.` });
       await queryClient.invalidateQueries({ queryKey: awsRootKey });
     },
@@ -237,6 +246,8 @@ export function AwsPage() {
     setForm(emptyAwsAccountForm);
     setValidationError("");
     setFormFeedback(null);
+    setTestFeedback(null);
+    setAccountModalOpen(true);
   }
 
   function editAccount(account: AwsAccount) {
@@ -245,6 +256,15 @@ export function AwsPage() {
     setForm(awsAccountToForm(account));
     setValidationError("");
     setFormFeedback(null);
+    setTestFeedback(null);
+    setAccountModalOpen(true);
+  }
+
+  function closeAccountModal() {
+    setAccountModalOpen(false);
+    setFormFeedback(null);
+    setValidationError("");
+    setTestFeedback(null);
   }
 
   function submitAccount(event: FormEvent<HTMLFormElement>) {
@@ -270,8 +290,12 @@ export function AwsPage() {
     testAccount.mutate(accountID);
   }
 
+  const refreshing = accounts.isFetching || syncStatus.isFetching || syncRuns.isFetching;
+  const syncRunning = Boolean(syncStatus.data?.running);
+  const syncTone = syncRunning ? "info" : syncStatus.data?.last_error ? "warn" : "ok";
+
   return (
-    <section className="page-section">
+    <section className="page-section aws-page">
       <div className="page-header">
         <div>
           <p className="eyebrow">Cloud accounts</p>
@@ -283,311 +307,155 @@ export function AwsPage() {
         </span>
       </div>
 
-      <div className="metric-grid">
-        <article className="metric-card">
-          <div className="metric-icon">
-            <Cloud size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Accounts</div>
-            <div className="metric-value">{canReadAws ? accountItems.length : "-"}</div>
-          </div>
-          <span className="status-pill">connected</span>
-        </article>
-
-        <article className="metric-card">
-          <div className="metric-icon">
-            <CloudCog size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Sync status</div>
-            <div className="metric-value compact">{syncStatusLabel(syncStatus.data)}</div>
-          </div>
-          <span className={`status-pill ${syncStatus.data?.running ? "info" : syncStatus.data?.last_error ? "warn" : "ok"}`}>
-            {syncStatus.data?.running ? "running" : "ready"}
+      <div className="aws-toolbar">
+        <div className="aws-toolbar-stats">
+          <span className="aws-stat">
+            <Cloud size={14} aria-hidden="true" />
+            <strong>{canReadAws ? accountItems.length : "-"}</strong>
+            <span className="muted">accounts</span>
           </span>
-        </article>
-
-        <article className="metric-card">
-          <div className="metric-icon">
-            <Zap size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Sync runs</div>
-            <div className="metric-value">{canReadAws ? runItems.length : "-"}</div>
-          </div>
-          <span className="status-pill">latest 120</span>
-        </article>
-      </div>
-
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Access</p>
-            <h2>AWS permissions</h2>
-          </div>
+          <span className="aws-stat">
+            <CloudCog size={14} aria-hidden="true" />
+            <span className={`status-pill ${syncTone}`}>{syncStatusLabel(syncStatus.data)}</span>
+            <span className="muted">sync</span>
+          </span>
+          <span className="aws-stat">
+            <Zap size={14} aria-hidden="true" />
+            <strong>{canReadAws ? runItems.length : "-"}</strong>
+            <span className="muted">runs (last 120)</span>
+          </span>
+        </div>
+        <div className="aws-toolbar-actions">
           <button
             type="button"
             className="secondary-button compact"
             onClick={refreshAws}
-            disabled={!canReadAws || accounts.isFetching || syncStatus.isFetching || syncRuns.isFetching}
+            disabled={!canReadAws || refreshing}
           >
             <RefreshCw size={14} aria-hidden="true" />
-            <span>{accounts.isFetching || syncStatus.isFetching || syncRuns.isFetching ? "Refreshing" : "Refresh"}</span>
+            <span>{refreshing ? "Refreshing" : "Refresh"}</span>
+          </button>
+          <button
+            type="button"
+            className="secondary-button compact"
+            onClick={() => runSync.mutate()}
+            disabled={!canWriteAws || runSync.isPending || syncRunning}
+          >
+            <Zap size={14} aria-hidden="true" />
+            <span>{runSync.isPending ? "Triggering" : syncRunning ? "Running" : "Run sync"}</span>
+          </button>
+          <button type="button" className="primary-button compact" onClick={startCreate} disabled={!canWriteAws}>
+            <Plus size={14} aria-hidden="true" />
+            <span>Add account</span>
           </button>
         </div>
-        <PermissionList permissions={awsPermissions} emptyLabel="No AWS permissions." />
-      </article>
-
-      <div className="profile-grid">
-        <article className="work-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Accounts</p>
-              <h2>Connected accounts</h2>
-            </div>
-            <button type="button" className="primary-button compact" onClick={startCreate} disabled={!canWriteAws}>
-              <Plus size={14} aria-hidden="true" />
-              <span>Add account</span>
-            </button>
-          </div>
-
-          {!canReadAws ? <PanelState kind="permission" message="Permission required: aws.account:read" /> : null}
-
-          {canReadAws && accounts.isError ? (
-            <PanelState
-              kind="error"
-              message={accounts.error instanceof Error ? accounts.error.message : "Failed to load AWS accounts."}
-            />
-          ) : null}
-
-          {canReadAws && accounts.isLoading ? <PanelState kind="loading" message="Loading AWS accounts" /> : null}
-
-          {canReadAws && !accounts.isLoading && !accounts.isError && accountItems.length === 0 ? (
-            <PanelState kind="empty" message="No AWS accounts connected yet." />
-          ) : null}
-
-          {accountItems.length > 0 ? (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Account</th>
-                    <th>Auth</th>
-                    <th>Credential</th>
-                    <th>Regions</th>
-                    <th>Last sync</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {accountItems.map((account) => {
-                    const summary = syncSummary[account.account_id];
-                    return (
-                      <tr className={selectedAccountID === account.id ? "selected" : ""} key={account.id}>
-                        <td>
-                          <strong>{account.display_name}</strong>
-                          <div className="muted">{account.account_id}</div>
-                        </td>
-                        <td>{account.auth_mode}</td>
-                        <td>
-                          <code>{accountCredentialLabel(account)}</code>
-                        </td>
-                        <td>{regionChips(account.region_allowlist || [])}</td>
-                        <td>
-                          <div className="last-sync-cell">
-                            {syncRunStatusPill(summary?.lastRun)}
-                            {summary?.lastRun ? <span className="muted">{formatRelative(summary.lastRun.started_at)}</span> : null}
-                          </div>
-                          {summary?.lastRun?.status === "failed" && summary.lastRun.error_message ? (
-                            <div className="muted inline-error">{summary.lastRun.error_message}</div>
-                          ) : null}
-                          {summary?.lastSuccess && summary.lastRun?.status === "failed" ? (
-                            <div className="muted">last ok {formatRelative(summary.lastSuccess.started_at)}</div>
-                          ) : null}
-                        </td>
-                        <td>
-                          <span className={`status-pill ${account.enabled ? "ok" : "warn"}`}>
-                            {account.enabled ? "enabled" : "disabled"}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="request-actions">
-                            <button
-                              type="button"
-                              className="secondary-button compact"
-                              onClick={() => editAccount(account)}
-                              disabled={!canWriteAws}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary-button compact"
-                              onClick={() => testSelectedOrAccount(account.id)}
-                              disabled={!canWriteAws || testAccount.isPending}
-                            >
-                              Test
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-
-          {testFeedback ? <PanelState kind={testFeedback.kind} message={testFeedback.message} /> : null}
-
-          {testFeedback?.result ? (
-            <dl className="detail-list">
-              <div>
-                <dt>Region</dt>
-                <dd>{testFeedback.result.region || "-"}</dd>
-              </div>
-              <div>
-                <dt>Checked</dt>
-                <dd>{formatDateTime(testFeedback.result.checked_at)}</dd>
-              </div>
-            </dl>
-          ) : null}
-        </article>
-
-        <article className="work-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">{formMode === "create" ? "Connect" : "Update"}</p>
-              <h2>{formMode === "create" ? "Add AWS account" : selectedAccount?.display_name || "Edit AWS account"}</h2>
-            </div>
-            <span className={`status-pill ${canWriteAws ? "ok" : "warn"}`}>
-              {canWriteAws ? "aws.account:write" : "write required"}
-            </span>
-          </div>
-
-          {!canWriteAws ? <PanelState kind="permission" message="Permission required: aws.account:write" /> : null}
-          {validationError ? <PanelState kind="error" message={validationError} /> : null}
-          {formFeedback ? <PanelState kind={formFeedback.kind} message={formFeedback.message} /> : null}
-
-          <form className="request-form" onSubmit={submitAccount}>
-            <div className="form-grid">
-              <label className="form-field">
-                <span>Account ID</span>
-                <input
-                  value={form.accountID}
-                  onChange={(event) => updateForm(setForm, "accountID", event.target.value)}
-                  placeholder="12-digit AWS account ID"
-                  disabled={!canWriteAws || formMode === "edit"}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Display name</span>
-                <input
-                  value={form.displayName}
-                  onChange={(event) => updateForm(setForm, "displayName", event.target.value)}
-                  disabled={!canWriteAws}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Auth mode</span>
-                <select
-                  value={form.authMode}
-                  onChange={(event) => updateForm(setForm, "authMode", event.target.value as AwsAccount["auth_mode"])}
-                  disabled={!canWriteAws || formMode === "edit"}
-                >
-                  <option value="assume_role">Assume role</option>
-                  <option value="static">Static keys</option>
-                </select>
-              </label>
-
-              <label className="form-field">
-                <span>Role ARN</span>
-                <input
-                  value={form.roleARN}
-                  onChange={(event) => updateForm(setForm, "roleARN", event.target.value)}
-                  placeholder="arn:aws:iam::..."
-                  disabled={!canWriteAws || form.authMode !== "assume_role"}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>External ID</span>
-                <input
-                  value={form.externalID}
-                  onChange={(event) => updateForm(setForm, "externalID", event.target.value)}
-                  disabled={!canWriteAws || form.authMode !== "assume_role"}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Access key ID</span>
-                <input
-                  value={form.accessKeyID}
-                  onChange={(event) => updateForm(setForm, "accessKeyID", event.target.value)}
-                  disabled={!canWriteAws || form.authMode !== "static"}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Secret access key</span>
-                <input
-                  type="password"
-                  value={form.secretAccessKey}
-                  onChange={(event) => updateForm(setForm, "secretAccessKey", event.target.value)}
-                  placeholder={formMode === "edit" ? "Leave empty to keep saved value" : ""}
-                  disabled={!canWriteAws || form.authMode !== "static"}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Regions</span>
-                <input
-                  value={form.regionAllowlist}
-                  onChange={(event) => updateForm(setForm, "regionAllowlist", event.target.value)}
-                  placeholder="us-east-1, ap-southeast-1"
-                  disabled={!canWriteAws}
-                />
-              </label>
-
-              <label className="toggle-row form-toggle-row">
-                <input
-                  type="checkbox"
-                  checked={form.enabled}
-                  onChange={(event) => updateForm(setForm, "enabled", event.target.checked)}
-                  disabled={!canWriteAws}
-                />
-                <span>Enabled</span>
-              </label>
-            </div>
-
-            <div className="form-actions">
-              <button
-                type="submit"
-                className="primary-button"
-                disabled={!canWriteAws || createAccount.isPending || updateAccount.isPending}
-              >
-                <Save size={16} aria-hidden="true" />
-                <span>
-                  {createAccount.isPending || updateAccount.isPending
-                    ? "Saving"
-                    : formMode === "create"
-                    ? "Add account"
-                    : "Save changes"}
-                </span>
-              </button>
-              {formMode === "edit" ? (
-                <button type="button" className="secondary-button" onClick={startCreate}>
-                  New account
-                </button>
-              ) : null}
-            </div>
-          </form>
-        </article>
       </div>
+
+      {!accountModalOpen && formFeedback ? (
+        <PanelState kind={formFeedback.kind} message={formFeedback.message} />
+      ) : null}
+      {syncFeedback ? <PanelState kind={syncFeedback.kind} message={syncFeedback.message} /> : null}
+      {testFeedback && !accountModalOpen ? <PanelState kind={testFeedback.kind} message={testFeedback.message} /> : null}
+
+      <article className="work-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Accounts</p>
+            <h2>Connected accounts</h2>
+          </div>
+          <span className={`status-pill ${canWriteAws ? "ok" : "warn"}`}>
+            {canWriteAws ? "aws.account:write" : "read-only"}
+          </span>
+        </div>
+
+        {!canReadAws ? <PanelState kind="permission" message="Permission required: aws.account:read" /> : null}
+
+        {canReadAws && accounts.isError ? (
+          <PanelState
+            kind="error"
+            message={accounts.error instanceof Error ? accounts.error.message : "Failed to load AWS accounts."}
+          />
+        ) : null}
+
+        {canReadAws && accounts.isLoading ? <PanelState kind="loading" message="Loading AWS accounts" /> : null}
+
+        {canReadAws && !accounts.isLoading && !accounts.isError && accountItems.length === 0 ? (
+          <PanelState kind="empty" message="No AWS accounts connected yet." />
+        ) : null}
+
+        {accountItems.length > 0 ? (
+          <div className="table-wrap">
+            <table className="data-table aws-accounts-table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Auth</th>
+                  <th>Credential</th>
+                  <th>Regions</th>
+                  <th>Last sync</th>
+                  <th>Status</th>
+                  <th className="col-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accountItems.map((account) => {
+                  const summary = syncSummary[account.account_id];
+                  return (
+                    <tr className={selectedAccountID === account.id ? "selected" : ""} key={account.id}>
+                      <td>
+                        <strong>{account.display_name}</strong>
+                        <div className="muted">{account.account_id}</div>
+                      </td>
+                      <td>{account.auth_mode}</td>
+                      <td>
+                        <code>{accountCredentialLabel(account)}</code>
+                      </td>
+                      <td>{regionChips(account.region_allowlist || [])}</td>
+                      <td>
+                        <div className="last-sync-cell">
+                          {syncRunStatusPill(summary?.lastRun)}
+                          {summary?.lastRun ? <span className="muted">{formatRelative(summary.lastRun.started_at)}</span> : null}
+                        </div>
+                        {summary?.lastRun?.status === "failed" && summary.lastRun.error_message ? (
+                          <div className="muted inline-error">{summary.lastRun.error_message}</div>
+                        ) : null}
+                        {summary?.lastSuccess && summary.lastRun?.status === "failed" ? (
+                          <div className="muted">last ok {formatRelative(summary.lastSuccess.started_at)}</div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <span className={`status-pill ${account.enabled ? "ok" : "warn"}`}>
+                          {account.enabled ? "enabled" : "disabled"}
+                        </span>
+                      </td>
+                      <td className="col-actions">
+                        <div className="request-actions">
+                          <button
+                            type="button"
+                            className="secondary-button compact"
+                            onClick={() => editAccount(account)}
+                            disabled={!canWriteAws}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button compact"
+                            onClick={() => testSelectedOrAccount(account.id)}
+                            disabled={!canWriteAws || testAccount.isPending}
+                          >
+                            Test
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </article>
 
       <article className="work-panel">
         <div className="panel-header">
@@ -595,26 +463,14 @@ export function AwsPage() {
             <p className="eyebrow">Sync</p>
             <h2>Sync status</h2>
           </div>
-          <button
-            type="button"
-            className="primary-button compact"
-            onClick={() => runSync.mutate()}
-            disabled={!canWriteAws || runSync.isPending || syncStatus.data?.running}
-          >
-            <Zap size={14} aria-hidden="true" />
-            <span>{runSync.isPending ? "Triggering" : "Run sync"}</span>
-          </button>
+          <span className={`status-pill ${syncTone}`}>{syncRunning ? "running" : "ready"}</span>
         </div>
-
-        {syncFeedback ? <PanelState kind={syncFeedback.kind} message={syncFeedback.message} /> : null}
 
         <dl className="detail-grid">
           <div>
             <dt>Status</dt>
             <dd>
-              <span className={`status-pill ${syncStatus.data?.running ? "info" : syncStatus.data?.last_error ? "warn" : "ok"}`}>
-                {syncStatusLabel(syncStatus.data)}
-              </span>
+              <span className={`status-pill ${syncTone}`}>{syncStatusLabel(syncStatus.data)}</span>
             </dd>
           </div>
           <div>
@@ -705,17 +561,180 @@ export function AwsPage() {
             </table>
           </div>
         ) : null}
-
-        <button
-          type="button"
-          className="secondary-button compact text-link-button"
-          onClick={refreshAws}
-          disabled={!canReadAws || accounts.isFetching || syncStatus.isFetching || syncRuns.isFetching}
-        >
-          <RefreshCw size={14} aria-hidden="true" />
-          <span>Refresh AWS data</span>
-        </button>
       </article>
+
+      <article className="work-panel aws-permissions-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Access</p>
+            <h2>AWS permissions</h2>
+          </div>
+        </div>
+        <PermissionList permissions={awsPermissions} emptyLabel="No AWS permissions." />
+      </article>
+
+      {accountModalOpen ? (
+        <div className="aws-modal" role="dialog" aria-modal="true" aria-label="AWS account form">
+          <button
+            type="button"
+            className="aws-modal-backdrop"
+            aria-label="Close"
+            onClick={closeAccountModal}
+          />
+          <div className="aws-modal-card">
+            <div className="aws-modal-head">
+              <div>
+                <p className="eyebrow">{formMode === "create" ? "Connect" : "Update"}</p>
+                <h2>{formMode === "create" ? "Add AWS account" : selectedAccount?.display_name || "Edit AWS account"}</h2>
+              </div>
+              <button type="button" className="icon-button" onClick={closeAccountModal} aria-label="Close">
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+
+            {!canWriteAws ? <PanelState kind="permission" message="Permission required: aws.account:write" /> : null}
+            {validationError ? <PanelState kind="error" message={validationError} /> : null}
+            {formFeedback ? <PanelState kind={formFeedback.kind} message={formFeedback.message} /> : null}
+            {testFeedback ? <PanelState kind={testFeedback.kind} message={testFeedback.message} /> : null}
+            {testFeedback?.result ? (
+              <dl className="detail-list">
+                <div>
+                  <dt>Region</dt>
+                  <dd>{testFeedback.result.region || "-"}</dd>
+                </div>
+                <div>
+                  <dt>Checked</dt>
+                  <dd>{formatDateTime(testFeedback.result.checked_at)}</dd>
+                </div>
+              </dl>
+            ) : null}
+
+            <form className="request-form" onSubmit={submitAccount}>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span>Account ID</span>
+                  <input
+                    value={form.accountID}
+                    onChange={(event) => updateForm(setForm, "accountID", event.target.value)}
+                    placeholder="12-digit AWS account ID"
+                    disabled={!canWriteAws || formMode === "edit"}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Display name</span>
+                  <input
+                    value={form.displayName}
+                    onChange={(event) => updateForm(setForm, "displayName", event.target.value)}
+                    disabled={!canWriteAws}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Auth mode</span>
+                  <select
+                    value={form.authMode}
+                    onChange={(event) => updateForm(setForm, "authMode", event.target.value as AwsAccount["auth_mode"])}
+                    disabled={!canWriteAws || formMode === "edit"}
+                  >
+                    <option value="assume_role">Assume role</option>
+                    <option value="static">Static keys</option>
+                  </select>
+                </label>
+
+                <label className="form-field">
+                  <span>Role ARN</span>
+                  <input
+                    value={form.roleARN}
+                    onChange={(event) => updateForm(setForm, "roleARN", event.target.value)}
+                    placeholder="arn:aws:iam::..."
+                    disabled={!canWriteAws || form.authMode !== "assume_role"}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>External ID</span>
+                  <input
+                    value={form.externalID}
+                    onChange={(event) => updateForm(setForm, "externalID", event.target.value)}
+                    disabled={!canWriteAws || form.authMode !== "assume_role"}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Access key ID</span>
+                  <input
+                    value={form.accessKeyID}
+                    onChange={(event) => updateForm(setForm, "accessKeyID", event.target.value)}
+                    disabled={!canWriteAws || form.authMode !== "static"}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Secret access key</span>
+                  <input
+                    type="password"
+                    value={form.secretAccessKey}
+                    onChange={(event) => updateForm(setForm, "secretAccessKey", event.target.value)}
+                    placeholder={formMode === "edit" ? "Leave empty to keep saved value" : ""}
+                    disabled={!canWriteAws || form.authMode !== "static"}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Regions</span>
+                  <input
+                    value={form.regionAllowlist}
+                    onChange={(event) => updateForm(setForm, "regionAllowlist", event.target.value)}
+                    placeholder="us-east-1, ap-southeast-1"
+                    disabled={!canWriteAws}
+                  />
+                </label>
+
+                <label className="toggle-row form-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={form.enabled}
+                    onChange={(event) => updateForm(setForm, "enabled", event.target.checked)}
+                    disabled={!canWriteAws}
+                  />
+                  <span>Enabled</span>
+                </label>
+              </div>
+
+              <div className="aws-modal-foot">
+                {formMode === "edit" && selectedAccountID ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => testSelectedOrAccount(selectedAccountID)}
+                    disabled={!canWriteAws || testAccount.isPending}
+                  >
+                    {testAccount.isPending ? "Testing" : "Test connection"}
+                  </button>
+                ) : null}
+                <button type="button" className="secondary-button" onClick={closeAccountModal}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={!canWriteAws || createAccount.isPending || updateAccount.isPending}
+                >
+                  <Save size={16} aria-hidden="true" />
+                  <span>
+                    {createAccount.isPending || updateAccount.isPending
+                      ? "Saving"
+                      : formMode === "create"
+                      ? "Add account"
+                      : "Save changes"}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

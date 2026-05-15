@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, KeyRound, RefreshCw, Search, ShieldAlert, UserPlus, UsersRound, X } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   bindRoleToUser,
@@ -50,6 +50,13 @@ export function IamPage() {
   const [roleToBind, setRoleToBind] = useState("");
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
   const iamRootKey = ["iam", currentUserID] as const;
+
+  useEffect(() => {
+    document.body.classList.add("fullwidth-mode");
+    return () => {
+      document.body.classList.remove("fullwidth-mode");
+    };
+  }, []);
 
   const users = useQuery({
     queryKey: [...iamRootKey, "users", userSearch.trim()],
@@ -142,8 +149,10 @@ export function IamPage() {
     unbindRole.mutate(roleName);
   }
 
+  const refreshing = users.isFetching || roles.isFetching;
+
   return (
-    <section className="page-section">
+    <section className="page-section iam-page">
       <div className="page-header">
         <div>
           <p className="eyebrow">Identity</p>
@@ -155,61 +164,36 @@ export function IamPage() {
         </span>
       </div>
 
-      <div className="metric-grid">
-        <article className="metric-card">
-          <div className="metric-icon">
-            <UsersRound size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Users</div>
-            <div className="metric-value">{canReadIAM ? userItems.length : "-"}</div>
-          </div>
-          <span className="status-pill">visible</span>
-        </article>
-
-        <article className="metric-card">
-          <div className="metric-icon">
-            <KeyRound size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Roles</div>
-            <div className="metric-value">{canReadIAM ? roleItems.length : "-"}</div>
-          </div>
-          <span className="status-pill">configured</span>
-        </article>
-
-        <article className="metric-card">
-          <div className="metric-icon">
-            <CheckCircle2 size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">IAM permissions</div>
-            <div className="metric-value">{iamPermissions.length}</div>
-          </div>
-          <span className={`status-pill ${canWriteIAM ? "ok" : "info"}`}>
-            {canWriteIAM ? "write" : "read"}
+      <div className="iam-toolbar">
+        <div className="iam-toolbar-stats">
+          <span className="iam-stat">
+            <UsersRound size={14} aria-hidden="true" />
+            <strong>{canReadIAM ? userItems.length : "-"}</strong>
+            <span className="muted">users</span>
           </span>
-        </article>
-      </div>
-
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Access</p>
-            <h2>Effective IAM permissions</h2>
-          </div>
+          <span className="iam-stat">
+            <KeyRound size={14} aria-hidden="true" />
+            <strong>{canReadIAM ? roleItems.length : "-"}</strong>
+            <span className="muted">roles</span>
+          </span>
+          <span className="iam-stat">
+            <CheckCircle2 size={14} aria-hidden="true" />
+            <strong>{iamPermissions.length}</strong>
+            <span className="muted">my permissions · {canWriteIAM ? "write" : "read"}</span>
+          </span>
+        </div>
+        <div className="iam-toolbar-actions">
           <button
             type="button"
             className="secondary-button compact"
             onClick={refreshIam}
-            disabled={!canReadIAM || users.isFetching || roles.isFetching}
+            disabled={!canReadIAM || refreshing}
           >
             <RefreshCw size={14} aria-hidden="true" />
-            <span>{users.isFetching || roles.isFetching ? "Refreshing" : "Refresh"}</span>
+            <span>{refreshing ? "Refreshing" : "Refresh"}</span>
           </button>
         </div>
-        <PermissionList permissions={iamPermissions} emptyLabel="No IAM permissions." />
-      </article>
+      </div>
 
       <div className="profile-grid">
         <article className="work-panel">
@@ -519,6 +503,14 @@ export function IamPage() {
           </div>
         ) : null}
       </article>
+
+      <details className="iam-perms-summary">
+        <summary>
+          Effective IAM permissions
+          <span className="muted"> — {iamPermissions.length} grant{iamPermissions.length === 1 ? "" : "s"}</span>
+        </summary>
+        <PermissionList permissions={iamPermissions} emptyLabel="No IAM permissions." />
+      </details>
     </section>
   );
 }

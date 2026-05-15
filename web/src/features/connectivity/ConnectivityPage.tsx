@@ -12,8 +12,9 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
-import { type ChangeEvent, type FormEvent, useMemo, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   approveHostKeyOverride,
@@ -133,6 +134,15 @@ export function ConnectivityPage() {
   const [deleteFeedback, setDeleteFeedback] = useState<ActionFeedback | null>(null);
   const [hostKeyFeedback, setHostKeyFeedback] = useState<ActionFeedback | null>(null);
   const [keypairFeedback, setKeypairFeedback] = useState<ActionFeedback | null>(null);
+  const [proxyModalOpen, setProxyModalOpen] = useState(false);
+  const [keypairModalOpen, setKeypairModalOpen] = useState(false);
+
+  useEffect(() => {
+    document.body.classList.add("fullwidth-mode");
+    return () => {
+      document.body.classList.remove("fullwidth-mode");
+    };
+  }, []);
 
   const proxies = useQuery({
     queryKey: [...connectivityRootKey, "ssh-proxies"],
@@ -174,6 +184,7 @@ export function ConnectivityPage() {
       setForm(sshProxyToForm(proxy));
       setFormMode("edit");
       setSelectedProxyID(proxy.id);
+      setProxyModalOpen(false);
       setFormFeedback({ kind: "success", message: `SSH proxy created: ${proxy.name}.` });
       await queryClient.invalidateQueries({ queryKey: connectivityRootKey });
     },
@@ -204,7 +215,12 @@ export function ConnectivityPage() {
       setDeleteFeedback(null);
     },
     onSuccess: async () => {
-      startCreate();
+      setFormMode("create");
+      setSelectedProxyID("");
+      setForm(emptySSHProxyForm);
+      setValidationError("");
+      setFormFeedback(null);
+      setProxyModalOpen(false);
       setDeleteFeedback({ kind: "success", message: "SSH proxy deleted." });
       await queryClient.invalidateQueries({ queryKey: connectivityRootKey });
     },
@@ -221,6 +237,7 @@ export function ConnectivityPage() {
     onSuccess: async (keypair) => {
       setKeypairForm(emptySSHKeypairForm);
       setKeypairValidationError("");
+      setKeypairModalOpen(false);
       setKeypairFeedback({ kind: "success", message: `SSH keypair saved: ${keypair.name}.` });
       await queryClient.invalidateQueries({ queryKey: [...connectivityRootKey, "ssh-keypairs"] });
     },
@@ -298,6 +315,7 @@ export function ConnectivityPage() {
     setForm(emptySSHProxyForm);
     setValidationError("");
     setFormFeedback(null);
+    setProxyModalOpen(true);
   }
 
   function editProxy(proxy: SSHProxy) {
@@ -306,6 +324,25 @@ export function ConnectivityPage() {
     setForm(sshProxyToForm(proxy));
     setValidationError("");
     setFormFeedback(null);
+    setProxyModalOpen(true);
+  }
+
+  function closeProxyModal() {
+    setProxyModalOpen(false);
+    setFormFeedback(null);
+    setValidationError("");
+  }
+
+  function openKeypairModal() {
+    setKeypairForm(emptySSHKeypairForm);
+    setKeypairValidationError("");
+    setKeypairFeedback(null);
+    setKeypairModalOpen(true);
+  }
+
+  function closeKeypairModal() {
+    setKeypairModalOpen(false);
+    setKeypairValidationError("");
   }
 
   function submitProxy(event: FormEvent<HTMLFormElement>) {
@@ -412,8 +449,10 @@ export function ConnectivityPage() {
     forgetHostKey.mutate(record);
   }
 
+  const refreshing = proxies.isFetching || keypairs.isFetching || hostKeys.isFetching;
+
   return (
-    <section className="page-section">
+    <section className="page-section connectivity-page">
       <div className="page-header">
         <div>
           <p className="eyebrow">Network</p>
@@ -425,72 +464,69 @@ export function ConnectivityPage() {
         </span>
       </div>
 
-      <div className="metric-grid">
-        <article className="metric-card">
-          <div className="metric-icon">
-            <Route size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">SSH proxies</div>
-            <div className="metric-value">{canReadAssets ? proxyItems.length : "-"}</div>
-          </div>
-          <span className="status-pill">configured</span>
-        </article>
-
-        <article className="metric-card">
-          <div className="metric-icon">
-            <Network size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Network zones</div>
-            <div className="metric-value">{canReadAssets ? zoneCount : "-"}</div>
-          </div>
-          <span className="status-pill">mapped</span>
-        </article>
-
-        <article className="metric-card">
-          <div className="metric-icon">
-            <Fingerprint size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Host keys</div>
-            <div className="metric-value">{canReadAssets ? hostKeyStats.pinned : "-"}</div>
-          </div>
-          <span className={`status-pill ${hostKeyStats.mismatched > 0 ? "warn" : "ok"}`}>
-            {hostKeyStats.mismatched > 0 ? `${hostKeyStats.mismatched} mismatch` : "pinned"}
+      <div className="connectivity-toolbar">
+        <div className="connectivity-toolbar-stats">
+          <span className="connectivity-stat">
+            <Route size={14} aria-hidden="true" />
+            <strong>{canReadAssets ? proxyItems.length : "-"}</strong>
+            <span className="muted">proxies</span>
           </span>
-        </article>
-
-        <article className="metric-card">
-          <div className="metric-icon">
-            <KeyRound size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <div className="metric-label">Keypairs</div>
-            <div className="metric-value">{canReadAssets ? keypairItems.length : "-"}</div>
-          </div>
-          <span className="status-pill">{keyAuthCount} key auth proxies</span>
-        </article>
-      </div>
-
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Access</p>
-            <h2>Connectivity permissions</h2>
-          </div>
+          <span className="connectivity-stat">
+            <Network size={14} aria-hidden="true" />
+            <strong>{canReadAssets ? zoneCount : "-"}</strong>
+            <span className="muted">zones</span>
+          </span>
+          <span className="connectivity-stat">
+            <Fingerprint size={14} aria-hidden="true" />
+            <strong>{canReadAssets ? hostKeyStats.pinned : "-"}</strong>
+            <span className={`muted ${hostKeyStats.mismatched > 0 ? "warn-text" : ""}`}>
+              host keys
+              {hostKeyStats.mismatched > 0 ? ` · ${hostKeyStats.mismatched} mismatch` : ""}
+            </span>
+          </span>
+          <span className="connectivity-stat">
+            <KeyRound size={14} aria-hidden="true" />
+            <strong>{canReadAssets ? keypairItems.length : "-"}</strong>
+            <span className="muted">keypairs · {keyAuthCount} key-auth</span>
+          </span>
+        </div>
+        <div className="connectivity-toolbar-actions">
           <button
             type="button"
             className="secondary-button compact"
             onClick={refreshConnectivity}
-            disabled={!canReadAssets || proxies.isFetching || keypairs.isFetching || hostKeys.isFetching}
+            disabled={!canReadAssets || refreshing}
           >
             <RefreshCw size={14} aria-hidden="true" />
-            <span>{proxies.isFetching || keypairs.isFetching || hostKeys.isFetching ? "Refreshing" : "Refresh"}</span>
+            <span>{refreshing ? "Refreshing" : "Refresh"}</span>
           </button>
+          {activeTab === "proxies" ? (
+            <button type="button" className="primary-button compact" onClick={startCreate} disabled={!canWriteAssets}>
+              <Plus size={14} aria-hidden="true" />
+              <span>New proxy</span>
+            </button>
+          ) : null}
+          {activeTab === "keypairs" ? (
+            <button
+              type="button"
+              className="primary-button compact"
+              onClick={openKeypairModal}
+              disabled={!canWriteAssets}
+            >
+              <Upload size={14} aria-hidden="true" />
+              <span>Upload keypair</span>
+            </button>
+          ) : null}
         </div>
-        <PermissionList permissions={connectivityPermissions} emptyLabel="No CMDB permissions." />
-      </article>
+      </div>
+
+      {!proxyModalOpen && formFeedback ? (
+        <PanelState kind={formFeedback.kind} message={formFeedback.message} />
+      ) : null}
+      {deleteFeedback ? <PanelState kind={deleteFeedback.kind} message={deleteFeedback.message} /> : null}
+      {!keypairModalOpen && keypairFeedback ? (
+        <PanelState kind={keypairFeedback.kind} message={keypairFeedback.message} />
+      ) : null}
 
       <div className="drawer-tabs" role="tablist" aria-label="Connectivity sections">
         <button
@@ -523,22 +559,18 @@ export function ConnectivityPage() {
       </div>
 
       {activeTab === "proxies" ? (
-        <div className="profile-grid">
         <article className="work-panel">
           <div className="panel-header">
             <div>
               <p className="eyebrow">SSH proxies</p>
               <h2>Jump hosts</h2>
             </div>
-            <button type="button" className="primary-button compact" onClick={startCreate} disabled={!canWriteAssets}>
-              <Plus size={14} aria-hidden="true" />
-              <span>New proxy</span>
-            </button>
+            <span className={`status-pill ${canWriteAssets ? "ok" : "warn"}`}>
+              {canWriteAssets ? "cmdb.asset:write" : "read-only"}
+            </span>
           </div>
 
           {!canReadAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
-          {!canWriteAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:write" /> : null}
-          {deleteFeedback ? <PanelState kind={deleteFeedback.kind} message={deleteFeedback.message} /> : null}
 
           {canReadAssets && proxies.isError ? (
             <PanelState
@@ -555,7 +587,7 @@ export function ConnectivityPage() {
 
           {proxyItems.length > 0 ? (
             <div className="table-wrap">
-              <table className="data-table compact-table">
+              <table className="data-table compact-table connectivity-proxies-table">
                 <thead>
                   <tr>
                     <th>Name</th>
@@ -564,7 +596,7 @@ export function ConnectivityPage() {
                     <th>Username</th>
                     <th>Auth</th>
                     <th>Credentials</th>
-                    <th>Actions</th>
+                    <th className="col-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -583,7 +615,7 @@ export function ConnectivityPage() {
                         <span className="status-pill">{proxy.auth_type}</span>
                       </td>
                       <td>{credentialChips(proxy)}</td>
-                      <td>
+                      <td className="col-actions">
                         <div className="request-actions">
                           <button
                             type="button"
@@ -611,352 +643,109 @@ export function ConnectivityPage() {
             </div>
           ) : null}
         </article>
-
-        <article className="work-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">{formMode === "create" ? "Create" : "Update"}</p>
-              <h2>{formMode === "create" ? "New SSH proxy" : selectedProxy?.name || "Edit SSH proxy"}</h2>
-            </div>
-            <span className={`status-pill ${canWriteAssets ? "ok" : "warn"}`}>
-              {canWriteAssets ? "cmdb.asset:write" : "write required"}
-            </span>
-          </div>
-
-          {validationError ? <PanelState kind="error" message={validationError} /> : null}
-          {formFeedback ? <PanelState kind={formFeedback.kind} message={formFeedback.message} /> : null}
-
-          <form className="request-form" onSubmit={submitProxy}>
-            <div className="form-grid">
-              <label className="form-field">
-                <span>Name</span>
-                <input
-                  value={form.name}
-                  onChange={(event) => updateForm(setForm, "name", event.target.value)}
-                  disabled={!canWriteAssets}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Network zone</span>
-                <input
-                  value={form.networkZone}
-                  onChange={(event) => updateForm(setForm, "networkZone", event.target.value)}
-                  placeholder="zone-a"
-                  disabled={!canWriteAssets}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Host</span>
-                <input
-                  value={form.host}
-                  onChange={(event) => updateForm(setForm, "host", event.target.value)}
-                  disabled={!canWriteAssets}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Port</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={form.port}
-                  onChange={(event) => updateForm(setForm, "port", event.target.value)}
-                  disabled={!canWriteAssets}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Username</span>
-                <input
-                  value={form.username}
-                  onChange={(event) => updateForm(setForm, "username", event.target.value)}
-                  disabled={!canWriteAssets}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Auth type</span>
-                <select
-                  value={form.authType}
-                  onChange={(event) => updateForm(setForm, "authType", event.target.value as SSHProxy["auth_type"])}
-                  disabled={!canWriteAssets}
-                >
-                  <option value="password">password</option>
-                  <option value="key">key</option>
-                </select>
-              </label>
-
-              <label className="form-field full-field">
-                <span>Description</span>
-                <input
-                  value={form.description}
-                  onChange={(event) => updateForm(setForm, "description", event.target.value)}
-                  disabled={!canWriteAssets}
-                />
-              </label>
-
-              {form.authType === "password" ? (
-                <label className="form-field">
-                  <span>Password</span>
-                  <input
-                    type="password"
-                    value={form.password}
-                    onChange={(event) => updateForm(setForm, "password", event.target.value)}
-                    placeholder={form.hasPassword ? "Leave empty to keep saved value" : "enter password"}
-                    disabled={!canWriteAssets}
-                  />
-                </label>
-              ) : (
-                <>
-                  <label className="form-field full-field">
-                    <span>Private key</span>
-                    <textarea
-                      value={form.privateKey}
-                      onChange={(event) => updateForm(setForm, "privateKey", event.target.value)}
-                      placeholder={form.hasPrivateKey ? "Leave empty to keep saved value" : "-----BEGIN OPENSSH PRIVATE KEY-----"}
-                      rows={5}
-                      disabled={!canWriteAssets}
-                    />
-                  </label>
-                  <label className="form-field">
-                    <span>Passphrase</span>
-                    <input
-                      type="password"
-                      value={form.passphrase}
-                      onChange={(event) => updateForm(setForm, "passphrase", event.target.value)}
-                      placeholder={form.hasPassphrase ? "Leave empty to keep saved value" : "optional"}
-                      disabled={!canWriteAssets}
-                    />
-                  </label>
-                </>
-              )}
-            </div>
-
-            <div className="form-actions">
-              <button
-                type="submit"
-                className="primary-button"
-                disabled={!canWriteAssets || createProxy.isPending || updateProxy.isPending}
-              >
-                <Save size={16} aria-hidden="true" />
-                <span>
-                  {createProxy.isPending || updateProxy.isPending
-                    ? "Saving"
-                    : formMode === "create"
-                    ? "Create proxy"
-                    : "Save changes"}
-                </span>
-              </button>
-              {formMode === "edit" ? (
-                <button type="button" className="secondary-button" onClick={startCreate}>
-                  New proxy
-                </button>
-              ) : null}
-            </div>
-          </form>
-        </article>
-      </div>
       ) : null}
 
       {activeTab === "keypairs" ? (
-        <div className="profile-grid">
-          <article className="work-panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">SSH keypairs</p>
-                <h2>Uploaded keys</h2>
+        <article className="work-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">SSH keypairs</p>
+              <h2>Uploaded keys</h2>
+            </div>
+            <span className={`status-pill ${canWriteAssets ? "ok" : "warn"}`}>
+              {canWriteAssets ? "cmdb.asset:write" : "read-only"}
+            </span>
+          </div>
+
+          {!canReadAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
+
+          {canReadAssets && keypairs.isError ? (
+            <PanelState
+              kind="error"
+              message={keypairs.error instanceof Error ? keypairs.error.message : "Failed to load SSH keypairs."}
+            />
+          ) : null}
+
+          <div className="filter-panel">
+            <label className="form-field search-field">
+              <span>Search</span>
+              <div className="input-with-icon">
+                <Search size={16} aria-hidden="true" />
+                <input
+                  type="search"
+                  value={keypairQuery}
+                  onChange={(event) => setKeypairQuery(event.target.value)}
+                  placeholder="Name, fingerprint, uploader"
+                  disabled={!canReadAssets}
+                />
               </div>
-              <button
-                type="button"
-                className="secondary-button compact"
-                onClick={() => void keypairs.refetch()}
-                disabled={!canReadAssets || keypairs.isFetching}
-              >
-                <RefreshCw size={14} aria-hidden="true" />
-                <span>{keypairs.isFetching ? "Refreshing" : "Refresh"}</span>
-              </button>
-            </div>
+            </label>
+          </div>
 
-            {!canReadAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
-            {!canWriteAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:write" /> : null}
-            {keypairFeedback ? <PanelState kind={keypairFeedback.kind} message={keypairFeedback.message} /> : null}
+          {canReadAssets && keypairs.isLoading ? <PanelState kind="loading" message="Loading SSH keypairs" /> : null}
 
-            {canReadAssets && keypairs.isError ? (
-              <PanelState
-                kind="error"
-                message={keypairs.error instanceof Error ? keypairs.error.message : "Failed to load SSH keypairs."}
-              />
-            ) : null}
+          {canReadAssets && !keypairs.isLoading && !keypairs.isError && filteredKeypairs.length === 0 ? (
+            <PanelState kind="empty" message="No matching SSH keypairs." />
+          ) : null}
 
-            <div className="filter-panel">
-              <label className="form-field search-field">
-                <span>Search</span>
-                <div className="input-with-icon">
-                  <Search size={16} aria-hidden="true" />
-                  <input
-                    type="search"
-                    value={keypairQuery}
-                    onChange={(event) => setKeypairQuery(event.target.value)}
-                    placeholder="Name, fingerprint, uploader"
-                    disabled={!canReadAssets}
-                  />
-                </div>
-              </label>
-            </div>
-
-            {canReadAssets && keypairs.isLoading ? <PanelState kind="loading" message="Loading SSH keypairs" /> : null}
-
-            {canReadAssets && !keypairs.isLoading && !keypairs.isError && filteredKeypairs.length === 0 ? (
-              <PanelState kind="empty" message="No matching SSH keypairs." />
-            ) : null}
-
-            {filteredKeypairs.length > 0 ? (
-              <div className="table-wrap">
-                <table className="data-table compact-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Fingerprint</th>
-                      <th>Passphrase</th>
-                      <th>Uploaded by</th>
-                      <th>Updated</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredKeypairs.map((keypair) => (
-                      <tr key={keypair.id}>
-                        <td>
-                          <strong>{keypair.name}</strong>
-                          {keypair.description ? <div className="muted">{keypair.description}</div> : null}
-                        </td>
-                        <td>
-                          <div className="fingerprint-cell">
-                            <code>{keypair.fingerprint}</code>
-                            <button
-                              type="button"
-                              className="icon-button compact-icon"
-                              onClick={() => void copyKeypairFingerprint(keypair.fingerprint)}
-                              title="Copy fingerprint"
-                            >
-                              <Copy size={14} aria-hidden="true" />
-                            </button>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`status-pill ${keypair.has_passphrase ? "ok" : ""}`}>
-                            {keypair.has_passphrase ? "yes" : "no"}
-                          </span>
-                        </td>
-                        <td>{keypair.uploaded_by || "-"}</td>
-                        <td>{formatDateTime(keypair.updated_at || keypair.created_at)}</td>
-                        <td>
+          {filteredKeypairs.length > 0 ? (
+            <div className="table-wrap">
+              <table className="data-table compact-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Fingerprint</th>
+                    <th>Passphrase</th>
+                    <th>Uploaded by</th>
+                    <th>Updated</th>
+                    <th className="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredKeypairs.map((keypair) => (
+                    <tr key={keypair.id}>
+                      <td>
+                        <strong>{keypair.name}</strong>
+                        {keypair.description ? <div className="muted">{keypair.description}</div> : null}
+                      </td>
+                      <td>
+                        <div className="fingerprint-cell">
+                          <code>{keypair.fingerprint}</code>
                           <button
                             type="button"
-                            className="secondary-button compact"
-                            onClick={() => deleteKeypair(keypair)}
-                            disabled={!canWriteAssets || removeKeypair.isPending}
+                            className="icon-button compact-icon"
+                            onClick={() => void copyKeypairFingerprint(keypair.fingerprint)}
+                            title="Copy fingerprint"
                           >
-                            <Trash2 size={14} aria-hidden="true" />
-                            <span>Delete</span>
+                            <Copy size={14} aria-hidden="true" />
                           </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-          </article>
-
-          <article className="work-panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Upload</p>
-                <h2>SSH keypair</h2>
-              </div>
-              <span className={`status-pill ${canWriteAssets ? "ok" : "warn"}`}>
-                {canWriteAssets ? "cmdb.asset:write" : "write required"}
-              </span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`status-pill ${keypair.has_passphrase ? "ok" : ""}`}>
+                          {keypair.has_passphrase ? "yes" : "no"}
+                        </span>
+                      </td>
+                      <td>{keypair.uploaded_by || "-"}</td>
+                      <td>{formatDateTime(keypair.updated_at || keypair.created_at)}</td>
+                      <td className="col-actions">
+                        <button
+                          type="button"
+                          className="secondary-button compact"
+                          onClick={() => deleteKeypair(keypair)}
+                          disabled={!canWriteAssets || removeKeypair.isPending}
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                          <span>Delete</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-
-            {keypairValidationError ? <PanelState kind="error" message={keypairValidationError} /> : null}
-
-            <form className="request-form" onSubmit={submitKeypair}>
-              <div className="form-grid">
-                <label className="form-field">
-                  <span>Name</span>
-                  <input
-                    value={keypairForm.name}
-                    onChange={(event) => updateKeypairForm(setKeypairForm, "name", event.target.value)}
-                    disabled={!canWriteAssets || uploadKeypair.isPending}
-                  />
-                </label>
-
-                <label className="form-field">
-                  <span>Private key file</span>
-                  <input
-                    type="file"
-                    accept=".pem,.key,.txt,text/plain"
-                    onChange={readKeypairFile}
-                    disabled={!canWriteAssets || uploadKeypair.isPending}
-                  />
-                </label>
-
-                <label className="form-field full-field">
-                  <span>Description</span>
-                  <input
-                    value={keypairForm.description}
-                    onChange={(event) => updateKeypairForm(setKeypairForm, "description", event.target.value)}
-                    disabled={!canWriteAssets || uploadKeypair.isPending}
-                  />
-                </label>
-
-                <label className="form-field full-field">
-                  <span>Private key</span>
-                  <textarea
-                    value={keypairForm.privateKey}
-                    onChange={(event) => updateKeypairForm(setKeypairForm, "privateKey", event.target.value)}
-                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                    rows={8}
-                    disabled={!canWriteAssets || uploadKeypair.isPending}
-                  />
-                </label>
-
-                <label className="form-field">
-                  <span>Passphrase</span>
-                  <input
-                    type="password"
-                    value={keypairForm.passphrase}
-                    onChange={(event) => updateKeypairForm(setKeypairForm, "passphrase", event.target.value)}
-                    placeholder="optional"
-                    disabled={!canWriteAssets || uploadKeypair.isPending}
-                  />
-                </label>
-              </div>
-
-              <div className="form-actions">
-                <button type="submit" className="primary-button" disabled={!canWriteAssets || uploadKeypair.isPending}>
-                  <Upload size={16} aria-hidden="true" />
-                  <span>{uploadKeypair.isPending ? "Saving" : "Upload keypair"}</span>
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => {
-                    setKeypairForm(emptySSHKeypairForm);
-                    setKeypairValidationError("");
-                  }}
-                  disabled={!canWriteAssets || uploadKeypair.isPending}
-                >
-                  Clear
-                </button>
-              </div>
-            </form>
-          </article>
-        </div>
+          ) : null}
+        </article>
       ) : null}
 
       {activeTab === "hostkeys" ? (
@@ -1120,6 +909,267 @@ export function ConnectivityPage() {
             </div>
           ) : null}
         </article>
+      ) : null}
+
+      <details className="connectivity-perms-summary">
+        <summary>
+          Connectivity permissions
+          <span className="muted"> — {connectivityPermissions.length} grant{connectivityPermissions.length === 1 ? "" : "s"}</span>
+        </summary>
+        <PermissionList permissions={connectivityPermissions} emptyLabel="No CMDB permissions." />
+      </details>
+
+      {proxyModalOpen ? (
+        <div className="connectivity-modal" role="dialog" aria-modal="true" aria-label="SSH proxy form">
+          <button
+            type="button"
+            className="connectivity-modal-backdrop"
+            aria-label="Close"
+            onClick={closeProxyModal}
+          />
+          <div className="connectivity-modal-card">
+            <div className="connectivity-modal-head">
+              <div>
+                <p className="eyebrow">{formMode === "create" ? "Create" : "Update"}</p>
+                <h2>{formMode === "create" ? "New SSH proxy" : selectedProxy?.name || "Edit SSH proxy"}</h2>
+              </div>
+              <button type="button" className="icon-button" onClick={closeProxyModal} aria-label="Close">
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+
+            {!canWriteAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:write" /> : null}
+            {validationError ? <PanelState kind="error" message={validationError} /> : null}
+            {formFeedback ? <PanelState kind={formFeedback.kind} message={formFeedback.message} /> : null}
+
+            <form className="request-form" onSubmit={submitProxy}>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span>Name</span>
+                  <input
+                    value={form.name}
+                    onChange={(event) => updateForm(setForm, "name", event.target.value)}
+                    disabled={!canWriteAssets}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Network zone</span>
+                  <input
+                    value={form.networkZone}
+                    onChange={(event) => updateForm(setForm, "networkZone", event.target.value)}
+                    placeholder="zone-a"
+                    disabled={!canWriteAssets}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Host</span>
+                  <input
+                    value={form.host}
+                    onChange={(event) => updateForm(setForm, "host", event.target.value)}
+                    disabled={!canWriteAssets}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Port</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={form.port}
+                    onChange={(event) => updateForm(setForm, "port", event.target.value)}
+                    disabled={!canWriteAssets}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Username</span>
+                  <input
+                    value={form.username}
+                    onChange={(event) => updateForm(setForm, "username", event.target.value)}
+                    disabled={!canWriteAssets}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Auth type</span>
+                  <select
+                    value={form.authType}
+                    onChange={(event) => updateForm(setForm, "authType", event.target.value as SSHProxy["auth_type"])}
+                    disabled={!canWriteAssets}
+                  >
+                    <option value="password">password</option>
+                    <option value="key">key</option>
+                  </select>
+                </label>
+
+                <label className="form-field full-field">
+                  <span>Description</span>
+                  <input
+                    value={form.description}
+                    onChange={(event) => updateForm(setForm, "description", event.target.value)}
+                    disabled={!canWriteAssets}
+                  />
+                </label>
+
+                {form.authType === "password" ? (
+                  <label className="form-field">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={form.password}
+                      onChange={(event) => updateForm(setForm, "password", event.target.value)}
+                      placeholder={form.hasPassword ? "Leave empty to keep saved value" : "enter password"}
+                      disabled={!canWriteAssets}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <label className="form-field full-field">
+                      <span>Private key</span>
+                      <textarea
+                        value={form.privateKey}
+                        onChange={(event) => updateForm(setForm, "privateKey", event.target.value)}
+                        placeholder={
+                          form.hasPrivateKey
+                            ? "Leave empty to keep saved value"
+                            : "-----BEGIN OPENSSH PRIVATE KEY-----"
+                        }
+                        rows={5}
+                        disabled={!canWriteAssets}
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Passphrase</span>
+                      <input
+                        type="password"
+                        value={form.passphrase}
+                        onChange={(event) => updateForm(setForm, "passphrase", event.target.value)}
+                        placeholder={form.hasPassphrase ? "Leave empty to keep saved value" : "optional"}
+                        disabled={!canWriteAssets}
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+
+              <div className="connectivity-modal-foot">
+                <button type="button" className="secondary-button" onClick={closeProxyModal}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={!canWriteAssets || createProxy.isPending || updateProxy.isPending}
+                >
+                  <Save size={16} aria-hidden="true" />
+                  <span>
+                    {createProxy.isPending || updateProxy.isPending
+                      ? "Saving"
+                      : formMode === "create"
+                      ? "Create proxy"
+                      : "Save changes"}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {keypairModalOpen ? (
+        <div className="connectivity-modal" role="dialog" aria-modal="true" aria-label="Upload SSH keypair">
+          <button
+            type="button"
+            className="connectivity-modal-backdrop"
+            aria-label="Close"
+            onClick={closeKeypairModal}
+          />
+          <div className="connectivity-modal-card">
+            <div className="connectivity-modal-head">
+              <div>
+                <p className="eyebrow">Upload</p>
+                <h2>SSH keypair</h2>
+              </div>
+              <button type="button" className="icon-button" onClick={closeKeypairModal} aria-label="Close">
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+
+            {!canWriteAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:write" /> : null}
+            {keypairValidationError ? <PanelState kind="error" message={keypairValidationError} /> : null}
+            {keypairFeedback ? <PanelState kind={keypairFeedback.kind} message={keypairFeedback.message} /> : null}
+
+            <form className="request-form" onSubmit={submitKeypair}>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span>Name</span>
+                  <input
+                    value={keypairForm.name}
+                    onChange={(event) => updateKeypairForm(setKeypairForm, "name", event.target.value)}
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Private key file</span>
+                  <input
+                    type="file"
+                    accept=".pem,.key,.txt,text/plain"
+                    onChange={readKeypairFile}
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+
+                <label className="form-field full-field">
+                  <span>Description</span>
+                  <input
+                    value={keypairForm.description}
+                    onChange={(event) => updateKeypairForm(setKeypairForm, "description", event.target.value)}
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+
+                <label className="form-field full-field">
+                  <span>Private key</span>
+                  <textarea
+                    value={keypairForm.privateKey}
+                    onChange={(event) => updateKeypairForm(setKeypairForm, "privateKey", event.target.value)}
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                    rows={8}
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+
+                <label className="form-field">
+                  <span>Passphrase</span>
+                  <input
+                    type="password"
+                    value={keypairForm.passphrase}
+                    onChange={(event) => updateKeypairForm(setKeypairForm, "passphrase", event.target.value)}
+                    placeholder="optional"
+                    disabled={!canWriteAssets || uploadKeypair.isPending}
+                  />
+                </label>
+              </div>
+
+              <div className="connectivity-modal-foot">
+                <button type="button" className="secondary-button" onClick={closeKeypairModal}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={!canWriteAssets || uploadKeypair.isPending}
+                >
+                  <Upload size={16} aria-hidden="true" />
+                  <span>{uploadKeypair.isPending ? "Saving" : "Upload keypair"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       ) : null}
     </section>
   );

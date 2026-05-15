@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, KeyRound, RefreshCw, Send, ShieldAlert } from "lucide-react";
-import { type FormEvent, useState } from "react";
-import { Link } from "react-router-dom";
+import { CheckCircle2, KeyRound, Plus, RefreshCw, Send, ShieldAlert, X } from "lucide-react";
+import { type FormEvent, useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
 import {
   approveBastionRequest,
@@ -51,6 +51,7 @@ function assetOptionLabel(asset: Asset) {
 export function AccessPage() {
   const auth = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [assetQuery, setAssetQuery] = useState("");
   const [selectedAssetID, setSelectedAssetID] = useState("");
   const [requestReason, setRequestReason] = useState("");
@@ -58,6 +59,14 @@ export function AccessPage() {
   const [createFeedback, setCreateFeedback] = useState<ActionFeedback | null>(null);
   const [decisionFeedback, setDecisionFeedback] = useState<ActionFeedback | null>(null);
   const [requestFeedback, setRequestFeedback] = useState<ActionFeedback | null>(null);
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
+
+  useEffect(() => {
+    document.body.classList.add("fullwidth-mode");
+    return () => {
+      document.body.classList.remove("fullwidth-mode");
+    };
+  }, []);
   const identity = auth.identity;
   const userID = identity?.user.id || "";
   const capabilities = accessCapabilityState(identity?.permissions);
@@ -106,6 +115,7 @@ export function AccessPage() {
       setSelectedAssetID("");
       setRequestReason("");
       setDurationSeconds(3600);
+      setRequestModalOpen(false);
       setCreateFeedback({
         kind: "success",
         message: `Request created for ${created.asset_name || created.asset_id}.`,
@@ -161,6 +171,35 @@ export function AccessPage() {
     },
   });
 
+  const tabParam = searchParams.get("tab");
+  const accessTab: "mine" | "approve" =
+    tabParam === "approve" && canApproveRequests ? "approve" : "mine";
+  function setAccessTab(next: "mine" | "approve") {
+    const params = new URLSearchParams(searchParams);
+    if (next === "mine") params.delete("tab");
+    else params.set("tab", next);
+    setSearchParams(params, { replace: true });
+  }
+  function openRequestModal() {
+    setCreateFeedback(null);
+    setRequestModalOpen(true);
+  }
+  function closeRequestModal() {
+    setRequestModalOpen(false);
+  }
+  function refreshTab() {
+    if (accessTab === "approve") {
+      void pendingApprovals.refetch();
+      return;
+    }
+    void myRequests.refetch();
+    void myActiveGrants.refetch();
+  }
+  const tabRefreshing =
+    accessTab === "approve"
+      ? pendingApprovals.isFetching
+      : myRequests.isFetching || myActiveGrants.isFetching;
+
   function createAccessRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const assetID = selectedAssetID.trim();
@@ -189,7 +228,7 @@ export function AccessPage() {
   }
 
   return (
-    <section className="page-section">
+    <section className="page-section access-page">
       <div className="page-header">
         <div>
           <p className="eyebrow">My access</p>
@@ -201,388 +240,413 @@ export function AccessPage() {
         </span>
       </div>
 
-      <div className="metric-grid">
-        {capabilities.map((capability) => {
-          const Icon = capability.allowed ? CheckCircle2 : ShieldAlert;
-          return (
-            <article className="metric-card" key={capability.id}>
-              <div className="metric-icon">
-                <Icon size={20} aria-hidden="true" />
-              </div>
-              <div>
-                <div className="metric-label">{capability.permission}</div>
-                <div className="metric-value compact">{capability.label}</div>
-              </div>
-              <span className={`status-pill ${capability.allowed ? "ok" : "warn"}`}>
-                {capability.allowed ? "available" : "unavailable"}
-              </span>
-            </article>
-          );
-        })}
-      </div>
-
-      <div className="profile-grid">
-        <article className="work-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Requests</p>
-              <h2>Request permissions</h2>
-            </div>
-            <span className="status-pill">{requestPermissions.length}</span>
-          </div>
-          <PermissionList permissions={requestPermissions} emptyLabel="No request permissions." />
-        </article>
-
-        <article className="work-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Grants</p>
-              <h2>Grant permissions</h2>
-            </div>
-            <span className="status-pill">{grantPermissions.length}</span>
-          </div>
-          <PermissionList permissions={grantPermissions} emptyLabel="No grant permissions." />
-        </article>
-      </div>
-
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">New request</p>
-            <h2>Request asset access</h2>
-          </div>
+      <div className="access-toolbar">
+        <div className="access-toolbar-stats">
+          {capabilities.map((capability) => (
+            <span className="access-cap" key={capability.id}>
+              {capability.allowed ? (
+                <CheckCircle2 size={14} className="ok" aria-hidden="true" />
+              ) : (
+                <ShieldAlert size={14} className="warn" aria-hidden="true" />
+              )}
+              <span>{capability.label}</span>
+            </span>
+          ))}
+          <span className="access-cap muted" title={`${pendingItems.length} pending approvals`}>
+            {pendingItems.length > 0 && canApproveRequests ? (
+              <span className="status-pill warn">{pendingItems.length} pending</span>
+            ) : null}
+          </span>
+        </div>
+        <div className="access-toolbar-actions">
           <button
             type="button"
             className="secondary-button compact"
-            onClick={() => void assetSearch.refetch()}
-            disabled={!canReadAssets || !canWriteRequests || assetSearch.isFetching}
+            onClick={refreshTab}
+            disabled={!canReadRequests || tabRefreshing}
           >
             <RefreshCw size={14} aria-hidden="true" />
-            <span>{assetSearch.isFetching ? "Refreshing" : "Refresh assets"}</span>
+            <span>{tabRefreshing ? "Refreshing" : "Refresh"}</span>
+          </button>
+          <button
+            type="button"
+            className="primary-button compact"
+            onClick={openRequestModal}
+            disabled={!canReadAssets || !canWriteRequests}
+          >
+            <Plus size={14} aria-hidden="true" />
+            <span>Request access</span>
           </button>
         </div>
+      </div>
 
-        {createFeedback ? <PanelState kind={createFeedback.kind} message={createFeedback.message} /> : null}
-
-        {!canWriteRequests ? (
-          <PanelState kind="permission" message="Permission required: bastion.request:write" />
+      <div className="access-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={accessTab === "mine"}
+          className={`access-tab ${accessTab === "mine" ? "active" : ""}`}
+          onClick={() => setAccessTab("mine")}
+        >
+          Mine
+        </button>
+        {canApproveRequests ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={accessTab === "approve"}
+            className={`access-tab ${accessTab === "approve" ? "active" : ""}`}
+            onClick={() => setAccessTab("approve")}
+          >
+            Approve
+            {pendingItems.length > 0 ? <span className="access-tab-badge">{pendingItems.length}</span> : null}
+          </button>
         ) : null}
+      </div>
 
-        {!canReadAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
+      {createFeedback ? <PanelState kind={createFeedback.kind} message={createFeedback.message} /> : null}
+      {requestFeedback ? <PanelState kind={requestFeedback.kind} message={requestFeedback.message} /> : null}
+      {decisionFeedback && accessTab === "approve" ? (
+        <PanelState kind={decisionFeedback.kind} message={decisionFeedback.message} />
+      ) : null}
 
-        {canReadAssets && canWriteRequests && assetSearch.isError ? (
-          <PanelState
-            kind="error"
-            message={assetSearch.error instanceof Error ? assetSearch.error.message : "Failed to load assets."}
-          />
-        ) : null}
+      {accessTab === "mine" ? (
+        <>
+          <article className="work-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Requests</p>
+                <h2>My requests</h2>
+              </div>
+            </div>
 
-        <form className="request-form" onSubmit={createAccessRequest}>
-          <div className="form-grid">
-            <label className="form-field">
-              <span>Asset search</span>
-              <input
-                type="search"
-                value={assetQuery}
-                onChange={(event) => setAssetQuery(event.target.value)}
-                placeholder="Name, IP, owner, region"
-                disabled={!canReadAssets || !canWriteRequests}
+            {!canReadRequests ? (
+              <PanelState kind="permission" message="Permission required: bastion.request:read" />
+            ) : null}
+
+            {canReadRequests && myRequests.isError ? (
+              <PanelState
+                kind="error"
+                message={myRequests.error instanceof Error ? myRequests.error.message : "Failed to load requests."}
               />
-            </label>
+            ) : null}
 
-            <label className="form-field">
-              <span>Asset</span>
-              <select
-                value={selectedAssetID}
-                onChange={(event) => setSelectedAssetID(event.target.value)}
-                disabled={!canReadAssets || !canWriteRequests || assetSearch.isLoading}
-              >
-                <option value="">Select an active asset</option>
-                {assetItems.map((asset) => (
-                  <option value={asset.id} key={asset.id}>
-                    {assetOptionLabel(asset)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {canReadRequests && myRequests.isLoading ? <PanelState kind="loading" message="Loading requests" /> : null}
 
-            <label className="form-field">
-              <span>Duration</span>
-              <select
-                value={durationSeconds}
-                onChange={(event) => setDurationSeconds(Number(event.target.value))}
-                disabled={!canWriteRequests}
-              >
-                {requestDurationOptions.map((option) => (
-                  <option value={option.value} key={option.value}>
-                    {option.label}
-                  </option>
+            {canReadRequests && !myRequests.isLoading && !myRequests.isError && requestItems.length === 0 ? (
+              <PanelState kind="empty" message="No requests yet." />
+            ) : null}
+
+            {requestItems.length > 0 ? (
+              <div className="request-list">
+                {requestItems.map((request) => (
+                  <article className="request-row" key={request.id}>
+                    <div className="request-main">
+                      <div>
+                        <h3>{request.asset_name || request.asset_id}</h3>
+                        <p>{request.reason || "No reason provided."}</p>
+                      </div>
+                      <div className="request-status-actions">
+                        <span className={`status-pill ${requestStatusTone(request.status)}`}>{request.status}</span>
+                        {request.status === "pending" && canWriteRequests ? (
+                          <button
+                            type="button"
+                            className="secondary-button compact"
+                            onClick={() => cancelOwnRequest(request.id)}
+                            disabled={cancelRequest.isPending}
+                          >
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="request-meta">
+                      <span>{formatDurationSeconds(request.requested_duration_seconds)}</span>
+                      <span>{new Date(request.created_at).toLocaleString()}</span>
+                      {request.decided_by_name ? <span>Decided by {request.decided_by_name}</span> : null}
+                    </div>
+                  </article>
                 ))}
-              </select>
-            </label>
+              </div>
+            ) : null}
+          </article>
+
+          <article className="work-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Grants</p>
+                <h2>My active grants</h2>
+              </div>
+            </div>
+
+            {!canReadGrants ? (
+              <PanelState kind="permission" message="Permission required: bastion.grant:read" />
+            ) : null}
+
+            {canReadGrants && myActiveGrants.isError ? (
+              <PanelState
+                kind="error"
+                message={
+                  myActiveGrants.error instanceof Error
+                    ? myActiveGrants.error.message
+                    : "Failed to load active grants."
+                }
+              />
+            ) : null}
+
+            {canReadGrants && myActiveGrants.isLoading ? (
+              <PanelState kind="loading" message="Loading active grants" />
+            ) : null}
+
+            {canReadGrants && !myActiveGrants.isLoading && !myActiveGrants.isError && grantItems.length === 0 ? (
+              <PanelState kind="empty" message="No active grants." />
+            ) : null}
+
+            {grantItems.length > 0 ? (
+              <div className="request-list">
+                {grantItems.map((grant) => (
+                  <article className="request-row" key={grant.id}>
+                    <div className="request-main">
+                      <div>
+                        <h3>{grant.asset_name || grant.asset_id}</h3>
+                        <p>{grant.reason || "No reason provided."}</p>
+                      </div>
+                      <span className="status-pill ok">active</span>
+                    </div>
+                    <div className="request-meta">
+                      <span>{formatGrantTimeRemaining(grant.expires_at)}</span>
+                      <span>Expires {new Date(grant.expires_at).toLocaleString()}</span>
+                      {grant.granted_by_name ? <span>Granted by {grant.granted_by_name}</span> : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+          </article>
+        </>
+      ) : null}
+
+      {accessTab === "approve" ? (
+        <article className="work-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Approvals</p>
+              <h2>Pending approvals</h2>
+            </div>
           </div>
 
-          <label className="form-field">
-            <span>Reason</span>
-            <textarea
-              value={requestReason}
-              onChange={(event) => setRequestReason(event.target.value)}
-              placeholder="Why do you need access?"
-              rows={3}
-              disabled={!canWriteRequests}
+          {!canReadRequests ? (
+            <PanelState kind="permission" message="Permission required: bastion.request:read" />
+          ) : null}
+
+          {canReadRequests && !canApproveRequests ? (
+            <PanelState kind="permission" message="Permission required: bastion.grant:write" />
+          ) : null}
+
+          {canReadRequests && canApproveRequests && pendingApprovals.isError ? (
+            <PanelState
+              kind="error"
+              message={
+                pendingApprovals.error instanceof Error
+                  ? pendingApprovals.error.message
+                  : "Failed to load pending approvals."
+              }
             />
-          </label>
-
-          {canReadAssets && canWriteRequests && assetSearch.isLoading ? (
-            <PanelState kind="loading" message="Loading active assets" />
           ) : null}
 
-          {canReadAssets &&
-          canWriteRequests &&
-          !assetSearch.isLoading &&
-          !assetSearch.isError &&
-          assetItems.length === 0 ? (
-            <PanelState kind="empty" message="No active assets match this search." />
+          {canReadRequests && canApproveRequests && pendingApprovals.isLoading ? (
+            <PanelState kind="loading" message="Loading pending approvals" />
           ) : null}
 
-          <div className="form-actions">
-            <button
-              type="submit"
-              className="primary-button"
-              disabled={!canReadAssets || !canWriteRequests || createRequest.isPending || !selectedAssetID}
-            >
-              <Send size={16} aria-hidden="true" />
-              <span>{createRequest.isPending ? "Submitting" : "Request access"}</span>
-            </button>
-          </div>
-        </form>
-      </article>
+          {canReadRequests &&
+          canApproveRequests &&
+          !pendingApprovals.isLoading &&
+          !pendingApprovals.isError &&
+          pendingItems.length === 0 ? (
+            <PanelState kind="empty" message="No pending approvals." />
+          ) : null}
 
-      <article className="work-panel">
-        <div className="panel-header">
+          {pendingItems.length > 0 ? (
+            <div className="request-list">
+              {pendingItems.map((request) => (
+                <article className="request-row" key={request.id}>
+                  <div className="request-main">
+                    <div>
+                      <h3>{request.asset_name || request.asset_id}</h3>
+                      <p>{request.reason || "No reason provided."}</p>
+                    </div>
+                    <div className="request-status-actions">
+                      <span className={`status-pill ${requestStatusTone(request.status)}`}>{request.status}</span>
+                      <div className="request-actions">
+                        <button
+                          type="button"
+                          className="primary-button compact"
+                          onClick={() => decidePendingRequest(request.id, "approve")}
+                          disabled={decideRequest.isPending}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button compact"
+                          onClick={() => decidePendingRequest(request.id, "reject")}
+                          disabled={decideRequest.isPending}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="request-meta">
+                    <span>{request.user_name || request.user_id}</span>
+                    <span>{formatDurationSeconds(request.requested_duration_seconds)}</span>
+                    <span>{new Date(request.created_at).toLocaleString()}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </article>
+      ) : null}
+
+      <details className="access-perms-summary">
+        <summary>
+          Permission details
+          <span className="muted">
+            {" "}— {requestPermissions.length} request, {grantPermissions.length} grant
+          </span>
+        </summary>
+        <div className="access-perms-grid">
           <div>
             <p className="eyebrow">Requests</p>
-            <h2>My requests</h2>
+            <PermissionList permissions={requestPermissions} emptyLabel="No request permissions." />
           </div>
-          <button
-            type="button"
-            className="secondary-button compact"
-            onClick={() => void myRequests.refetch()}
-            disabled={!canReadRequests || myRequests.isFetching}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-            <span>{myRequests.isFetching ? "Refreshing" : "Refresh"}</span>
-          </button>
+          <div>
+            <p className="eyebrow">Grants</p>
+            <PermissionList permissions={grantPermissions} emptyLabel="No grant permissions." />
+          </div>
         </div>
-
-        {requestFeedback ? <PanelState kind={requestFeedback.kind} message={requestFeedback.message} /> : null}
-
-        {!canReadRequests ? (
-          <PanelState kind="permission" message="Permission required: bastion.request:read" />
-        ) : null}
-
-        {canReadRequests && myRequests.isError ? (
-          <PanelState
-            kind="error"
-            message={myRequests.error instanceof Error ? myRequests.error.message : "Failed to load requests."}
-          />
-        ) : null}
-
-        {canReadRequests && myRequests.isLoading ? (
-          <PanelState kind="loading" message="Loading requests" />
-        ) : null}
-
-        {canReadRequests && !myRequests.isLoading && !myRequests.isError && requestItems.length === 0 ? (
-          <PanelState kind="empty" message="No requests yet." />
-        ) : null}
-
-        {requestItems.length > 0 ? (
-          <div className="request-list">
-            {requestItems.map((request) => (
-              <article className="request-row" key={request.id}>
-                <div className="request-main">
-                  <div>
-                    <h3>{request.asset_name || request.asset_id}</h3>
-                    <p>{request.reason || "No reason provided."}</p>
-                  </div>
-                  <div className="request-status-actions">
-                    <span className={`status-pill ${requestStatusTone(request.status)}`}>{request.status}</span>
-                    {request.status === "pending" && canWriteRequests ? (
-                      <button
-                        type="button"
-                        className="secondary-button compact"
-                        onClick={() => cancelOwnRequest(request.id)}
-                        disabled={cancelRequest.isPending}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="request-meta">
-                  <span>{formatDurationSeconds(request.requested_duration_seconds)}</span>
-                  <span>{new Date(request.created_at).toLocaleString()}</span>
-                  {request.decided_by_name ? <span>Decided by {request.decided_by_name}</span> : null}
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : null}
-
         <Link className="secondary-button compact text-link-button" to="/profile">
           View profile
         </Link>
-      </article>
+      </details>
 
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Approvals</p>
-            <h2>Pending approvals</h2>
-          </div>
+      {requestModalOpen ? (
+        <div className="access-modal" role="dialog" aria-modal="true" aria-label="Request asset access">
           <button
             type="button"
-            className="secondary-button compact"
-            onClick={() => void pendingApprovals.refetch()}
-            disabled={!canReadRequests || !canApproveRequests || pendingApprovals.isFetching}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-            <span>{pendingApprovals.isFetching ? "Refreshing" : "Refresh"}</span>
-          </button>
-        </div>
-
-        {decisionFeedback ? <PanelState kind={decisionFeedback.kind} message={decisionFeedback.message} /> : null}
-
-        {!canReadRequests ? <PanelState kind="permission" message="Permission required: bastion.request:read" /> : null}
-
-        {canReadRequests && !canApproveRequests ? (
-          <PanelState kind="permission" message="Permission required: bastion.grant:write" />
-        ) : null}
-
-        {canReadRequests && canApproveRequests && pendingApprovals.isError ? (
-          <PanelState
-            kind="error"
-            message={
-              pendingApprovals.error instanceof Error
-                ? pendingApprovals.error.message
-                : "Failed to load pending approvals."
-            }
+            className="access-modal-backdrop"
+            aria-label="Close"
+            onClick={closeRequestModal}
           />
-        ) : null}
+          <div className="access-modal-card">
+            <div className="access-modal-head">
+              <div>
+                <p className="eyebrow">New request</p>
+                <h2>Request asset access</h2>
+              </div>
+              <button type="button" className="icon-button" onClick={closeRequestModal} aria-label="Close">
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
 
-        {canReadRequests && canApproveRequests && pendingApprovals.isLoading ? (
-          <PanelState kind="loading" message="Loading pending approvals" />
-        ) : null}
+            {!canWriteRequests ? (
+              <PanelState kind="permission" message="Permission required: bastion.request:write" />
+            ) : null}
+            {!canReadAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
+            {canReadAssets && canWriteRequests && assetSearch.isError ? (
+              <PanelState
+                kind="error"
+                message={assetSearch.error instanceof Error ? assetSearch.error.message : "Failed to load assets."}
+              />
+            ) : null}
+            {createFeedback ? <PanelState kind={createFeedback.kind} message={createFeedback.message} /> : null}
 
-        {canReadRequests &&
-        canApproveRequests &&
-        !pendingApprovals.isLoading &&
-        !pendingApprovals.isError &&
-        pendingItems.length === 0 ? (
-          <PanelState kind="empty" message="No pending approvals." />
-        ) : null}
+            <form className="request-form" onSubmit={createAccessRequest}>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span>Asset search</span>
+                  <input
+                    type="search"
+                    value={assetQuery}
+                    onChange={(event) => setAssetQuery(event.target.value)}
+                    placeholder="Name, IP, owner, region"
+                    disabled={!canReadAssets || !canWriteRequests}
+                  />
+                </label>
 
-        {pendingItems.length > 0 ? (
-          <div className="request-list">
-            {pendingItems.map((request) => (
-              <article className="request-row" key={request.id}>
-                <div className="request-main">
-                  <div>
-                    <h3>{request.asset_name || request.asset_id}</h3>
-                    <p>{request.reason || "No reason provided."}</p>
-                  </div>
-                  <div className="request-status-actions">
-                    <span className={`status-pill ${requestStatusTone(request.status)}`}>{request.status}</span>
-                    <div className="request-actions">
-                      <button
-                        type="button"
-                        className="primary-button compact"
-                        onClick={() => decidePendingRequest(request.id, "approve")}
-                        disabled={decideRequest.isPending}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary-button compact"
-                        onClick={() => decidePendingRequest(request.id, "reject")}
-                        disabled={decideRequest.isPending}
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="request-meta">
-                  <span>{request.user_name || request.user_id}</span>
-                  <span>{formatDurationSeconds(request.requested_duration_seconds)}</span>
-                  <span>{new Date(request.created_at).toLocaleString()}</span>
-                </div>
-              </article>
-            ))}
+                <label className="form-field">
+                  <span>Asset</span>
+                  <select
+                    value={selectedAssetID}
+                    onChange={(event) => setSelectedAssetID(event.target.value)}
+                    disabled={!canReadAssets || !canWriteRequests || assetSearch.isLoading}
+                  >
+                    <option value="">Select an active asset</option>
+                    {assetItems.map((asset) => (
+                      <option value={asset.id} key={asset.id}>
+                        {assetOptionLabel(asset)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="form-field">
+                  <span>Duration</span>
+                  <select
+                    value={durationSeconds}
+                    onChange={(event) => setDurationSeconds(Number(event.target.value))}
+                    disabled={!canWriteRequests}
+                  >
+                    {requestDurationOptions.map((option) => (
+                      <option value={option.value} key={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="form-field">
+                <span>Reason</span>
+                <textarea
+                  value={requestReason}
+                  onChange={(event) => setRequestReason(event.target.value)}
+                  placeholder="Why do you need access?"
+                  rows={3}
+                  disabled={!canWriteRequests}
+                />
+              </label>
+
+              {canReadAssets && canWriteRequests && assetSearch.isLoading ? (
+                <PanelState kind="loading" message="Loading active assets" />
+              ) : null}
+
+              {canReadAssets &&
+              canWriteRequests &&
+              !assetSearch.isLoading &&
+              !assetSearch.isError &&
+              assetItems.length === 0 ? (
+                <PanelState kind="empty" message="No active assets match this search." />
+              ) : null}
+
+              <div className="access-modal-foot">
+                <button type="button" className="secondary-button" onClick={closeRequestModal}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={!canReadAssets || !canWriteRequests || createRequest.isPending || !selectedAssetID}
+                >
+                  <Send size={16} aria-hidden="true" />
+                  <span>{createRequest.isPending ? "Submitting" : "Request access"}</span>
+                </button>
+              </div>
+            </form>
           </div>
-        ) : null}
-      </article>
-
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Grants</p>
-            <h2>My active grants</h2>
-          </div>
-          <button
-            type="button"
-            className="secondary-button compact"
-            onClick={() => void myActiveGrants.refetch()}
-            disabled={!canReadGrants || myActiveGrants.isFetching}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-            <span>{myActiveGrants.isFetching ? "Refreshing" : "Refresh"}</span>
-          </button>
         </div>
-
-        {!canReadGrants ? (
-          <PanelState kind="permission" message="Permission required: bastion.grant:read" />
-        ) : null}
-
-        {canReadGrants && myActiveGrants.isError ? (
-          <PanelState
-            kind="error"
-            message={
-              myActiveGrants.error instanceof Error ? myActiveGrants.error.message : "Failed to load active grants."
-            }
-          />
-        ) : null}
-
-        {canReadGrants && myActiveGrants.isLoading ? (
-          <PanelState kind="loading" message="Loading active grants" />
-        ) : null}
-
-        {canReadGrants && !myActiveGrants.isLoading && !myActiveGrants.isError && grantItems.length === 0 ? (
-          <PanelState kind="empty" message="No active grants." />
-        ) : null}
-
-        {grantItems.length > 0 ? (
-          <div className="request-list">
-            {grantItems.map((grant) => (
-              <article className="request-row" key={grant.id}>
-                <div className="request-main">
-                  <div>
-                    <h3>{grant.asset_name || grant.asset_id}</h3>
-                    <p>{grant.reason || "No reason provided."}</p>
-                  </div>
-                  <span className="status-pill ok">active</span>
-                </div>
-                <div className="request-meta">
-                  <span>{formatGrantTimeRemaining(grant.expires_at)}</span>
-                  <span>Expires {new Date(grant.expires_at).toLocaleString()}</span>
-                  {grant.granted_by_name ? <span>Granted by {grant.granted_by_name}</span> : null}
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : null}
-      </article>
+      ) : null}
     </section>
   );
 }

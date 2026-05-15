@@ -159,6 +159,12 @@ services:
         HTTPS_PROXY: ${HTTPS_PROXY-}
     environment:
       OPS_API_UPSTREAM: ${OPS_API_UPSTREAM-ops-api:8080}
+    # Lets the container talk to a host-side ops-api when running
+    # standalone (e.g. local dev: `OPS_API_UPSTREAM=host.docker.internal:8080`).
+    # No-op in production where OPS_API_UPSTREAM points at the compose
+    # service or an external DNS name.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8081:80"
     depends_on:
