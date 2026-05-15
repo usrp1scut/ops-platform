@@ -34,6 +34,7 @@ import {
 } from "../../api/connectivity";
 import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
+import { useModalFocus } from "../../hooks/useModalFocus";
 import {
   emptySSHProxyForm,
   emptySSHKeypairForm,
@@ -344,6 +345,15 @@ export function ConnectivityPage() {
     setKeypairModalOpen(false);
     setKeypairValidationError("");
   }
+
+  const { panelRef: proxyModalRef, closeButtonRef: proxyModalCloseRef } = useModalFocus(
+    proxyModalOpen,
+    closeProxyModal,
+  );
+  const { panelRef: keypairModalRef, closeButtonRef: keypairModalCloseRef } = useModalFocus(
+    keypairModalOpen,
+    closeKeypairModal,
+  );
 
   function submitProxy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -927,13 +937,19 @@ export function ConnectivityPage() {
             aria-label="Close"
             onClick={closeProxyModal}
           />
-          <div className="connectivity-modal-card">
+          <div className="connectivity-modal-card" ref={proxyModalRef} tabIndex={-1}>
             <div className="connectivity-modal-head">
               <div>
                 <p className="eyebrow">{formMode === "create" ? "Create" : "Update"}</p>
                 <h2>{formMode === "create" ? "New SSH proxy" : selectedProxy?.name || "Edit SSH proxy"}</h2>
               </div>
-              <button type="button" className="icon-button" onClick={closeProxyModal} aria-label="Close">
+              <button
+                ref={proxyModalCloseRef}
+                type="button"
+                className="icon-button"
+                onClick={closeProxyModal}
+                aria-label="Close"
+              >
                 <X size={16} aria-hidden="true" />
               </button>
             </div>
@@ -1086,13 +1102,19 @@ export function ConnectivityPage() {
             aria-label="Close"
             onClick={closeKeypairModal}
           />
-          <div className="connectivity-modal-card">
+          <div className="connectivity-modal-card" ref={keypairModalRef} tabIndex={-1}>
             <div className="connectivity-modal-head">
               <div>
                 <p className="eyebrow">Upload</p>
                 <h2>SSH keypair</h2>
               </div>
-              <button type="button" className="icon-button" onClick={closeKeypairModal} aria-label="Close">
+              <button
+                ref={keypairModalCloseRef}
+                type="button"
+                className="icon-button"
+                onClick={closeKeypairModal}
+                aria-label="Close"
+              >
                 <X size={16} aria-hidden="true" />
               </button>
             </div>

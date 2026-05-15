@@ -2064,6 +2064,11 @@ body.fullwidth-mode .page-section { width: 100%; max-width: none; }
   gap: 12px;
 }
 .access-modal-head h2 { margin: 0; font-size: 18px; }
+.access-modal-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .access-modal-foot {
   display: flex;
   justify-content: flex-end;

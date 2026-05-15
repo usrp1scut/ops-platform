@@ -17,6 +17,7 @@ import {
 import { listAssets, type Asset } from "../../api/cmdb";
 import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
+import { useModalFocus } from "../../hooks/useModalFocus";
 import { accessCapabilityState } from "../../lib/access";
 import { formatGrantTimeRemaining } from "../../lib/bastionGrants";
 import { formatDurationSeconds, requestStatusTone } from "../../lib/bastionRequests";
@@ -183,10 +184,19 @@ export function AccessPage() {
   function openRequestModal() {
     setCreateFeedback(null);
     setRequestModalOpen(true);
+    // Asset list lives in a long-running query so it can be stale by the
+    // time the operator opens the modal. Re-poll so the dropdown reflects
+    // current active assets.
+    if (canReadAssets) void assetSearch.refetch();
   }
   function closeRequestModal() {
     setRequestModalOpen(false);
   }
+
+  const { panelRef: requestModalRef, closeButtonRef: requestModalCloseRef } = useModalFocus(
+    requestModalOpen,
+    closeRequestModal,
+  );
   function refreshTab() {
     if (accessTab === "approve") {
       void pendingApprovals.refetch();
@@ -539,15 +549,33 @@ export function AccessPage() {
             aria-label="Close"
             onClick={closeRequestModal}
           />
-          <div className="access-modal-card">
+          <div className="access-modal-card" ref={requestModalRef} tabIndex={-1}>
             <div className="access-modal-head">
               <div>
                 <p className="eyebrow">New request</p>
                 <h2>Request asset access</h2>
               </div>
-              <button type="button" className="icon-button" onClick={closeRequestModal} aria-label="Close">
-                <X size={16} aria-hidden="true" />
-              </button>
+              <div className="access-modal-head-actions">
+                <button
+                  type="button"
+                  className="secondary-button compact"
+                  onClick={() => void assetSearch.refetch()}
+                  disabled={!canReadAssets || !canWriteRequests || assetSearch.isFetching}
+                  title="Refresh asset list"
+                >
+                  <RefreshCw size={14} aria-hidden="true" />
+                  <span>{assetSearch.isFetching ? "Refreshing" : "Refresh"}</span>
+                </button>
+                <button
+                  ref={requestModalCloseRef}
+                  type="button"
+                  className="icon-button"
+                  onClick={closeRequestModal}
+                  aria-label="Close"
+                >
+                  <X size={16} aria-hidden="true" />
+                </button>
+              </div>
             </div>
 
             {!canWriteRequests ? (

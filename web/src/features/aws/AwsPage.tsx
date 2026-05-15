@@ -18,6 +18,7 @@ import {
 } from "../../api/aws";
 import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
+import { useModalFocus } from "../../hooks/useModalFocus";
 import {
   awsAccountToForm,
   awsFormToCreatePayload,
@@ -266,6 +267,20 @@ export function AwsPage() {
     setValidationError("");
     setTestFeedback(null);
   }
+
+  const { panelRef: accountModalRef, closeButtonRef: accountModalCloseRef } = useModalFocus(
+    accountModalOpen,
+    closeAccountModal,
+  );
+
+  // Edit mode mutates only the in-memory form until Save; the Test
+  // connection endpoint reads the persisted account by ID, so testing
+  // a dirty form would silently exercise the stale config. Track dirty
+  // state so we can warn the user and re-label the button.
+  const isFormDirty =
+    formMode === "edit" && selectedAccount
+      ? JSON.stringify(form) !== JSON.stringify(awsAccountToForm(selectedAccount))
+      : false;
 
   function submitAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -581,13 +596,19 @@ export function AwsPage() {
             aria-label="Close"
             onClick={closeAccountModal}
           />
-          <div className="aws-modal-card">
+          <div className="aws-modal-card" ref={accountModalRef} tabIndex={-1}>
             <div className="aws-modal-head">
               <div>
                 <p className="eyebrow">{formMode === "create" ? "Connect" : "Update"}</p>
                 <h2>{formMode === "create" ? "Add AWS account" : selectedAccount?.display_name || "Edit AWS account"}</h2>
               </div>
-              <button type="button" className="icon-button" onClick={closeAccountModal} aria-label="Close">
+              <button
+                ref={accountModalCloseRef}
+                type="button"
+                className="icon-button"
+                onClick={closeAccountModal}
+                aria-label="Close"
+              >
                 <X size={16} aria-hidden="true" />
               </button>
             </div>
@@ -702,6 +723,15 @@ export function AwsPage() {
                 </label>
               </div>
 
+              {formMode === "edit" && isFormDirty ? (
+                <div className="notice-row warn">
+                  <ShieldCheck size={16} aria-hidden="true" />
+                  <span>
+                    Test connection exercises the saved configuration, not your unsaved edits. Save first to verify the new values.
+                  </span>
+                </div>
+              ) : null}
+
               <div className="aws-modal-foot">
                 {formMode === "edit" && selectedAccountID ? (
                   <button
@@ -709,8 +739,13 @@ export function AwsPage() {
                     className="secondary-button"
                     onClick={() => testSelectedOrAccount(selectedAccountID)}
                     disabled={!canWriteAws || testAccount.isPending}
+                    title={
+                      isFormDirty
+                        ? "Tests the persisted account, not your unsaved edits."
+                        : "Tests the persisted account."
+                    }
                   >
-                    {testAccount.isPending ? "Testing" : "Test connection"}
+                    {testAccount.isPending ? "Testing" : "Test saved connection"}
                   </button>
                 ) : null}
                 <button type="button" className="secondary-button" onClick={closeAccountModal}>
