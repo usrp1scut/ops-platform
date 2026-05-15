@@ -14,6 +14,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
+import { ThemeToggle } from "../../components/ThemeToggle";
 import { useAuth } from "../../features/auth/AuthProvider";
 
 type NavItem = {
@@ -95,6 +96,7 @@ export function AppShell() {
             >
               Old portal
             </a>
+            <ThemeToggle />
             <span className="user-name">{displayName}</span>
             <button type="button" className="icon-button" onClick={auth.logout} title="Sign out">
               <LogOut size={18} aria-hidden="true" />
