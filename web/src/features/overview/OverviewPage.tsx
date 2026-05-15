@@ -71,16 +71,21 @@ export function OverviewPage() {
       <div className="work-panel">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Migration slice</p>
-            <h2>Phase 1 foundation</h2>
+            <p className="eyebrow">Console</p>
+            <h2>Platform status</h2>
           </div>
-          <StatusPill ok label="in progress" />
+          <StatusPill ok={healthOk} label={healthOk ? "operational" : "degraded"} />
         </div>
         <div className="check-list">
-          <div>React, TypeScript, Vite, routing, and dev proxy</div>
-          <div>Shared API client with bearer token handling</div>
-          <div>Local login, OIDC redirect launch, and profile restore</div>
-          <div>Permission helper aligned with backend RBAC names</div>
+          <div>React/Vite console is the primary /portal/ experience</div>
+          <div>Classic console kept at /portal-legacy/ for rollback</div>
+          <div>API {healthOk ? "online" : "unavailable"} — re-checked every 30s</div>
+          <div>
+            Signed in as {displayName} · {auth.identity?.roles.length || 0} role
+            {(auth.identity?.roles.length || 0) === 1 ? "" : "s"} ·{" "}
+            {auth.identity?.permissions.length || 0} permission grant
+            {(auth.identity?.permissions.length || 0) === 1 ? "" : "s"}
+          </div>
         </div>
       </div>
     </section>
