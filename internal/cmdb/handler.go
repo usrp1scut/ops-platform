@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"ops-platform/internal/iam"
 	"ops-platform/internal/platform/httpx"
 )
 
@@ -52,22 +53,27 @@ func (h *Handler) Routes() chi.Router {
 
 	r.With(h.withReadAuth).Get("/", h.ListAssets)
 	r.With(h.withReadAuth).Get("/facets", h.ListAssetFacets)
+	// CreateAsset has no existing asset to scope against; the scope of the
+	// asset being created (its body env/source) is enforced inside the
+	// handler. Every {assetID} write goes through withScopedAssetWrite,
+	// which refines the coarse cmdb.asset:write gate by the target asset's
+	// env/source via the shared iam evaluator.
 	r.With(h.withWriteAuth).Post("/", h.CreateAsset)
 	r.With(h.withReadAuth).Get("/{assetID}", h.GetAsset)
-	r.With(h.withWriteAuth).Patch("/{assetID}", h.UpdateAsset)
-	r.With(h.withWriteAuth).Delete("/{assetID}", h.DeleteAsset)
+	r.With(h.withScopedAssetWrite).Patch("/{assetID}", h.UpdateAsset)
+	r.With(h.withScopedAssetWrite).Delete("/{assetID}", h.DeleteAsset)
 	r.With(h.withReadAuth).Get("/{assetID}/connection", h.GetAssetConnection)
-	r.With(h.withWriteAuth).Get("/{assetID}/connection/resolve", h.ResolveAssetConnection)
-	r.With(h.withWriteAuth).Put("/{assetID}/connection", h.UpsertAssetConnection)
+	r.With(h.withScopedAssetWrite).Get("/{assetID}/connection/resolve", h.ResolveAssetConnection)
+	r.With(h.withScopedAssetWrite).Put("/{assetID}/connection", h.UpsertAssetConnection)
 	r.With(h.withReadAuth).Get("/{assetID}/probe/latest", h.GetLatestAssetProbe)
-	r.With(h.withWriteAuth).Post("/{assetID}/probe", h.UpsertAssetProbe)
-	r.With(h.withWriteAuth).Post("/{assetID}/probe/run", h.RunAssetProbe)
-	r.With(h.withWriteAuth).Post("/{assetID}/connection/test", h.TestAssetConnection)
+	r.With(h.withScopedAssetWrite).Post("/{assetID}/probe", h.UpsertAssetProbe)
+	r.With(h.withScopedAssetWrite).Post("/{assetID}/probe/run", h.RunAssetProbe)
+	r.With(h.withScopedAssetWrite).Post("/{assetID}/connection/test", h.TestAssetConnection)
 	r.With(h.withReadAuth).Get("/{assetID}/relations", h.ListAssetRelations)
-	r.With(h.withWriteAuth).Post("/{assetID}/relations", h.CreateRelation)
-	r.With(h.withWriteAuth).Delete("/{assetID}/relations/{relationID}", h.DeleteRelation)
-	r.With(h.withWriteAuth).Post("/{assetID}/promote-vpc-proxy", h.PromoteVPCProxy)
-	r.With(h.withWriteAuth).Post("/{assetID}/demote-vpc-proxy", h.DemoteVPCProxy)
+	r.With(h.withScopedAssetWrite).Post("/{assetID}/relations", h.CreateRelation)
+	r.With(h.withScopedAssetWrite).Delete("/{assetID}/relations/{relationID}", h.DeleteRelation)
+	r.With(h.withScopedAssetWrite).Post("/{assetID}/promote-vpc-proxy", h.PromoteVPCProxy)
+	r.With(h.withScopedAssetWrite).Post("/{assetID}/demote-vpc-proxy", h.DemoteVPCProxy)
 
 	return r
 }
@@ -84,6 +90,47 @@ func (h *Handler) withWriteAuth(next http.Handler) http.Handler {
 		return next
 	}
 	return h.writeMW(next)
+}
+
+// withScopedAssetWrite refines the coarse cmdb.asset:write gate: the caller
+// must additionally be in scope for the target asset's env/source. It routes
+// through the same iam.UserIdentity.Authorize evaluator as /resolve and the
+// bastion gate, so a scoped cmdb.asset:write (e.g. source=aws) is enforced
+// identically everywhere. Authorize subsumes the coarse check (admin bypass,
+// has-permission, unscoped == allow), so this replaces withWriteAuth rather
+// than stacking on it. With writeMW nil (handler built without auth, e.g.
+// tests) it is a pass-through, matching withWriteAuth.
+func (h *Handler) withScopedAssetWrite(next http.Handler) http.Handler {
+	if h.writeMW == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := iam.IdentityFromContext(r.Context())
+		if !ok {
+			httpx.WriteError(w, http.StatusUnauthorized, "missing identity context")
+			return
+		}
+		assetID := chi.URLParam(r, "assetID")
+		if assetID == "" {
+			httpx.WriteError(w, http.StatusBadRequest, "asset id required")
+			return
+		}
+		asset, err := h.repo.GetAsset(r.Context(), assetID)
+		if err != nil {
+			if errors.Is(err, ErrAssetNotFound) {
+				httpx.WriteError(w, http.StatusNotFound, err.Error())
+				return
+			}
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		attrs := iam.ResourceAttrs{"env": asset.Env, "source": asset.Source}
+		if !identity.Authorize("cmdb.asset:write", attrs).Allowed {
+			httpx.WriteError(w, http.StatusForbidden, "permission denied")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *Handler) ListAssets(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +187,23 @@ func (h *Handler) CreateAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Source == "" {
 		req.Source = "manual"
+	}
+
+	// Scope is enforced here rather than in middleware because the asset does
+	// not exist yet — the scope of what is being created comes from the body.
+	// Guarded by writeMW so a handler built without auth (tests) is unaffected,
+	// matching the route-level nil-guard pattern.
+	if h.writeMW != nil {
+		identity, ok := iam.IdentityFromContext(r.Context())
+		if !ok {
+			httpx.WriteError(w, http.StatusUnauthorized, "missing identity context")
+			return
+		}
+		attrs := iam.ResourceAttrs{"env": req.Env, "source": req.Source}
+		if !identity.Authorize("cmdb.asset:write", attrs).Allowed {
+			httpx.WriteError(w, http.StatusForbidden, "permission denied")
+			return
+		}
 	}
 
 	asset, err := h.repo.CreateAsset(r.Context(), req)

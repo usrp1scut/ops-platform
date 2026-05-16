@@ -2463,3 +2463,129 @@ body.fullwidth-mode .page-section { width: 100%; max-width: none; }
 }
 .connect-card-list dt { color: var(--color-fg-muted); }
 .connect-card-list dd { margin: 0; text-align: right; }
+
+/* ========== IAM capability matrix (Govern · phase 4c) ==========
+ * Primary IAM view: rows = capabilities, columns = roles, cells =
+ * all / partial / none. Roles & users stay editable but secondary,
+ * reached via the view switch. Dense, scan-first, matches the
+ * design review p.11 grid. */
+.iam-view-switch {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.iam-view-switch button {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
+  cursor: pointer;
+}
+.iam-view-switch button.active {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+  color: var(--color-accent-hover);
+  font-weight: 500;
+}
+
+.cap-inspector-grid .stack-1,
+.work-panel .stack-1 {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+.cap-matrix-wrap { overflow-x: auto; }
+.cap-matrix {
+  display: grid;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  min-width: 720px;
+  font-size: 12.5px;
+}
+.cap-matrix .cell {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-bg-elevated);
+}
+.cap-matrix .cell:nth-child(5n) { border-right: none; }
+.cap-matrix .cell.h {
+  font-weight: 600;
+  background: var(--color-bg-subtle);
+  color: var(--color-fg-muted);
+  position: sticky;
+  top: 0;
+}
+.cap-matrix .cell.h.center,
+.cap-matrix .cell.center { justify-content: center; }
+.cap-matrix .cell.cap code {
+  font-size: 12px;
+  color: var(--color-fg);
+}
+.cap-matrix button.cell {
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: center;
+  justify-content: center;
+}
+.cap-matrix button.cell.selected {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: -2px;
+}
+.cap-cell-all { color: var(--color-success-fg); background: var(--color-success-bg) !important; }
+.cap-cell-partial { color: var(--color-warn-fg); background: var(--color-warn-bg) !important; }
+.cap-cell-none { color: var(--color-fg-muted); }
+
+.cap-inspector-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+@media (max-width: 900px) {
+  .cap-inspector-grid { grid-template-columns: 1fr; }
+}
+.cap-source-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.cap-source-row.flagged {
+  border-color: var(--color-warn-border);
+  background: var(--color-warn-bg);
+  color: var(--color-warn-fg);
+}
+.cap-source-row .micro { color: var(--color-fg-muted); }
+.cap-resolver-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.cap-resolver-form .form-field { flex: 1 1 180px; }
+.cap-path-step {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--color-bg-subtle);
+  font-size: 12.5px;
+}
+.cap-path-step.allow {
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  color: var(--color-success-fg);
+}

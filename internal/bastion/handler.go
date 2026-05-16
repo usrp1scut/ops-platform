@@ -78,6 +78,32 @@ func canSeeAllBastionRecords(identity iam.UserIdentity) bool {
 	return false
 }
 
+// enforceGrantScope refines the coarse bastion.grant:write gate at the two
+// access-CREATING boundaries (approve a request, create a grant directly) by
+// the target asset's env/source, via the same iam.UserIdentity.Authorize
+// evaluator used by /resolve, the bastion ticket gate and cmdb writes. Revoke
+// and reject stay coarse — removing/denying access is always safe and should
+// never be blocked by scope. Returns false (and writes the response) when the
+// caller is out of scope. found=false (asset/request gone) falls back to the
+// coarse permission rather than hard-failing. Backward compatible: with
+// scope_json NULL, Authorize behaves exactly like RequirePermission.
+func (h *Handler) enforceGrantScope(
+	w http.ResponseWriter,
+	identity iam.UserIdentity,
+	env, source string,
+	found bool,
+) bool {
+	var attrs iam.ResourceAttrs
+	if found {
+		attrs = iam.ResourceAttrs{"env": env, "source": source}
+	}
+	if identity.Authorize("bastion.grant:write", attrs).Allowed {
+		return true
+	}
+	httpx.WriteError(w, http.StatusForbidden, "permission denied")
+	return false
+}
+
 // --- Grants ---
 
 func (h *Handler) listGrants(w http.ResponseWriter, r *http.Request) {
@@ -139,6 +165,17 @@ func (h *Handler) createGrant(w http.ResponseWriter, r *http.Request) {
 		// Two-person rule: an approver must not be able to bypass approval
 		// by directly granting themselves. Mirrors ErrSelfApprovalDenied.
 		httpx.WriteError(w, http.StatusForbidden, ErrSelfGrantDenied.Error())
+		return
+	}
+	// Creating a grant directly is the same privilege as approving a request
+	// for that asset, so it gets the same scope enforcement — otherwise a
+	// scoped approver could bypass the env restriction via this path.
+	env, source, found, err := h.repo.AssetScopeAttrs(r.Context(), req.AssetID)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !h.enforceGrantScope(w, identity, env, source, found) {
 		return
 	}
 	if req.DurationSeconds <= 0 {
@@ -272,11 +309,26 @@ type decideRequestPayload struct {
 }
 
 func (h *Handler) approveRequest(w http.ResponseWriter, r *http.Request) {
-	identity, _ := iam.IdentityFromContext(r.Context())
+	identity, ok := iam.IdentityFromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "missing identity")
+		return
+	}
+	requestID := chi.URLParam(r, "requestID")
+	// Approving creates a grant for the request's asset, so scope it by that
+	// asset's env/source (the design's "approve only where env≠prod").
+	env, source, found, err := h.repo.RequestAssetScopeAttrs(r.Context(), requestID)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !h.enforceGrantScope(w, identity, env, source, found) {
+		return
+	}
 	var p decideRequestPayload
 	_ = json.NewDecoder(r.Body).Decode(&p)
 	in := DecideRequestInput{
-		RequestID:      chi.URLParam(r, "requestID"),
+		RequestID:      requestID,
 		DecidedByID:    identity.User.ID,
 		DecisionReason: p.Reason,
 	}

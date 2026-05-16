@@ -16,6 +16,9 @@ import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
 import { groupRolePermissions, iamUserLabel, rolesAvailableToBind } from "../../lib/iam";
 import { useAuth } from "../auth/AuthProvider";
+import { CapabilityMatrix } from "./CapabilityMatrix";
+
+type IamView = "capabilities" | "directory";
 
 type ActionFeedback = {
   kind: "error" | "success";
@@ -44,6 +47,7 @@ export function IamPage() {
   const canReadIAM = auth.can("iam.user:read");
   const canWriteIAM = auth.can("iam.user:write");
   const iamPermissions = (auth.identity?.permissions || []).filter((permission) => permission.startsWith("iam.user:"));
+  const [view, setView] = useState<IamView>("capabilities");
   const [userSearch, setUserSearch] = useState("");
   const [selectedUserID, setSelectedUserID] = useState("");
   const [selectedRoleName, setSelectedRoleName] = useState("");
@@ -183,18 +187,44 @@ export function IamPage() {
           </span>
         </div>
         <div className="iam-toolbar-actions">
-          <button
-            type="button"
-            className="secondary-button compact"
-            onClick={refreshIam}
-            disabled={!canReadIAM || refreshing}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-            <span>{refreshing ? "Refreshing" : "Refresh"}</span>
-          </button>
+          <div className="iam-view-switch" role="tablist" aria-label="IAM view">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "capabilities"}
+              className={view === "capabilities" ? "active" : ""}
+              onClick={() => setView("capabilities")}
+            >
+              Capabilities
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "directory"}
+              className={view === "directory" ? "active" : ""}
+              onClick={() => setView("directory")}
+            >
+              Users &amp; roles
+            </button>
+          </div>
+          {view === "directory" ? (
+            <button
+              type="button"
+              className="secondary-button compact"
+              onClick={refreshIam}
+              disabled={!canReadIAM || refreshing}
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+              <span>{refreshing ? "Refreshing" : "Refresh"}</span>
+            </button>
+          ) : null}
         </div>
       </div>
 
+      {view === "capabilities" ? <CapabilityMatrix /> : null}
+
+      {view === "directory" ? (
+        <>
       <div className="profile-grid">
         <article className="work-panel">
           <div className="panel-header">
@@ -511,6 +541,8 @@ export function IamPage() {
         </summary>
         <PermissionList permissions={iamPermissions} emptyLabel="No IAM permissions." />
       </details>
+        </>
+      ) : null}
     </section>
   );
 }

@@ -105,7 +105,7 @@ FROM iam_user WHERE id = $1
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-SELECT r.name, rp.resource, rp.action
+SELECT r.name, rp.resource, rp.action, rp.scope_json
 FROM iam_user_role_binding b
 JOIN iam_role r ON r.id = b.role_id
 LEFT JOIN iam_role_permission rp ON rp.role_id = r.id
@@ -119,16 +119,38 @@ ORDER BY r.name ASC
 
 	roleSet := map[string]struct{}{}
 	permSet := map[string]struct{}{}
+	scopedAcc := map[string]*ScopedPermission{}
 	for rows.Next() {
 		var role string
 		var resource sql.NullString
 		var action sql.NullString
-		if err := rows.Scan(&role, &resource, &action); err != nil {
+		var scopeRaw []byte
+		if err := rows.Scan(&role, &resource, &action, &scopeRaw); err != nil {
 			return UserIdentity{}, err
 		}
 		roleSet[role] = struct{}{}
-		if resource.Valid && action.Valid {
-			permSet[resource.String+":"+action.String] = struct{}{}
+		if !resource.Valid || !action.Valid {
+			continue
+		}
+		perm := resource.String + ":" + action.String
+		permSet[perm] = struct{}{}
+
+		scope, err := parseScopeJSON(scopeRaw)
+		if err != nil {
+			return UserIdentity{}, err
+		}
+		sp := scopedAcc[perm]
+		if sp == nil {
+			sp = &ScopedPermission{Permission: perm, Resource: resource.String, Action: action.String}
+			scopedAcc[perm] = sp
+		}
+		sp.Sources = append(sp.Sources, PermissionSource{Kind: "role", Ref: role, Scope: scope})
+		if len(scope) == 0 {
+			// An unscoped grant from any role wins: it widens to "all".
+			sp.Unscoped = true
+			sp.Scopes = nil
+		} else if !sp.Unscoped {
+			sp.Scopes = append(sp.Scopes, scope)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -146,11 +168,39 @@ ORDER BY r.name ASC
 	sort.Strings(roles)
 	sort.Strings(perms)
 
+	scoped := make([]ScopedPermission, 0, len(perms))
+	for _, perm := range perms {
+		if sp := scopedAcc[perm]; sp != nil {
+			scoped = append(scoped, *sp)
+		}
+	}
+
 	return UserIdentity{
-		User:        user,
-		Roles:       roles,
-		Permissions: perms,
+		User:              user,
+		Roles:             roles,
+		Permissions:       perms,
+		ScopedPermissions: scoped,
 	}, nil
+}
+
+// parseScopeJSON turns a nullable scope_json column into a Scope. NULL or an
+// empty/`[]` document means unscoped (returns nil, no error).
+func parseScopeJSON(raw []byte) (Scope, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" || trimmed == "[]" {
+		return nil, nil
+	}
+	var scope Scope
+	if err := json.Unmarshal(raw, &scope); err != nil {
+		return nil, err
+	}
+	if len(scope) == 0 {
+		return nil, nil
+	}
+	return scope, nil
 }
 
 func (r *Repository) IdentityBySubject(ctx context.Context, subject string) (UserIdentity, error) {
@@ -525,7 +575,7 @@ func (r *Repository) ListRolePermissions(ctx context.Context, roleName string) (
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-SELECT resource, action
+SELECT resource, action, scope_json
 FROM iam_role_permission
 WHERE role_id = $1
 ORDER BY resource ASC, action ASC
@@ -538,10 +588,16 @@ ORDER BY resource ASC, action ASC
 	permissions := make([]RolePermission, 0, 16)
 	for rows.Next() {
 		var item RolePermission
-		if err := rows.Scan(&item.Resource, &item.Action); err != nil {
+		var scopeRaw []byte
+		if err := rows.Scan(&item.Resource, &item.Action, &scopeRaw); err != nil {
 			return nil, err
 		}
 		item.Permission = item.Resource + ":" + item.Action
+		scope, err := parseScopeJSON(scopeRaw)
+		if err != nil {
+			return nil, err
+		}
+		item.Scope = scope
 		permissions = append(permissions, item)
 	}
 	if err := rows.Err(); err != nil {

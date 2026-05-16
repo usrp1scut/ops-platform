@@ -139,7 +139,6 @@ func (s *Server) Router() http.Handler {
 		iam.RequirePermission("bastion.request", "read"),
 		iam.RequirePermission("bastion.request", "write"),
 	)
-	requireGrant := bastion.RequireActiveGrant(bastionRepo, "assetID")
 
 	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.db.PingContext(r.Context()); err != nil {
@@ -162,11 +161,14 @@ func (s *Server) Router() http.Handler {
 		r.Mount("/cmdb/sessions", sessionsHandler.Routes())
 		r.Mount("/ssh-keypairs", keypairHandler.Routes())
 		// Connect routes: cmdb.asset:read is the baseline (must be able to
-		// see the asset) and the JIT grant gate is the actual authorization.
-		// Admins (system:admin) bypass the grant check inside RequireActiveGrant.
-		r.With(iam.RequirePermission("cmdb.asset", "read")).With(requireGrant).
+		// see the asset). Authorization is admin OR scoped role capability
+		// bastion.session:<action> admitting the asset OR an active JIT grant
+		// — see bastion.RequireSessionAuthorization.
+		r.With(iam.RequirePermission("cmdb.asset", "read")).
+			With(bastion.RequireSessionAuthorization(bastionRepo, "ssh", "assetID")).
 			Post("/cmdb/assets/{assetID}/terminal/ticket", terminalHandler.IssueTicket)
-		r.With(iam.RequirePermission("cmdb.asset", "read")).With(requireGrant).
+		r.With(iam.RequirePermission("cmdb.asset", "read")).
+			With(bastion.RequireSessionAuthorization(bastionRepo, "rdp", "assetID")).
 			Post("/cmdb/assets/{assetID}/rdp/ticket", guacHandler.IssueTicket)
 		r.Mount("/bastion", bastionHandler.Routes())
 		r.Mount("/aws/accounts", awsHandler.Routes())

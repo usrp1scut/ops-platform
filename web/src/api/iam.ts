@@ -107,6 +107,99 @@ export function getIamRolePermissions(roleName: string) {
   return apiRequest<RolePermissionsResponse>(buildIamRolePermissionsPath(roleName));
 }
 
+export type ScopeOp = "in" | "not_in" | "eq";
+
+export type ScopeConstraint = {
+  dimension: string;
+  op: ScopeOp;
+  values: string[];
+};
+
+export type Scope = ScopeConstraint[];
+
+export type PermissionSource = {
+  kind: "role" | "grant";
+  ref: string;
+  scope?: Scope;
+};
+
+export type Capability = {
+  permission: string;
+  resource: string;
+  action: string;
+  group: string;
+  description?: string;
+};
+
+export type MatrixCellState = "all" | "partial" | "none";
+
+export type MatrixCell = {
+  state: MatrixCellState;
+  scope?: Scope;
+  sources?: PermissionSource[];
+};
+
+export type MatrixRole = {
+  name: string;
+  rank: number;
+};
+
+export type CapabilityMatrix = {
+  roles: MatrixRole[];
+  capabilities: Capability[];
+  cells: Record<string, Record<string, MatrixCell>>;
+  warnings: { unscoped_grants: number };
+};
+
+export type CapabilityPrincipals = {
+  permission: string;
+  summary: { users: number; groups: number; label: string };
+  sources: PermissionSource[];
+};
+
+export type ResolveStep = {
+  source: "role" | "grant" | "profile";
+  ref: string;
+  capability: string;
+  scope?: Scope;
+  note?: string;
+};
+
+export type ResolveResult = {
+  allowed: boolean;
+  effect: "allow" | "deny";
+  expires_at?: string;
+  path: ResolveStep[];
+  denied_reason?: string;
+};
+
+export type ResolveCapabilityRequest = {
+  user_id: string;
+  capability: string;
+  resource_ref?: string;
+};
+
+export function listCapabilities() {
+  return apiRequest<{ items: Capability[] }>("/api/v1/iam/capabilities");
+}
+
+export function getCapabilityMatrix() {
+  return apiRequest<CapabilityMatrix>("/api/v1/iam/matrix");
+}
+
+export function getCapabilityPrincipals(permission: string) {
+  return apiRequest<CapabilityPrincipals>(
+    `/api/v1/iam/capabilities/${encodeURIComponent(permission)}/principals`,
+  );
+}
+
+export function resolveCapability(req: ResolveCapabilityRequest) {
+  return apiRequest<ResolveResult>("/api/v1/iam/resolve", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
 export function bindRoleToUser(userID: string, roleName: string) {
   return apiRequest<IamUserIdentity>(buildIamUserRolesPath(userID), {
     method: "POST",

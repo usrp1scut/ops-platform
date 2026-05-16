@@ -41,6 +41,10 @@ func (h *AdminHandler) Routes() chi.Router {
 	r.With(h.withReadAuth).Get("/users/{userID}", h.GetUserIdentity)
 	r.With(h.withReadAuth).Get("/roles", h.ListRoles)
 	r.With(h.withReadAuth).Get("/roles/{roleName}/permissions", h.GetRolePermissions)
+	r.With(h.withReadAuth).Get("/capabilities", h.ListCapabilities)
+	r.With(h.withReadAuth).Get("/capabilities/{permission}/principals", h.CapabilityPrincipals)
+	r.With(h.withReadAuth).Get("/matrix", h.CapabilityMatrix)
+	r.With(h.withReadAuth).Post("/resolve", h.ResolveCapability)
 	r.With(h.withReadAuth).Get("/oidc-config", h.GetOIDCSettings)
 	r.With(h.withWriteAuth).Put("/oidc-config", h.UpdateOIDCSettings)
 	r.With(h.withWriteAuth).Post("/oidc-config/test", h.TestOIDCSettings)
@@ -114,6 +118,66 @@ func (h *AdminHandler) GetRolePermissions(w http.ResponseWriter, r *http.Request
 		"role_name":   roleName,
 		"permissions": permissions,
 	})
+}
+
+func (h *AdminHandler) ListCapabilities(w http.ResponseWriter, r *http.Request) {
+	items, err := h.repo.ListCapabilities(r.Context())
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *AdminHandler) CapabilityMatrix(w http.ResponseWriter, r *http.Request) {
+	matrix, err := h.repo.CapabilityMatrix(r.Context())
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, matrix)
+}
+
+func (h *AdminHandler) CapabilityPrincipals(w http.ResponseWriter, r *http.Request) {
+	permission := strings.TrimSpace(chi.URLParam(r, "permission"))
+	if permission == "" {
+		httpx.WriteError(w, http.StatusBadRequest, "permission is required")
+		return
+	}
+	result, err := h.repo.CapabilityPrincipals(r.Context(), permission)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandler) ResolveCapability(w http.ResponseWriter, r *http.Request) {
+	var req ResolveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if strings.TrimSpace(req.UserID) == "" {
+		httpx.WriteError(w, http.StatusBadRequest, "user_id is required")
+		return
+	}
+	if strings.TrimSpace(req.Capability) == "" {
+		httpx.WriteError(w, http.StatusBadRequest, "capability is required")
+		return
+	}
+
+	result, err := h.repo.ResolveCapability(r.Context(), req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrUserNotFound), errors.Is(err, ErrCapabilityResourceNotFound):
+			httpx.WriteError(w, http.StatusNotFound, err.Error())
+		default:
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 func (h *AdminHandler) BindRole(w http.ResponseWriter, r *http.Request) {

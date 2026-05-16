@@ -1,4 +1,16 @@
-import type { IamRole, IamUser, RolePermission } from "../api/iam";
+import type { IamRole, IamUser, RolePermission, Scope } from "../api/iam";
+
+// formatScope renders a scope as the dense matrix label, e.g.
+// "env=default,dev · source=aws" or "env≠prod". Empty scope == unscoped.
+export function formatScope(scope: Scope | undefined): string {
+  if (!scope || scope.length === 0) return "all";
+  return scope
+    .map((c) => {
+      const op = c.op === "not_in" ? "≠" : "=";
+      return `${c.dimension}${op}${c.values.join(",")}`;
+    })
+    .join(" · ");
+}
 
 export type PermissionGroup = {
   actions: string[];

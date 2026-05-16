@@ -67,6 +67,45 @@ func scanGrant(row interface {
 	return g, nil
 }
 
+// AssetScopeAttrs returns the scope-relevant attributes (env, source) of an
+// asset for the capability evaluator. Raw SQL on cmdb_asset keeps bastion
+// decoupled from the cmdb package, mirroring iam.lookupAsset. A missing asset
+// returns ok=false (no error) so the gate falls back to the grant check
+// rather than hard-failing the connect path.
+func (r *Repository) AssetScopeAttrs(ctx context.Context, assetID string) (env, source string, ok bool, err error) {
+	row := r.db.QueryRowContext(ctx, `
+SELECT env, source FROM cmdb_asset
+WHERE deleted_at IS NULL AND id::text = $1
+LIMIT 1`, strings.TrimSpace(assetID))
+	if scanErr := row.Scan(&env, &source); scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return "", "", false, nil
+		}
+		return "", "", false, scanErr
+	}
+	return env, source, true, nil
+}
+
+// RequestAssetScopeAttrs returns the scope-relevant attributes (env, source)
+// of the asset a pending request targets, for scoping the approve decision.
+// ok=false (no error) when the request or its asset is gone, so the caller
+// falls back to the coarse permission rather than hard-failing.
+func (r *Repository) RequestAssetScopeAttrs(ctx context.Context, requestID string) (env, source string, ok bool, err error) {
+	row := r.db.QueryRowContext(ctx, `
+SELECT a.env, a.source
+FROM bastion_request br
+JOIN cmdb_asset a ON a.id = br.asset_id AND a.deleted_at IS NULL
+WHERE br.id = $1::uuid
+LIMIT 1`, strings.TrimSpace(requestID))
+	if scanErr := row.Scan(&env, &source); scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return "", "", false, nil
+		}
+		return "", "", false, scanErr
+	}
+	return env, source, true, nil
+}
+
 // FindActiveGrant returns the highest-expiring active grant for (user, asset)
 // or ErrGrantNotFound if none exists. Used by the ticket-issue gate, so
 // hot-path: the supporting index is idx_bastion_grant_active.

@@ -77,6 +77,46 @@ func RequirePermission(resource string, action string) func(http.Handler) http.H
 	}
 }
 
+// RequireScopedPermission gates a route on a permission AND the scope of the
+// concrete resource the request targets. attrsFrom resolves the resource's
+// scope attributes (e.g. env, source) from the request — typically after the
+// handler's resource id is known, so it is applied per-route by callers that
+// can identify the resource, not as a blanket middleware (a static middleware
+// cannot know which asset a request touches). It delegates to the same
+// Authorize evaluator as the /resolve endpoint, so enforcement and the
+// resolver can never disagree. attrsFrom returning (nil, nil) means "resource
+// not identifiable here" and falls back to the coarse unscoped check.
+func RequireScopedPermission(
+	resource string,
+	action string,
+	attrsFrom func(*http.Request) (ResourceAttrs, error),
+) func(http.Handler) http.Handler {
+	permission := resource + ":" + action
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			identity, ok := IdentityFromContext(r.Context())
+			if !ok {
+				httpx.WriteError(w, http.StatusUnauthorized, "missing identity context")
+				return
+			}
+			var attrs ResourceAttrs
+			if attrsFrom != nil {
+				resolved, err := attrsFrom(r)
+				if err != nil {
+					httpx.WriteError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				attrs = resolved
+			}
+			if identity.Authorize(permission, attrs).Allowed {
+				next.ServeHTTP(w, r)
+				return
+			}
+			httpx.WriteError(w, http.StatusForbidden, "permission denied")
+		})
+	}
+}
+
 func AuditMiddleware(repo *Repository) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
