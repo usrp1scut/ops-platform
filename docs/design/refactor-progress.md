@@ -23,6 +23,7 @@
 - 旧地址 `/portal/sessions?mode=audit` 现在会自动重定向到 `/portal/audit`，侧栏 Govern 分组下的 `Audit` 也从占位链接切换为真实路由。
 - 本阶段严格停在阶段 2：未提前实现阶段 2.5 的多会话标签页，也未扩展到新的 Connect 页面或后端接口调整。
 - 验证：`cd web && npm run typecheck`、`cd web && npm run build` 通过；浏览器手测确认旧路径重定向、`Open Audit →` 跳转、Audit 表格与 `Inspect` 录屏预览均可用。
+- 回填更正（记于 2026-05-16，事实早于本条）：阶段 2.5 多会话标签页**已实现**，落地于 `fdb2ff7 feat(web): turn Sessions Live and Assets pages into real workspaces`（2026-05-12，早于本进度文档撰写）。`SessionsPage` 现为 `liveSessions: LiveSession[]` + `activeLiveID` 的并发多会话工作区：每会话一个 `live-session-tabs` 标签可切换/关闭，`live-session-stage` 以 `hidden` 切换渲染各 pane，关闭当前标签自动跳 `next[0]`。即"阶段 2.5"非长期延后，后续待办清单不应再列此项。
 
 ## 2026-05-16 · 阶段 3：Connect 新页
 
