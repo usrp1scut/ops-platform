@@ -1,7 +1,7 @@
 # Frontend Refactor Plan (V2)
 
 Date: 2026-05-02
-Status: Proposed
+Status: Done (executed — portal moved to `web/`, ops-api is API-only)
 Audience: platform engineers, frontend maintainers, backend maintainers
 
 ## 1. Context

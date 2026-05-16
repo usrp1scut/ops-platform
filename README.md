@@ -183,7 +183,7 @@ This is the original v1 subset and is no longer exhaustive — the new
 endpoints added with bastion, sessions, connectivity, host keys, keypairs,
 asset relations, probe-run, and VPC proxy promote/demote are not all
 listed here. The authoritative client-facing inventory lives in
-`docs/design/frontend-migration-inventory.md`.
+`docs/design/archive/frontend-migration-inventory.md`.
 
 - `GET /auth/oidc/login`
 - `GET /auth/oidc/login?next=/portal/`
@@ -251,9 +251,9 @@ Sign-in flow is the same on both:
 Design references:
 
 - Core platform architecture: `docs/design/ops-platform-v0.3.md`
-- Frontend portal design (legacy v1): `docs/design/frontend-portal-v1.md`
-- Frontend refactor (current): `docs/design/frontend-refactor-v2.md`
-- Frontend baseline inventory: `docs/design/frontend-migration-inventory.md`
+- Frontend portal design (legacy v1, archived): `docs/design/archive/frontend-portal-v1.md`
+- Frontend refactor (done): `docs/design/frontend-refactor-v2.md`
+- Frontend baseline inventory (archived): `docs/design/archive/frontend-migration-inventory.md`
 - New portal source: `web/README.md`
 
 ## CMDB x Bastion integration (v1)

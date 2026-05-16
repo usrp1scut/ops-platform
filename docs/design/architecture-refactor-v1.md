@@ -1,6 +1,7 @@
 # Ops Platform 架构改造设计文档（V1）
 
 Date: 2026-04-26
+Status: Done (executed — decisions recorded in `docs/adr/` 0001–0010)
 Author: Codex + Team
 Scope: 后端服务边界重构、模块依赖收敛、前端门户可维护性治理（不改变产品功能范围）
 
