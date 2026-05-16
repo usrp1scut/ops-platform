@@ -12,7 +12,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { useAuth } from "../../features/auth/AuthProvider";
@@ -21,25 +21,48 @@ type NavItem = {
   to: string;
   label: string;
   icon: LucideIcon;
+  badge?: string;
   end?: boolean;
+  isAlias?: boolean;
+  matchesSearch?: (search: string) => boolean;
 };
 
-const workspaceNav: NavItem[] = [
+const operateNav: NavItem[] = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/cmdb", label: "CMDB", icon: Database },
-  { to: "/sessions", label: "Sessions", icon: SquareTerminal },
+  { to: "/cmdb", label: "Connect", icon: Database, badge: "new", isAlias: true },
+  {
+    to: "/sessions",
+    label: "Sessions",
+    icon: SquareTerminal,
+    matchesSearch: (search) => new URLSearchParams(search).get("mode") !== "audit",
+  },
   { to: "/access", label: "Access", icon: KeyRound },
+];
+
+const inventoryNav: NavItem[] = [
+  { to: "/cmdb", label: "CMDB", icon: Database },
   { to: "/connectivity", label: "Connectivity", icon: Network },
 ];
 
-const platformNav: NavItem[] = [
-  { to: "/aws", label: "AWS", icon: Cloud },
+const governNav: NavItem[] = [
   { to: "/iam", label: "IAM", icon: UsersRound },
+  {
+    to: "/sessions?mode=audit",
+    label: "Audit",
+    icon: Activity,
+    matchesSearch: (search) => new URLSearchParams(search).get("mode") === "audit",
+  },
+  { to: "/aws", label: "AWS", icon: Cloud },
   { to: "/oidc", label: "OIDC", icon: ShieldCheck },
+];
+
+const accountNav: NavItem[] = [
   { to: "/profile", label: "Profile", icon: UserRound },
 ];
 
 function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
+  const location = useLocation();
+
   return (
     <div className="nav-group">
       <div className="nav-group-title">{title}</div>
@@ -50,10 +73,28 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
             key={item.to}
             to={item.to}
             end={item.end}
-            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+            className={({ isActive }) => {
+              const matchesSearch = item.matchesSearch ? item.matchesSearch(location.search) : true;
+              const active = !item.isAlias && isActive && matchesSearch;
+
+              return `nav-link${active ? " active" : ""}`;
+            }}
           >
             <Icon size={18} aria-hidden="true" />
             <span>{item.label}</span>
+            {item.badge ? (
+              <span
+                className="status-pill tiny"
+                style={{
+                  marginLeft: "auto",
+                  borderColor: "var(--color-accent-border)",
+                  background: "var(--color-accent-bg)",
+                  color: "var(--color-accent-hover)",
+                }}
+              >
+                {item.badge}
+              </span>
+            ) : null}
           </NavLink>
         );
       })}
@@ -77,9 +118,13 @@ export function AppShell() {
           </div>
         </div>
         <nav className="side-nav" aria-label="Primary">
-          <NavGroup title="Workspace" items={workspaceNav} />
-          <NavGroup title="Platform" items={platformNav} />
+          <NavGroup title="Operate" items={operateNav} />
+          <NavGroup title="Inventory" items={inventoryNav} />
+          <NavGroup title="Govern" items={governNav} />
         </nav>
+        <div style={{ marginTop: "auto" }}>
+          <NavGroup title="Account" items={accountNav} />
+        </div>
       </aside>
 
       <div className="main-frame">
