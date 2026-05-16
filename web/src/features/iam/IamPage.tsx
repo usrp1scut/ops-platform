@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, KeyRound, RefreshCw, Search, ShieldAlert, UserPlus, UsersRound, X } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   bindRoleToUser,
@@ -47,9 +48,14 @@ export function IamPage() {
   const canReadIAM = auth.can("iam.user:read");
   const canWriteIAM = auth.can("iam.user:write");
   const iamPermissions = (auth.identity?.permissions || []).filter((permission) => permission.startsWith("iam.user:"));
-  const [view, setView] = useState<IamView>("capabilities");
+  const [searchParams] = useSearchParams();
+  // Deep link from Audit ("open this user in IAM"): /iam?user=<id>.
+  // The capabilities matrix has no per-user panel, so a user deep link
+  // lands on the directory view with that user pre-selected.
+  const deepLinkUserID = searchParams.get("user") || "";
+  const [view, setView] = useState<IamView>(deepLinkUserID ? "directory" : "capabilities");
   const [userSearch, setUserSearch] = useState("");
-  const [selectedUserID, setSelectedUserID] = useState("");
+  const [selectedUserID, setSelectedUserID] = useState(deepLinkUserID);
   const [selectedRoleName, setSelectedRoleName] = useState("");
   const [roleToBind, setRoleToBind] = useState("");
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);

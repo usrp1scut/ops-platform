@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ShieldAlert } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import {
   getCapabilityMatrix,
@@ -11,6 +12,7 @@ import {
   type ResolveResult,
 } from "../../api/iam";
 import { PanelState } from "../../components/PanelState";
+import { buildAuditSearch } from "../../lib/launch";
 import { formatScope, iamUserLabel } from "../../lib/iam";
 import { useAuth } from "../auth/AuthProvider";
 
@@ -289,6 +291,15 @@ export function CapabilityMatrix() {
 
           {resolveResult ? (
             <div className="stack-1" style={{ marginTop: 12 }}>
+              {resolveUserID ? (
+                <Link
+                  className="table-link"
+                  to={`/audit${buildAuditSearch({ userID: resolveUserID })}`}
+                  title="See this user's recorded sessions"
+                >
+                  See this user&rsquo;s sessions &rarr;
+                </Link>
+              ) : null}
               {resolveResult.expires_at ? (
                 <p className="muted" style={{ margin: 0 }}>
                   Expires: {new Date(resolveResult.expires_at).toLocaleString()}

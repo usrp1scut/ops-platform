@@ -21,7 +21,10 @@ function SessionsRoute() {
   const mode = new URLSearchParams(location.search).get("mode");
 
   if (mode === "audit") {
-    return <Navigate to="/audit" replace />;
+    const params = new URLSearchParams(location.search);
+    params.delete("mode");
+    const query = params.toString();
+    return <Navigate to={query ? `/audit?${query}` : "/audit"} replace />;
   }
 
   return <SessionsPage />;

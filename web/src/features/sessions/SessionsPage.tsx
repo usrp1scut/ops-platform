@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  History,
   Play,
   ShieldCheck,
   X,
@@ -17,7 +18,7 @@ import {
 } from "../../api/cmdb";
 import { issueRdpTicket, issueTerminalTicket } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
-import { parseLaunchParams } from "../../lib/launch";
+import { buildAuditSearch, parseLaunchParams } from "../../lib/launch";
 import { useAuth } from "../auth/AuthProvider";
 import { AssetRail } from "./AssetRail";
 import { RdpSessionPane, type LiveRDPStatus } from "./RdpSessionPane";
@@ -358,6 +359,13 @@ export function SessionsPage() {
                           <span className="live-session-tab-err">{errorBlurb}</span>
                         ) : null}
                       </button>
+                      <Link
+                        className="icon-button compact-icon"
+                        to={`/audit${buildAuditSearch({ assetID: session.asset.id })}`}
+                        title={`Audit history for ${session.asset.name || session.asset.id}`}
+                      >
+                        <History size={14} aria-hidden="true" />
+                      </Link>
                       <button
                         type="button"
                         className="icon-button compact-icon"

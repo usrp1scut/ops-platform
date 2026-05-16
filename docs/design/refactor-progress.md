@@ -71,3 +71,19 @@
 - 严格停在 4c：未改后端，未做跨页深链（Sessions/Audit/IAM 互跳属后续）。
 - 验证：worktree 缺 `web/node_modules`，已将其 junction 到主仓库 `B:\code\ops-platform\web\node_modules`（package.json 与主仓库逐字节一致；node_modules 已被 gitignore，不影响 diff）后，`npm run typecheck`、`npm run build` 均通过。本环境无浏览器，未做手测；建议 review 时在浏览器确认矩阵渲染、cell 选中/检查面板、解析器卡片，以及 `Users & roles` 视图回归。
 - 验证：`go build ./...` 通过；`go vet ./...` 通过；`internal/iam`、`internal/bastion` 无既有测试文件（与现状一致，未新增）。本环境无数据库/浏览器，未做运行期手测；建议 review 时跑迁移 0022 并验证：四个新端点、bastion 取票路径回归（无 scope 数据时连接行为应与改动前完全一致）、以及给某角色配 scoped `bastion.session:ssh` 后的分支 ②。
+
+## 2026-05-16 · 阶段 5：跨页深链（Sessions / Audit / IAM 互跳，纯前端）
+
+- 背景：阶段 3/4c 都点名"跨页深链属后续"。当前对象（资产 / 用户）在页面间没有连贯身份传递——`AuditPage` 的筛选只能手填 UUID、不读 URL；`IamPage` 选中用户也不读 URL；跨页只能人肉抄 UUID。本阶段把"发现问题→追溯权限→回看行为"的安全运维闭环用深链缝起来，零后端改动。
+- 使能改动（A）：
+  - `web/src/lib/launch.ts` 新增 `buildAuditSearch({assetID,userID,status})`，与既有 `buildLaunchSearch` 同风格集中参数名（`asset`/`user`/`status`，与 launch 的 `launch`/`protocol` 刻意区分；`status=all` 省略以保持链接短）。
+  - `AuditPage`：新增 `useSearchParams` 同步 effect，挂载与导航时把 `asset`/`user`/`status` 作为筛选初值（status 仅接受 active/closed/error，否则 all；`user` 仍受既有 `canReadAllSessions` 经 `effectiveUserID` 门控）。手动改筛选不写 URL，故 effect 只在真实导航时触发，不会覆盖用户的页内修改。
+  - `IamPage`：惰性初始化——`?user=<id>` 时 `selectedUserID` 预选该用户并把 `view` 切到 `directory`（capabilities 矩阵无 per-user 面板）。
+  - `router.tsx`：`?mode=audit` 重定向到 `/audit` 时保留其余 query（原先直接丢）。
+- 三条互跳链接（B）：
+  - Sessions Live → Audit：每个 live session tab 在关闭按钮前新增 `History` 图标链 → `/audit?asset=<asset.id>`；无上下文的 `Open Audit →` 保留。
+  - Audit → IAM / Audit：审计表 User 单元格 → `/iam?user=<user_id>`，Asset 单元格 → `/audit?asset=<asset_id>`（同页经 effect 重筛、可分享）；id 缺失时回退为纯文本。
+  - IAM 解析器 → Audit：resolve 出结果且选了用户时新增 "See this user's sessions →" → `/audit?user=<resolveUserID>`。
+  - 新增 `.table-link` 样式（`app.css`）：常态继承文字色，hover/focus 显 accent + 下划线，用于表格内不破坏密度的链接。
+- 严格停在阶段 5：未改后端，未新增接口；除上述链接外未改 `features/` 既有页面逻辑（`AuditPage` 筛选改为 URL-seed 但 Apply/Reset 行为不变）；阶段 2.5 多会话标签页、Connect 右侧卡片真实数据、IAM 过滤 pill 仍属后续。
+- 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（bundle >500kB 警告为既有，与本次无关）。本环境无浏览器，未做手测；建议 review 时在浏览器确认：① live tab 的 Audit 图标跳转并按资产预筛；② 审计表点用户名落到 IAM directory 视图并预选该用户、点资产名同页重筛；③ 解析器结果的 "See this user's sessions →" 落到按用户预筛的 Audit；④ 旧 `/portal/sessions?mode=audit&asset=…` 重定向后仍带 query；⑤ 直接打开 `/audit`（无参数）回归与改动前一致。

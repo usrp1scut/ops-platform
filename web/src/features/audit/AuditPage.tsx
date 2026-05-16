@@ -1,10 +1,12 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, MonitorPlay, RefreshCw, Search, ShieldCheck, SquareTerminal, Timer, Video } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { getSessionRecording, listSessions, type SessionAuditRecord } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
+import { buildAuditSearch } from "../../lib/launch";
 import {
   filterSessionsByStatus,
   formatBytes,
@@ -79,6 +81,25 @@ export function AuditPage() {
   );
   const [filters, setFilters] = useState<SessionFilters>(emptyFilters);
   const [draftFilters, setDraftFilters] = useState<SessionFilters>(emptyFilters);
+  const [searchParams] = useSearchParams();
+  // Seed (and re-seed on navigation) the filters from the URL so other
+  // pages can deep-link into a pre-filtered audit view, e.g.
+  // /audit?asset=<id> from a live session or ?user=<id> from IAM.
+  // Manual filter edits don't touch the URL, so this only fires on an
+  // actual navigation and never clobbers a user's in-page changes.
+  useEffect(() => {
+    const asset = searchParams.get("asset");
+    const user = searchParams.get("user");
+    const statusParam = searchParams.get("status");
+    if (asset === null && user === null && statusParam === null) return;
+    const status: SessionStatusFilter =
+      statusParam === "active" || statusParam === "closed" || statusParam === "error"
+        ? statusParam
+        : "all";
+    const next: SessionFilters = { assetID: asset || "", status, userID: user || "" };
+    setFilters(next);
+    setDraftFilters(next);
+  }, [searchParams]);
   const [recordingFeedback, setRecordingFeedback] = useState<ActionFeedback | null>(null);
   const [recordingPreview, setRecordingPreview] = useState<RecordingPreviewState | null>(null);
   const effectiveUserID = canReadAllSessions ? filters.userID.trim() : "";
@@ -324,11 +345,31 @@ export function AuditPage() {
                       {session.ended_at ? <div className="muted">ended {formatDateTime(session.ended_at)}</div> : null}
                     </td>
                     <td>
-                      <strong>{session.user_name || session.user_id}</strong>
+                      {session.user_id ? (
+                        <Link
+                          className="table-link"
+                          to={`/iam?user=${encodeURIComponent(session.user_id)}`}
+                          title="Open this user in IAM"
+                        >
+                          <strong>{session.user_name || session.user_id}</strong>
+                        </Link>
+                      ) : (
+                        <strong>{session.user_name || session.user_id}</strong>
+                      )}
                       <div className="muted">{session.user_id}</div>
                     </td>
                     <td>
-                      <strong>{session.asset_name || session.asset_id}</strong>
+                      {session.asset_id ? (
+                        <Link
+                          className="table-link"
+                          to={`/audit${buildAuditSearch({ assetID: session.asset_id })}`}
+                          title="Filter audit to this asset"
+                        >
+                          <strong>{session.asset_name || session.asset_id}</strong>
+                        </Link>
+                      ) : (
+                        <strong>{session.asset_name || session.asset_id}</strong>
+                      )}
                       <div className="muted">{session.asset_id}</div>
                       {session.proxy_name ? <div className="muted">via {session.proxy_name}</div> : null}
                     </td>

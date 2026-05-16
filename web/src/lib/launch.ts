@@ -145,6 +145,25 @@ export function buildLaunchSearch(spec: LaunchSpec): string {
   return `?${params.toString()}`;
 }
 
+// Cross-page deep-link target for the Audit page. Param names are kept
+// distinct from the launch params (`launch`/`protocol`) so a single URL
+// can't be ambiguous, and `status` is omitted when it's the default so
+// links stay short and shareable.
+export type AuditQuery = {
+  assetID?: string;
+  userID?: string;
+  status?: string;
+};
+
+export function buildAuditSearch(query: AuditQuery): string {
+  const params = new URLSearchParams();
+  if (query.assetID) params.set("asset", query.assetID);
+  if (query.userID) params.set("user", query.userID);
+  if (query.status && query.status !== "all") params.set("status", query.status);
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
+
 // Read the (assetID, protocol) tuple from a URLSearchParams instance and
 // return null if either field is missing or the protocol isn't one of the
 // supported values. The Sessions page consumes this on mount to auto-fire
