@@ -4,3 +4,6 @@ dist/
 *.log
 
 .env.local
+
+# Local design-review screenshots may contain internal asset names, IPs, or account ids.
+docs/design/assets/claude-design/

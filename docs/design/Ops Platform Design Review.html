@@ -1,0 +1,1627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Ops Platform — IA & Redesign Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --surface-2: #f3f4f6;
+    --fg: #18181b;
+    --fg-muted: #5b6068;
+    --fg-subtle: #8a8e96;
+    --border: #e4e6ea;
+    --border-strong: #cdd0d6;
+    --accent: #0d9488;
+    --accent-hover: #0f766e;
+    --accent-bg: rgba(13, 148, 136, 0.08);
+    --accent-border: rgba(13, 148, 136, 0.28);
+    --success-fg: #15803d;
+    --success-bg: #f0fdf4;
+    --success-border: #bbf7d0;
+    --warn-fg: #b45309;
+    --warn-bg: #fef3c7;
+    --warn-border: #fde68a;
+    --danger-fg: #b91c1c;
+    --danger-bg: #fef2f2;
+    --danger-border: #fecaca;
+    --info-fg: #1d4ed8;
+    --info-bg: #eff6ff;
+    --info-border: #bfdbfe;
+    --sidebar-bg: #18181b;
+    --sidebar-fg: #c9ced4;
+    --sidebar-fg-active: #ffffff;
+    --sidebar-active-bg: rgba(13, 148, 136, 0.18);
+    --sidebar-active-border: rgba(13, 148, 136, 0.45);
+    --sidebar-section-fg: #6b7178;
+    --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  html, body { margin: 0; padding: 0; background: #0b0c0d; font-family: var(--font-sans); color: var(--fg); }
+  deck-stage { --slide-w: 1920px; --slide-h: 1080px; }
+  section {
+    width: 1920px; height: 1080px;
+    background: var(--bg);
+    box-sizing: border-box;
+    overflow: hidden;
+    position: relative;
+    display: block;
+  }
+  /* ---------- typography ---------- */
+  .eyebrow { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-subtle); font-weight: 600; }
+  h1.title { font-size: 88px; line-height: 1.02; letter-spacing: -0.025em; font-weight: 700; margin: 0; color: var(--fg); }
+  h2.title { font-size: 56px; line-height: 1.05; letter-spacing: -0.022em; font-weight: 700; margin: 0; color: var(--fg); }
+  h3.title { font-size: 36px; line-height: 1.1; letter-spacing: -0.018em; font-weight: 600; margin: 0; color: var(--fg); }
+  .lede { font-size: 26px; line-height: 1.45; color: var(--fg-muted); max-width: 1100px; text-wrap: pretty; }
+  .small { font-size: 16px; line-height: 1.5; color: var(--fg-muted); }
+  .micro { font-size: 13px; line-height: 1.4; color: var(--fg-subtle); }
+  .mono { font-family: var(--font-mono); }
+
+  /* ---------- layout ---------- */
+  .slide-pad { padding: 80px 96px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 36px; }
+  .slide-pad-tight { padding: 56px 72px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; }
+  .row { display: flex; gap: 24px; }
+  .col { display: flex; flex-direction: column; gap: 24px; }
+  .grow { flex: 1; min-width: 0; min-height: 0; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+
+  /* ---------- chrome on cover ---------- */
+  .cover {
+    background: linear-gradient(180deg, #0f1012 0%, #18181b 100%);
+    color: #f7f7f9;
+  }
+  .cover .slide-pad { padding: 110px 120px; gap: 48px; justify-content: space-between; }
+  .cover .eyebrow { color: #8a8e96; }
+  .cover h1.title { color: #ffffff; font-size: 124px; }
+  .cover .lede { color: #c9ced4; max-width: 1300px; }
+  .cover .meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; padding-top: 32px; border-top: 1px solid #2a2d33; }
+  .cover .meta .k { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #6b7178; }
+  .cover .meta .v { font-size: 18px; color: #e6e8eb; margin-top: 6px; }
+  .cover .brand { display: flex; align-items: center; gap: 14px; }
+  .cover .brand-mark { width: 44px; height: 44px; border-radius: 10px; background: var(--accent); display: grid; place-items: center; font-weight: 700; color: #042f2e; font-size: 18px; letter-spacing: -0.02em; }
+  .cover .brand-name { font-weight: 600; font-size: 18px; color: #f7f7f9; }
+  .cover .brand-sub { font-size: 13px; color: #8a8e96; }
+
+  /* ---------- cards ---------- */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px; }
+  .card.tight { padding: 18px; border-radius: 8px; }
+  .card.flat { background: var(--surface-2); border-color: transparent; }
+  .card-h { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+  .card-eyebrow { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-subtle); font-weight: 600; }
+  .card-title { font-size: 20px; font-weight: 600; color: var(--fg); margin: 2px 0 0; }
+
+  /* ---------- pills ---------- */
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); }
+  .pill.accent { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent-hover); }
+  .pill.success { background: var(--success-bg); border-color: var(--success-border); color: var(--success-fg); }
+  .pill.warn { background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn-fg); }
+  .pill.danger { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-fg); }
+  .pill.info { background: var(--info-bg); border-color: var(--info-border); color: var(--info-fg); }
+  .pill.dark { background: #18181b; border-color: #2a2d33; color: #c9ced4; }
+
+  /* ---------- numbered issue ---------- */
+  .issue { display: grid; grid-template-columns: 64px 1fr auto; gap: 24px; align-items: start; padding: 22px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+  .issue .num { font-family: var(--font-mono); font-size: 36px; font-weight: 500; color: var(--fg-subtle); line-height: 1; }
+  .issue .body h4 { margin: 0 0 8px; font-size: 22px; font-weight: 600; color: var(--fg); letter-spacing: -0.01em; }
+  .issue .body p { margin: 0; font-size: 15px; line-height: 1.55; color: var(--fg-muted); max-width: 1200px; }
+  .issue .body .ev { margin-top: 10px; font-size: 13px; color: var(--fg-subtle); font-family: var(--font-mono); }
+  .issue .sev { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+
+  /* ---------- IA option ---------- */
+  .ia { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 18px; height: 100%; box-sizing: border-box; }
+  .ia.recommended { border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-bg); }
+  .ia-head { display: flex; align-items: baseline; justify-content: space-between; }
+  .ia-h { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; color: var(--fg-subtle); }
+  .ia-name { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  .ia-sub { font-size: 15px; color: var(--fg-muted); line-height: 1.5; }
+  .ia-nav { display: flex; flex-direction: column; gap: 6px; padding: 14px; background: #18181b; border-radius: 8px; }
+  .ia-nav .grp { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #6b7178; padding: 6px 10px 2px; font-weight: 600; }
+  .ia-nav .item { font-size: 14px; color: #c9ced4; padding: 6px 10px; border-radius: 5px; display: flex; align-items: center; gap: 8px; }
+  .ia-nav .item.active { background: rgba(13, 148, 136, 0.18); color: #ffffff; border-left: 2px solid var(--accent); padding-left: 8px; }
+  .ia-nav .item .dot { width: 6px; height: 6px; border-radius: 50%; background: #6b7178; }
+  .ia-pro-con { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; font-size: 14px; }
+  .ia-pro-con h5 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-subtle); font-weight: 600; }
+  .ia-pro-con ul { margin: 0; padding-left: 16px; color: var(--fg-muted); line-height: 1.5; }
+  .ia-pro-con li { margin-bottom: 4px; }
+
+  /* ---------- app shell mock ---------- */
+  .app {
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    height: 100%;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -8px rgba(15,23,42,0.08);
+  }
+  .sidebar {
+    background: var(--sidebar-bg);
+    color: var(--sidebar-fg);
+    padding: 18px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: hidden;
+  }
+  .sidebar .brand { display: flex; align-items: center; gap: 10px; padding: 8px 8px 16px; }
+  .sidebar .brand-mark { width: 30px; height: 30px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; color: #042f2e; font-weight: 700; font-size: 13px; }
+  .sidebar .brand-name { font-weight: 600; color: #ffffff; font-size: 14px; line-height: 1.1; }
+  .sidebar .brand-sub { font-size: 11px; color: #8a8e96; }
+  .sidebar .grp { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--sidebar-section-fg); font-weight: 600; padding: 14px 10px 6px; }
+  .sidebar .nav { font-size: 13px; color: var(--sidebar-fg); display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; cursor: default; }
+  .sidebar .nav.active { background: var(--sidebar-active-bg); color: var(--sidebar-fg-active); border-left: 2px solid var(--accent); padding-left: 8px; }
+  .sidebar .nav .ic { width: 14px; height: 14px; opacity: 0.7; }
+  .sidebar .nav.active .ic { opacity: 1; }
+  .sidebar .nav-sub { font-size: 12px; padding: 5px 10px 5px 32px; color: #8a8e96; border-radius: 6px; }
+  .sidebar .nav-sub.active { color: #ffffff; background: rgba(255,255,255,0.04); }
+
+  .topbar { height: 52px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 24px; gap: 16px; background: var(--surface); }
+  .topbar .crumb { font-size: 13px; color: var(--fg-muted); display: flex; align-items: center; gap: 8px; }
+  .topbar .crumb .sep { color: var(--fg-subtle); }
+  .topbar .spacer { flex: 1; }
+
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .work { flex: 1; min-height: 0; overflow: hidden; background: var(--bg); padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+
+  /* ---------- buttons ---------- */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; border: 1px solid var(--border-strong); background: var(--surface); color: var(--fg); cursor: default; }
+  .btn.primary { background: var(--accent); color: #ffffff; border-color: var(--accent); }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--fg-muted); }
+  .btn.sm { padding: 4px 8px; font-size: 12px; border-radius: 5px; }
+
+  /* ---------- table ---------- */
+  table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.tbl th { text-align: left; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-subtle); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  table.tbl td { padding: 12px; border-bottom: 1px solid var(--border); color: var(--fg); vertical-align: middle; }
+  table.tbl tr:hover td { background: var(--bg); }
+  table.tbl .nm { font-weight: 500; color: var(--fg); }
+  table.tbl .sub { font-size: 11px; color: var(--fg-subtle); font-family: var(--font-mono); margin-top: 2px; }
+
+  /* ---------- icons (inline svg helpers) ---------- */
+  .ic { width: 14px; height: 14px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.6; }
+
+  /* ---------- flow storyboard ---------- */
+  .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px; }
+  .step { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .step-h { display: flex; align-items: center; gap: 10px; }
+  .step-num { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
+  .step-t { font-size: 14px; font-weight: 600; color: var(--fg); }
+  .step-d { font-size: 12px; color: var(--fg-muted); line-height: 1.5; }
+  .step-mock { background: var(--surface-2); border-radius: 6px; flex: 1; padding: 10px; font-size: 11px; line-height: 1.5; color: var(--fg-muted); display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow: hidden; }
+  .step-mock .row { display: flex; justify-content: space-between; align-items: center; padding: 5px 7px; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; }
+  .step-mock .row.active { border-color: var(--accent-border); background: var(--accent-bg); color: var(--accent-hover); }
+  .step-mock .row .l { font-family: var(--font-mono); font-size: 10px; color: var(--fg); }
+  .step-mock .row .r { font-size: 10px; color: var(--fg-subtle); }
+  .step-arrow { position: relative; }
+  .step-arrow::after { content: '→'; position: absolute; right: -16px; top: 50%; transform: translateY(-50%); color: var(--fg-subtle); font-size: 18px; }
+
+  /* ---------- footer page indicator ---------- */
+  .footer { position: absolute; bottom: 28px; left: 96px; right: 96px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--fg-subtle); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; }
+
+  /* ---------- variant-specific bits ---------- */
+  .session-rail { width: 360px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .term { background: #0b0c0d; color: #e6e8eb; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; padding: 16px 18px; height: 100%; overflow: hidden; }
+  .term .prompt { color: var(--accent); }
+  .term .dim { color: #6b7178; }
+  .term .ok { color: #4ade80; }
+  .term .warn { color: #fbbf24; }
+  .term-tabs { display: flex; gap: 4px; padding: 6px 6px 0; background: #131417; border-bottom: 1px solid #25272d; }
+  .term-tab { padding: 6px 12px; font-size: 12px; color: #97a0aa; border-radius: 6px 6px 0 0; background: transparent; display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); }
+  .term-tab.active { background: #0b0c0d; color: #e6e8eb; }
+  .term-tab .dot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; }
+
+  /* Asset tree */
+  .tree { padding: 8px 6px; font-size: 13px; }
+  .tree .grp-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-weight: 600; color: var(--fg); }
+  .tree .grp-head .count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-subtle); font-weight: 400; }
+  .tree .vpc { padding: 4px 8px 4px 24px; font-size: 11px; color: var(--fg-subtle); letter-spacing: 0.04em; font-family: var(--font-mono); }
+  .tree .leaf { padding: 7px 10px 7px 36px; border-radius: 5px; display: flex; flex-direction: column; gap: 1px; font-size: 13px; }
+  .tree .leaf:hover { background: var(--surface-2); }
+  .tree .leaf.selected { background: var(--accent-bg); border-left: 2px solid var(--accent); padding-left: 34px; }
+  .tree .leaf .ln { color: var(--fg); font-weight: 500; }
+  .tree .leaf .sn { font-family: var(--font-mono); font-size: 11px; color: var(--fg-subtle); }
+
+  /* keep last */
+  .glow { box-shadow: 0 0 0 2px var(--accent-border) inset; }
+  .dim { opacity: 0.55; }
+  .stack-2 > * + * { margin-top: 8px; }
+  .stack-4 > * + * { margin-top: 16px; }
+  .stack-1 > * + * { margin-top: 4px; }
+
+  /* tag chips for IA "evidence" cards */
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  /* permission grid for IAM redesign */
+  .perm-grid { display: grid; grid-template-columns: 220px repeat(4, 1fr); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+  .perm-grid .cell { padding: 10px 14px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 13px; min-height: 38px; display: flex; align-items: center; gap: 6px; }
+  .perm-grid .cell:last-child { border-right: none; }
+  .perm-grid .h { background: var(--surface-2); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-subtle); font-weight: 600; }
+  .perm-grid .role { font-weight: 600; }
+  .perm-grid .yes { background: var(--success-bg); color: var(--success-fg); justify-content: center; font-weight: 600; }
+  .perm-grid .no { color: var(--fg-subtle); justify-content: center; }
+  .perm-grid .partial { background: var(--warn-bg); color: var(--warn-fg); justify-content: center; font-weight: 500; font-size: 11px; }
+
+  /* call out boxes */
+  .callout { background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: 10px; padding: 18px 22px; color: var(--fg); }
+  .callout h4 { margin: 0 0 6px; font-size: 14px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-hover); }
+  .callout p { margin: 0; font-size: 16px; line-height: 1.55; color: var(--fg); }
+
+</style>
+
+<script type="application/json" id="speaker-notes">["","","","","","","","","","","","","",""]</script>
+</head>
+<body>
+<deck-stage>
+
+<!-- ============================================================ -->
+<!-- 01 — COVER                                                   -->
+<!-- ============================================================ -->
+<section data-screen-label="01 Cover" class="cover">
+  <div class="slide-pad">
+    <div class="brand">
+      <div class="brand-mark">OP</div>
+      <div>
+        <div class="brand-name">Ops Platform</div>
+        <div class="brand-sub">Operations console · /portal/</div>
+      </div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap: 32px;">
+      <div class="eyebrow">Design review · IA &amp; redesign proposal</div>
+      <h1 class="title">From backend modules<br/>to operator workflows.</h1>
+      <p class="lede">A focused IA and surface review of Ops Platform — five highest-impact problems, three alternative information architectures, a recommended direction, and redesigned screens for Sessions, asset discovery / quick connect, and IAM.</p>
+    </div>
+    <div class="meta">
+      <div><div class="k">Audience</div><div class="v">Product · UX · Frontend</div></div>
+      <div><div class="k">Scope</div><div class="v">IA · Sessions · CMDB · IAM</div></div>
+      <div><div class="k">Posture</div><div class="v">Dense · task-oriented · keep tables</div></div>
+      <div><div class="k">Date</div><div class="v">2026‑05‑16 · v1</div></div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 02 — TL;DR                                                   -->
+<!-- ============================================================ -->
+<section data-screen-label="02 TL;DR">
+  <div class="slide-pad">
+    <div class="row" style="align-items:baseline; gap: 28px;">
+      <div class="eyebrow">Executive summary</div>
+      <div class="micro">Read first · decision lives on this page</div>
+    </div>
+    <h2 class="title">The shell is good. The map is wrong.</h2>
+    <p class="lede">The visual language — dark sidebar, light surface, dense tables, drawers, teal accent — is already calm and correct for an internal console. The problem is the top-level map: it lists backend modules in roughly the order they were built, not the work an operator does. Three changes recover most of the value.</p>
+
+    <div class="grid-3" style="margin-top: 12px;">
+      <div class="card">
+        <div class="card-eyebrow">Change 01</div>
+        <div class="card-title">Promote workflow zones</div>
+        <p class="small" style="margin-top: 10px;">Reorganise the sidebar into <b>Operate</b> (Connect, Sessions, Access), <b>Inventory</b> (CMDB, Connectivity), <b>Govern</b> (IAM, Audit, AWS, OIDC). Three zones map onto three distinct mental tasks.</p>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Change 02</div>
+        <div class="card-title">Split Sessions Live vs Audit</div>
+        <p class="small" style="margin-top: 10px;">"Sessions Live" is an interactive workspace. "Audit" is a forensic table over closed sessions and recordings. They share data but not user intent — they should be siblings, not modes.</p>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Change 03</div>
+        <div class="card-title">Make permissions readable</div>
+        <p class="small" style="margin-top: 10px;">IAM today shows users → roles. It should show <b>capabilities</b>: who can SSH where, who can approve, who can administer. Roles stay; they become a way of editing the matrix, not the matrix itself.</p>
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top: 8px;">
+      <h4>Bottom line</h4>
+      <p>Keep the visual system. Re-cut the navigation around the four jobs that bring operators back to the product daily: <b>connect</b>, <b>monitor</b>, <b>review</b>, and <b>govern</b>. The rest of this deck shows what that produces.</p>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>02 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 03 — TOP 5 ISSUES                                            -->
+<!-- ============================================================ -->
+<section data-screen-label="03 Top issues">
+  <div class="slide-pad">
+    <div>
+      <div class="eyebrow">UX / IA findings — ranked by impact</div>
+      <h2 class="title" style="margin-top: 14px;">Five problems doing most of the damage.</h2>
+    </div>
+    <div class="col" style="gap: 14px;">
+
+      <div class="issue">
+        <div class="num">01</div>
+        <div class="body">
+          <h4>Navigation is organised by backend module, not operator job.</h4>
+          <p>The sidebar reads as a list of services (CMDB, Sessions, Access, Connectivity, AWS, IAM, OIDC, Profile). An operator opening the console to do their job has to translate "I need to SSH into a host" into "Sessions &gt; Live &gt; SSH tab". Every flow pays this translation tax.</p>
+          <div class="ev">evidence · 01-overview.png · 02-sessions-live.png · 04-cmdb-table.png</div>
+        </div>
+        <div class="sev"><span class="pill danger">Severity · high</span><span class="micro">Affects every entry</span></div>
+      </div>
+
+      <div class="issue">
+        <div class="num">02</div>
+        <div class="body">
+          <h4>Sessions Live and Sessions Audit are two products in one route.</h4>
+          <p>Live is a real-time, two-pane workspace (rail + terminal). Audit is a filterable, paginated forensic table. They share zero interaction patterns and yet sit behind the same tab switcher. Live feels cramped because Audit's chrome is right next to it; Audit feels buried because Live owns the URL.</p>
+          <div class="ev">evidence · 02-sessions-live.png · 03-sessions-audit.png</div>
+        </div>
+        <div class="sev"><span class="pill danger">Severity · high</span><span class="micro">Two jobs, one route</span></div>
+      </div>
+
+      <div class="issue">
+        <div class="num">03</div>
+        <div class="body">
+          <h4>"Find an asset and connect" is the most common task and the least surfaced.</h4>
+          <p>The flat List view in CMDB is great for inventory work but heavy for connect: 99 rows, four filter dropdowns, and the connect action is an inline icon inside a wide table. There's a Tree view tucked behind a toggle, but it isn't where the operator lands.</p>
+          <div class="ev">evidence · 04-cmdb-table.png · 02-sessions-live.png (rail is the right pattern, wrong location)</div>
+        </div>
+        <div class="sev"><span class="pill warn">Severity · high</span><span class="micro">Primary path</span></div>
+      </div>
+
+      <div class="issue">
+        <div class="num">04</div>
+        <div class="body">
+          <h4>IAM tells you about roles, but not about consequences.</h4>
+          <p>The current page shows a users list, a role list, and "effective permissions" in a collapsed footer. To answer "can Alice SSH into prod-eks-node-…?" an admin has to mentally join three tables. There is no view of <i>capability by resource</i>, which is the question that matters at audit time.</p>
+          <div class="ev">evidence · 07-iam.png</div>
+        </div>
+        <div class="sev"><span class="pill warn">Severity · medium‑high</span><span class="micro">Hard at audit</span></div>
+      </div>
+
+      <div class="issue">
+        <div class="num">05</div>
+        <div class="body">
+          <h4>The Overview page is informational, not operational.</h4>
+          <p>"API health · Online", "Identity · 1 roles", "Permissions · 12 grants" is true but inert — none of it leads to a next click. An operator who opens the app wants the answer to "what's active, what needs me, what changed since I left?" — a small set of live action surfaces, not status copy.</p>
+          <div class="ev">evidence · 01-overview.png</div>
+        </div>
+        <div class="sev"><span class="pill warn">Severity · medium</span><span class="micro">First impression</span></div>
+      </div>
+
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>03 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 04 — IA OPTION A                                             -->
+<!-- ============================================================ -->
+<section data-screen-label="04 IA option A">
+  <div class="slide-pad">
+    <div class="row" style="align-items:baseline; justify-content: space-between;">
+      <div>
+        <div class="eyebrow">Information architecture · Option A</div>
+        <h2 class="title" style="margin-top: 14px;">Three zones — operate, inventory, govern.</h2>
+      </div>
+      <span class="pill accent">Recommended</span>
+    </div>
+    <p class="lede">Group nav by the three categories of work an operator actually does. The sidebar still has the same number of items (~9), but the groups now describe intent. Every existing route survives — it just moves.</p>
+
+    <div class="row grow" style="gap: 28px;">
+      <div class="ia recommended" style="width: 320px; flex-shrink: 0;">
+        <div class="ia-head"><span class="ia-h">Sidebar</span><span class="pill dark">Dark chrome · unchanged</span></div>
+        <div class="ia-nav">
+          <div class="grp">Operate</div>
+          <div class="item active"><span class="dot" style="background:var(--accent);"></span> Connect</div>
+          <div class="item"><span class="dot"></span> Sessions</div>
+          <div class="item"><span class="dot"></span> Access</div>
+          <div class="grp">Inventory</div>
+          <div class="item"><span class="dot"></span> CMDB</div>
+          <div class="item"><span class="dot"></span> Connectivity</div>
+          <div class="grp">Govern</div>
+          <div class="item"><span class="dot"></span> IAM</div>
+          <div class="item"><span class="dot"></span> Audit</div>
+          <div class="item"><span class="dot"></span> AWS</div>
+          <div class="item"><span class="dot"></span> OIDC</div>
+        </div>
+        <div class="micro" style="margin-top:auto;">9 items · 3 groups · same chrome, new map.</div>
+      </div>
+
+      <div class="col grow" style="gap: 20px;">
+        <div class="grid-3" style="gap: 18px;">
+          <div class="card">
+            <div class="card-eyebrow">Operate · the daily zone</div>
+            <p class="small" style="margin-top: 8px;"><b>Connect</b> is the new front door — an asset tree + search + recent + one-click SSH/RDP. <b>Sessions</b> is purely live (active terminals/RDPs, my work right now). <b>Access</b> is request &amp; approval.</p>
+          </div>
+          <div class="card">
+            <div class="card-eyebrow">Inventory · the curation zone</div>
+            <p class="small" style="margin-top: 8px;"><b>CMDB</b> stays table‑first for asset administration: tagging, sources, lifecycle. <b>Connectivity</b> covers profiles, jump hosts, network paths. This zone is read mostly by admins doing inventory hygiene.</p>
+          </div>
+          <div class="card">
+            <div class="card-eyebrow">Govern · the audit &amp; identity zone</div>
+            <p class="small" style="margin-top: 8px;"><b>IAM</b> redesigned around capability matrix. <b>Audit</b> is the new home for closed sessions + recordings (lifted out of Sessions). <b>AWS</b>/<b>OIDC</b> are configuration surfaces grouped with the other admin work.</p>
+          </div>
+        </div>
+
+        <div class="ia-pro-con card" style="grid-template-columns: 1fr 1fr 1fr; display: grid;">
+          <div>
+            <h5>Pros</h5>
+            <ul>
+              <li>Sidebar groups already match an operator's day.</li>
+              <li>Easy to layer permissions: Operate is broad, Govern is narrow.</li>
+              <li>Allows separating Sessions Live from Audit cleanly.</li>
+            </ul>
+          </div>
+          <div>
+            <h5>Cons</h5>
+            <ul>
+              <li>"Connect" is a new top-level — needs an empty state &amp; onboarding hint.</li>
+              <li>Splitting Sessions/Audit means two routes to remember instead of one.</li>
+            </ul>
+          </div>
+          <div>
+            <h5>Migration cost</h5>
+            <ul>
+              <li>~1 sprint frontend: re-group sidebar, split route, lift audit table.</li>
+              <li>Backend untouched — pure IA + routing.</li>
+              <li>Old URLs redirectable; nothing breaks.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>04 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 05 — IA OPTIONS B & C                                        -->
+<!-- ============================================================ -->
+<section data-screen-label="05 IA options B C">
+  <div class="slide-pad">
+    <div>
+      <div class="eyebrow">Information architecture · alternatives considered</div>
+      <h2 class="title" style="margin-top: 14px;">Two we looked at and didn't pick.</h2>
+    </div>
+
+    <div class="grid-2 grow" style="gap: 28px;">
+
+      <!-- Option B -->
+      <div class="ia">
+        <div class="ia-head">
+          <div>
+            <div class="ia-h">Option B</div>
+            <div class="ia-name">Verb-led — Find · Run · Review · Manage</div>
+          </div>
+          <span class="pill">Considered</span>
+        </div>
+        <p class="ia-sub">A more radical re-cut: four verbs at the top, every existing surface lives under one of them. Find = asset discovery + quick connect. Run = live sessions + active access. Review = audit + recordings + access history. Manage = CMDB curation + IAM + AWS + OIDC.</p>
+        <div class="ia-nav">
+          <div class="grp">Workspaces</div>
+          <div class="item"><span class="dot"></span> Find</div>
+          <div class="item active"><span class="dot" style="background:var(--accent);"></span> Run</div>
+          <div class="item"><span class="dot"></span> Review</div>
+          <div class="item"><span class="dot"></span> Manage</div>
+        </div>
+        <div class="ia-pro-con">
+          <div>
+            <h5>Pros</h5>
+            <ul>
+              <li>Most "operator‑first" of the three.</li>
+              <li>Sidebar shrinks to 4 items — huge clarity win.</li>
+              <li>Nests well into a future mobile/sidekick view.</li>
+            </ul>
+          </div>
+          <div>
+            <h5>Cons</h5>
+            <ul>
+              <li>"Manage" becomes a junk drawer for everything administrative.</li>
+              <li>Existing URLs need wholesale remap (deep links break).</li>
+              <li>Approvers have a confusing home — "Review" pulls double duty for audit and approvals.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="micro" style="margin-top:auto;">Verdict · too aggressive for v1. Worth revisiting after telemetry on Option A.</div>
+      </div>
+
+      <!-- Option C -->
+      <div class="ia">
+        <div class="ia-head">
+          <div>
+            <div class="ia-h">Option C</div>
+            <div class="ia-name">Two surfaces — Console &amp; Admin</div>
+          </div>
+          <span class="pill">Considered</span>
+        </div>
+        <p class="ia-sub">Hard split between a day-to-day Console (Connect, Sessions, Access) and an Admin area (CMDB, IAM, AWS, OIDC, Connectivity, Audit). Top-bar switch between the two, like AWS Console ↔ IAM Console. Each side keeps its own sidebar.</p>
+        <div class="ia-nav">
+          <div class="grp">Surface</div>
+          <div class="item active"><span class="dot" style="background:var(--accent);"></span> Console — operate</div>
+          <div class="item"><span class="dot"></span> Admin — manage</div>
+          <div class="grp">Inside Console</div>
+          <div class="item"><span class="dot"></span> Connect · Sessions · Access</div>
+        </div>
+        <div class="ia-pro-con">
+          <div>
+            <h5>Pros</h5>
+            <ul>
+              <li>Strongest separation between operator and admin headspace.</li>
+              <li>Permission gating becomes one boundary, not nine.</li>
+              <li>Reduces chrome on the operator side dramatically.</li>
+            </ul>
+          </div>
+          <div>
+            <h5>Cons</h5>
+            <ul>
+              <li>"Where do I do this?" question every time you need both — frequent for power users.</li>
+              <li>Two sidebars to maintain.</li>
+              <li>Audit lives awkwardly: it's reviewed by both audiences.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="micro" style="margin-top:auto;">Verdict · right answer for a much larger team. Premature for the current user base.</div>
+      </div>
+
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>05 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 06 — RECOMMENDED + TRADEOFFS                                 -->
+<!-- ============================================================ -->
+<section data-screen-label="06 Recommendation">
+  <div class="slide-pad">
+    <div>
+      <div class="eyebrow">Recommendation</div>
+      <h2 class="title" style="margin-top: 14px;">Pick Option A. Bank the smaller wins.</h2>
+    </div>
+
+    <div class="row grow" style="gap: 28px;">
+      <div class="col" style="flex: 1.2; gap: 18px;">
+        <div class="card">
+          <div class="card-eyebrow">Why A</div>
+          <p class="small" style="margin-top: 6px;">Option A keeps every existing route. The change is purely how they're <i>grouped</i> in the sidebar and which one acts as the front door. That means we can ship the IA shift in a single sprint, redirect legacy URLs, and measure usage before committing to anything more radical (B or C).</p>
+        </div>
+        <div class="card">
+          <div class="card-eyebrow">What "Connect" is</div>
+          <p class="small" style="margin-top: 6px;">A new top-level surface backed by the same asset query the CMDB list runs. It defaults to the asset tree (env → vpc → host), promotes search to the header, recents at the top, and the action it offers is <b>SSH</b> or <b>RDP</b> — not "view detail". Detail still lives in CMDB.</p>
+        </div>
+        <div class="card">
+          <div class="card-eyebrow">What "Sessions" becomes</div>
+          <p class="small" style="margin-top: 6px;">Purely the live workspace. It loses the Audit tab. Tab strip at the top of the terminal area becomes proper session tabs (multiple concurrent SSH/RDP), not a Live/Audit switcher.</p>
+        </div>
+        <div class="card">
+          <div class="card-eyebrow">What "Audit" gains</div>
+          <p class="small" style="margin-top: 6px;">Its own route under Govern. Filters get more room. Recording inspector becomes a full page, not a row action. Cross-links into IAM (who used this grant?) and Access (was this request approved?).</p>
+        </div>
+      </div>
+
+      <div class="col" style="flex: 1; gap: 18px;">
+        <div class="card">
+          <div class="card-eyebrow">Tradeoffs we are accepting</div>
+          <ul class="small" style="margin: 8px 0 0; padding-left: 18px; line-height: 1.7;">
+            <li>One more top-level item in the sidebar (Audit) — softened by grouping.</li>
+            <li>"Connect" is similar enough to CMDB Tree view that some users will need a beat to learn the difference. We address this with a one‑liner on the empty state and a "view in CMDB" link on every detail.</li>
+            <li>Existing operators' muscle memory ("Sessions → Audit tab") breaks. We mitigate with a sticky deprecation note for 30 days and an automatic redirect.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-eyebrow">What this unlocks next</div>
+          <ul class="small" style="margin: 8px 0 0; padding-left: 18px; line-height: 1.7;">
+            <li>IAM redesign — capability matrix slots cleanly into the Govern group.</li>
+            <li>Overview page becomes a real action surface (active sessions, pending approvals, recent recordings) once Audit moves out.</li>
+            <li>Telemetry on the Operate group tells us whether we should later collapse to Option B.</li>
+          </ul>
+        </div>
+
+        <div class="callout">
+          <h4>Decision</h4>
+          <p>Adopt Option A in the next iteration. Re-evaluate against Option B after one quarter of usage data on the Operate group.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>06 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 07 — GLOBAL SHELL                                            -->
+<!-- ============================================================ -->
+<section data-screen-label="07 Global shell">
+  <div class="slide-pad-tight">
+    <div class="row" style="justify-content:space-between; align-items:baseline;">
+      <div>
+        <div class="eyebrow">Redesign · global shell</div>
+        <h3 class="title" style="margin-top:8px;">New sidebar, same chrome.</h3>
+      </div>
+      <span class="micro">Tokens · accent #0d9488 · sidebar #18181b · same as today</span>
+    </div>
+
+    <div class="app grow">
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">OP</div>
+          <div>
+            <div class="brand-name">Ops Platform</div>
+            <div class="brand-sub">Operations console</div>
+          </div>
+        </div>
+        <div class="grp">Operate</div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><path d="M4 12h16M4 6h16M4 18h10"/></svg> Overview</div>
+        <div class="nav active"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg> Connect</div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 20h8"/></svg> Sessions <span class="pill accent" style="margin-left:auto; font-size:10px; padding:1px 6px;">3</span></div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="9" r="3"/><path d="M14 14l5 5"/></svg> Access <span class="pill warn" style="margin-left:auto; font-size:10px; padding:1px 6px;">2</span></div>
+        <div class="grp">Inventory</div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/></svg> CMDB</div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6 8v3a3 3 0 003 3h6a3 3 0 003-3V8"/></svg> Connectivity</div>
+        <div class="grp">Govern</div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><circle cx="17" cy="11" r="2"/></svg> IAM</div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg> Audit</div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><path d="M4 12c0-4 4-7 8-7s8 3 8 7-4 7-8 7-8-3-8-7z"/></svg> AWS</div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3l9 4v6c0 5-3.5 8-9 8s-9-3-9-8V7z"/></svg> OIDC</div>
+        <div class="grp">Account</div>
+        <div class="nav"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg> Profile</div>
+      </div>
+
+      <!-- Main -->
+      <div class="main">
+        <div class="topbar">
+          <div class="crumb">
+            <svg class="ic" viewBox="0 0 24 24" style="color: var(--fg-subtle);"><path d="M3 12l2-2 7 7L22 7l2 2-12 12z"/></svg>
+            <span>Operations console</span>
+            <span class="sep">/</span>
+            <span style="color: var(--fg);">Operate</span>
+            <span class="sep">/</span>
+            <span style="color: var(--fg); font-weight: 500;">Connect</span>
+          </div>
+          <div class="spacer"></div>
+          <span class="pill">⌘K · Quick connect</span>
+          <span class="pill">Old portal</span>
+          <span class="pill dark"><svg class="ic" viewBox="0 0 24 24" style="color:#c9ced4;"><rect x="3" y="5" width="18" height="12" rx="2"/></svg> admin</span>
+        </div>
+        <div class="work" style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 20px; align-content:start;">
+
+          <div class="card" style="grid-column: span 4;">
+            <div class="card-h">
+              <div>
+                <div class="card-eyebrow">Group · Operate</div>
+                <div class="card-title">What changed in this surface</div>
+              </div>
+              <span class="pill accent">Connect · new front door</span>
+            </div>
+            <p class="small" style="margin: 6px 0 0;">The shell — dark sidebar, light surface, teal accent, top breadcrumb — is identical to today. The only change is the sidebar map: items are grouped under Operate / Inventory / Govern, and "Connect" promotes the asset tree to a first-class route. Existing routes keep working; legacy URLs redirect for one release.</p>
+          </div>
+
+          <div class="card">
+            <div class="card-eyebrow">Before</div>
+            <div class="card-title" style="font-size: 16px;">Flat list of 9 items</div>
+            <p class="small" style="margin-top: 8px;">Workspace (Overview, CMDB, Sessions, Access, Connectivity) and Platform (AWS, IAM, OIDC, Profile) — two groups that mean "user-facing" vs "config", which is not how operators think about their work.</p>
+          </div>
+          <div class="card">
+            <div class="card-eyebrow">After · group · Operate</div>
+            <div class="card-title" style="font-size: 16px;">The daily zone</div>
+            <p class="small" style="margin-top: 8px;">Overview · Connect · Sessions · Access. This is where the operator spends 80% of their session.</p>
+          </div>
+          <div class="card">
+            <div class="card-eyebrow">After · group · Inventory</div>
+            <div class="card-title" style="font-size: 16px;">The curation zone</div>
+            <p class="small" style="margin-top: 8px;">CMDB · Connectivity. Admin work — tagging, sources, network paths, connection profiles — has its own space.</p>
+          </div>
+          <div class="card">
+            <div class="card-eyebrow">After · group · Govern</div>
+            <div class="card-title" style="font-size: 16px;">The audit zone</div>
+            <p class="small" style="margin-top: 8px;">IAM · Audit · AWS · OIDC. Permissions, historical sessions, cloud onboarding, identity providers.</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>07 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 08 — SESSIONS LIVE REDESIGN                                  -->
+<!-- ============================================================ -->
+<section data-screen-label="08 Sessions live">
+  <div class="slide-pad-tight">
+    <div class="row" style="justify-content:space-between; align-items:baseline;">
+      <div>
+        <div class="eyebrow">Redesign · Sessions (Live only)</div>
+        <h3 class="title" style="margin-top:8px;">A workspace, not a tab.</h3>
+      </div>
+      <span class="micro">Audit lifted out · session tabs replace mode tabs · ⌘K for quick launch</span>
+    </div>
+
+    <div class="app grow">
+      <!-- Sidebar (collapsed visual) -->
+      <div class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">OP</div>
+          <div>
+            <div class="brand-name">Ops Platform</div>
+            <div class="brand-sub">Operations console</div>
+          </div>
+        </div>
+        <div class="grp">Operate</div>
+        <div class="nav">Overview</div>
+        <div class="nav">Connect</div>
+        <div class="nav active">Sessions <span class="pill accent" style="margin-left:auto; font-size:10px; padding:1px 6px;">3</span></div>
+        <div class="nav">Access</div>
+        <div class="grp">Inventory</div>
+        <div class="nav">CMDB</div>
+        <div class="nav">Connectivity</div>
+        <div class="grp">Govern</div>
+        <div class="nav">IAM</div>
+        <div class="nav">Audit</div>
+        <div class="nav">AWS</div>
+        <div class="nav">OIDC</div>
+      </div>
+
+      <div class="main">
+        <div class="topbar">
+          <div class="crumb">
+            <svg class="ic" viewBox="0 0 24 24" style="color: var(--fg-subtle);"><path d="M3 12l2-2 7 7L22 7l2 2-12 12z"/></svg>
+            <span>Operate</span><span class="sep">/</span><span style="color: var(--fg); font-weight: 500;">Sessions</span><span class="sep">·</span>
+            <span class="pill success">3 active</span>
+          </div>
+          <div class="spacer"></div>
+          <span class="btn sm">Launch by ID</span>
+          <span class="btn sm primary">+ New session</span>
+          <span class="pill dark">admin</span>
+        </div>
+
+        <div class="work" style="padding: 0; gap: 0; flex-direction: row;">
+          <!-- Live session list rail -->
+          <div class="session-rail">
+            <div style="padding: 14px 16px; border-bottom: 1px solid var(--border); display:flex; align-items:center; justify-content: space-between;">
+              <div>
+                <div class="card-eyebrow">Live sessions</div>
+                <div style="font-size: 14px; font-weight: 600; margin-top: 2px;">3 active · 0 idle</div>
+              </div>
+              <span class="pill">auto · 5s</span>
+            </div>
+            <div style="padding: 8px; display: flex; flex-direction: column; gap: 4px; flex: 1; overflow: hidden;">
+
+              <div style="padding: 12px 14px; border-radius: 8px; background: var(--accent-bg); border: 1px solid var(--accent-border); display:flex; flex-direction: column; gap: 8px;">
+                <div style="display:flex; justify-content: space-between;">
+                  <span class="mono" style="font-size: 12px; font-weight: 600; color: var(--accent-hover);">ssh · ip-10-220-51-229</span>
+                  <span class="pill success" style="font-size: 10px;">live · 04:21</span>
+                </div>
+                <div class="micro mono">REDACTED-IP · default · ec2_instance</div>
+                <div style="display:flex; gap:6px;">
+                  <span class="pill" style="font-size:10px;">in 2.1 KB</span>
+                  <span class="pill" style="font-size:10px;">out 14.7 KB</span>
+                  <span class="pill" style="font-size:10px;">rec ●</span>
+                </div>
+              </div>
+
+              <div style="padding: 12px 14px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border);">
+                <div style="display:flex; justify-content:space-between;">
+                  <span class="mono" style="font-size: 12px; font-weight: 600;">ssh · ip-10-220-44-184</span>
+                  <span class="pill success" style="font-size: 10px;">live · 01:08</span>
+                </div>
+                <div class="micro mono" style="margin-top: 4px;">REDACTED-IP · default · ec2_instance</div>
+              </div>
+
+              <div style="padding: 12px 14px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border);">
+                <div style="display:flex; justify-content:space-between;">
+                  <span class="mono" style="font-size: 12px; font-weight: 600;">rdp · winhost-prod-08</span>
+                  <span class="pill warn" style="font-size: 10px;">idle · 12:46</span>
+                </div>
+                <div class="micro mono" style="margin-top: 4px;">REDACTED-IP · prod · ec2_instance</div>
+              </div>
+
+              <div style="padding: 12px 14px; border-radius: 8px; border: 1px dashed var(--border-strong); color: var(--fg-subtle); font-size: 12px; text-align: center; margin-top: 8px;">
+                Idle slot — drop an asset from Connect, or ⌘K
+              </div>
+
+            </div>
+            <div style="padding: 14px 16px; border-top: 1px solid var(--border); display:flex; align-items:center; justify-content: space-between; background: var(--surface-2);">
+              <span class="micro">Audit · closed sessions</span>
+              <a style="font-size: 12px; color: var(--accent-hover); text-decoration: none; font-weight: 500;">Open Audit →</a>
+            </div>
+          </div>
+
+          <!-- Terminal area -->
+          <div style="flex: 1; min-width: 0; display:flex; flex-direction: column; background: #0b0c0d;">
+            <div class="term-tabs">
+              <div class="term-tab active"><span class="dot"></span> ip-10-220-51-229 · ssh</div>
+              <div class="term-tab"><span class="dot"></span> ip-10-220-44-184 · ssh</div>
+              <div class="term-tab"><span class="dot" style="background:#fbbf24;"></span> winhost-prod-08 · rdp</div>
+              <div style="flex:1;"></div>
+              <div class="term-tab" style="color:#6b7178;">+ new</div>
+            </div>
+            <div class="term" style="flex:1; overflow:hidden;">
+              <div><span class="dim"># connected via bastion · default/vpc-REDACTED</span></div>
+              <div><span class="dim"># recording → s3://ops-platform-rec/2026-05-16/95ba39b4...</span></div>
+              <div><span class="prompt">admin@ip-10-220-51-229:~$</span> sudo systemctl status nginx</div>
+              <div><span class="ok">● nginx.service</span> — A high performance web server and a reverse proxy server</div>
+              <div>&nbsp;&nbsp;&nbsp;&nbsp;Loaded: loaded (/lib/systemd/system/nginx.service; enabled; vendor preset: enabled)</div>
+              <div>&nbsp;&nbsp;&nbsp;&nbsp;Active: <span class="ok">active (running)</span> since Sat 2026-05-16 09:12:04 UTC; 4h 38min ago</div>
+              <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Docs: man:nginx(8)</div>
+              <div>&nbsp;&nbsp;&nbsp;Memory: 14.2M</div>
+              <div>&nbsp;&nbsp;&nbsp;&nbsp;CPU: 412ms</div>
+              <div>&nbsp;&nbsp;&nbsp;CGroup: /system.slice/nginx.service</div>
+              <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─1183 nginx: master process /usr/sbin/nginx -g daemon on; master_process on;</div>
+              <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─1184 nginx: worker process</div>
+              <div style="margin-top: 8px;"><span class="prompt">admin@ip-10-220-51-229:~$</span> tail -n 4 /var/log/nginx/access.log</div>
+              <div class="dim">REDACTED-IP - - [16/May/2026:13:50:08 +0000] "GET /healthz HTTP/1.1" 200 5 "-" "kube-probe/1.29"</div>
+              <div class="dim">REDACTED-IP - - [16/May/2026:13:50:09 +0000] "GET /api/v1/assets?limit=25 HTTP/1.1" 200 21824 "-" "ops-portal/1"</div>
+              <div class="dim">REDACTED-IP  - - [16/May/2026:13:50:10 +0000] "POST /api/v1/sessions HTTP/1.1" 201 312 "-" "ops-portal/1"</div>
+              <div class="dim">REDACTED-IP - - [16/May/2026:13:50:11 +0000] "GET /api/v1/iam/grants HTTP/1.1" 200 4128 "-" "ops-portal/1"</div>
+              <div style="margin-top: 8px;"><span class="prompt">admin@ip-10-220-51-229:~$</span> <span style="background:#e6e8eb; color:#0b0c0d;">&nbsp;</span></div>
+            </div>
+            <div style="border-top: 1px solid #25272d; background:#131417; padding: 8px 16px; display:flex; align-items:center; gap: 16px; color:#97a0aa; font-size: 11px; font-family: var(--font-mono);">
+              <span>recording ● 04:21</span>
+              <span>bytes in 2.1 KB · out 14.7 KB</span>
+              <span>latency 31ms</span>
+              <span style="flex:1;"></span>
+              <span>shift+ctrl+C copy · shift+ctrl+V paste · ctrl+\ disconnect</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>08 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 09 — AUDIT REDESIGN                                          -->
+<!-- ============================================================ -->
+<section data-screen-label="09 Audit">
+  <div class="slide-pad-tight">
+    <div class="row" style="justify-content:space-between; align-items:baseline;">
+      <div>
+        <div class="eyebrow">Redesign · Audit (lifted out of Sessions)</div>
+        <h3 class="title" style="margin-top:8px;">A forensic table that earns its space.</h3>
+      </div>
+      <span class="micro">Govern group · filter rail · recording inspector is a full page now</span>
+    </div>
+
+    <div class="app grow">
+      <div class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">OP</div>
+          <div><div class="brand-name">Ops Platform</div><div class="brand-sub">Operations console</div></div>
+        </div>
+        <div class="grp">Operate</div>
+        <div class="nav">Overview</div>
+        <div class="nav">Connect</div>
+        <div class="nav">Sessions</div>
+        <div class="nav">Access</div>
+        <div class="grp">Inventory</div>
+        <div class="nav">CMDB</div>
+        <div class="nav">Connectivity</div>
+        <div class="grp">Govern</div>
+        <div class="nav">IAM</div>
+        <div class="nav active">Audit</div>
+        <div class="nav">AWS</div>
+        <div class="nav">OIDC</div>
+      </div>
+
+      <div class="main">
+        <div class="topbar">
+          <div class="crumb">
+            <span>Govern</span><span class="sep">/</span><span style="color: var(--fg); font-weight: 500;">Audit</span><span class="sep">·</span>
+            <span style="color: var(--fg-muted);">Sessions &amp; recordings</span>
+          </div>
+          <div class="spacer"></div>
+          <span class="pill">Export CSV</span>
+          <span class="pill">auto refresh · 10s</span>
+          <span class="pill dark">admin</span>
+        </div>
+
+        <div class="work" style="padding: 0; flex-direction: row; gap: 0;">
+          <!-- Filter rail -->
+          <div style="width: 280px; background: var(--surface); border-right: 1px solid var(--border); padding: 18px; display:flex; flex-direction: column; gap: 16px; overflow:hidden;">
+            <div>
+              <div class="card-eyebrow">Filters</div>
+              <div style="font-size: 16px; font-weight: 600; margin-top: 2px;">Session records</div>
+            </div>
+            <div class="stack-2">
+              <label class="micro" style="font-weight:600; letter-spacing:0.1em; text-transform: uppercase; color: var(--fg-subtle);">Range</label>
+              <div style="display:flex; gap:6px;"><span class="pill">last 24h</span><span class="pill accent">last 7d</span><span class="pill">last 30d</span></div>
+            </div>
+            <div class="stack-2">
+              <label class="micro" style="font-weight:600; letter-spacing:0.1em; text-transform: uppercase; color: var(--fg-subtle);">User</label>
+              <div style="font-size:13px; padding: 7px 10px; border:1px solid var(--border); border-radius:6px;">admin <span class="micro">· local:admin</span></div>
+            </div>
+            <div class="stack-2">
+              <label class="micro" style="font-weight:600; letter-spacing:0.1em; text-transform: uppercase; color: var(--fg-subtle);">Asset</label>
+              <div style="font-size:13px; padding: 7px 10px; border:1px solid var(--border); border-radius:6px; color: var(--fg-subtle);">filter by name or UUID</div>
+            </div>
+            <div class="stack-2">
+              <label class="micro" style="font-weight:600; letter-spacing:0.1em; text-transform: uppercase; color: var(--fg-subtle);">Protocol</label>
+              <div style="display:flex; gap:6px;"><span class="pill accent">ssh</span><span class="pill">rdp</span><span class="pill">db</span></div>
+            </div>
+            <div class="stack-2">
+              <label class="micro" style="font-weight:600; letter-spacing:0.1em; text-transform: uppercase; color: var(--fg-subtle);">Status</label>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;"><span class="pill success">closed</span><span class="pill">active</span><span class="pill danger">errored</span><span class="pill warn">idle‑killed</span></div>
+            </div>
+            <div class="stack-2">
+              <label class="micro" style="font-weight:600; letter-spacing:0.1em; text-transform: uppercase; color: var(--fg-subtle);">Recording</label>
+              <div style="display:flex; gap:6px;"><span class="pill accent">has recording</span><span class="pill">none</span></div>
+            </div>
+            <div style="display:flex; gap:8px; margin-top: auto;">
+              <span class="btn sm primary" style="flex:1; justify-content:center;">Apply</span>
+              <span class="btn sm ghost">Reset</span>
+            </div>
+          </div>
+
+          <!-- Records area -->
+          <div style="flex:1; padding: 20px 24px; display:flex; flex-direction: column; gap: 16px; min-width:0; overflow:hidden;">
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 14px;">
+              <div class="card tight"><div class="card-eyebrow">Shown</div><div style="font-size: 22px; font-weight: 600; margin-top:2px;">147</div><div class="micro">3 active · 144 closed</div></div>
+              <div class="card tight"><div class="card-eyebrow">Recordings</div><div style="font-size: 22px; font-weight: 600; margin-top:2px;">122</div><div class="micro">83% coverage</div></div>
+              <div class="card tight"><div class="card-eyebrow">Bytes (out)</div><div style="font-size: 22px; font-weight: 600; margin-top:2px;">1.42 GB</div><div class="micro">trailing 7d</div></div>
+              <div class="card tight"><div class="card-eyebrow">Errors</div><div style="font-size: 22px; font-weight: 600; margin-top:2px; color: var(--danger-fg);">4</div><div class="micro">→ inspect</div></div>
+            </div>
+
+            <div class="card" style="padding: 0; flex:1; min-height:0; overflow:hidden;">
+              <table class="tbl">
+                <thead><tr>
+                  <th>Started</th><th>User</th><th>Asset</th><th>Proto</th><th>Status</th><th>Duration</th><th>I/O</th><th>Client IP</th><th>Recording</th><th></th>
+                </tr></thead>
+                <tbody>
+                  <tr>
+                    <td><div class="nm">2026/05/16 06:07:39</div><div class="sub">ended 06:08:14</div></td>
+                    <td><div class="nm">admin</div><div class="sub">95ba39b4…aac2</div></td>
+                    <td><div class="nm">hermes</div><div class="sub">cd7b9ad4…045d</div></td>
+                    <td><span class="pill accent">ssh</span></td>
+                    <td><span class="pill success">closed</span></td>
+                    <td>35s</td>
+                    <td><span class="mono micro">0 B / 667 B</span></td>
+                    <td class="mono micro">REDACTED-IP:47010</td>
+                    <td><span class="pill">▶ rec · 84 KB</span></td>
+                    <td><span class="btn sm">Inspect</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="nm">2026/05/15 21:12:19</div><div class="sub">ended 21:15:44</div></td>
+                    <td><div class="nm">admin</div><div class="sub">95ba39b4…aac2</div></td>
+                    <td><div class="nm">hermes</div><div class="sub">cd7b9ad4…045d</div></td>
+                    <td><span class="pill accent">ssh</span></td>
+                    <td><span class="pill success">closed</span></td>
+                    <td>3m 24s</td>
+                    <td><span class="mono micro">0 B / 669 B</span></td>
+                    <td class="mono micro">REDACTED-IP:50278</td>
+                    <td><span class="pill">▶ rec · 412 KB</span></td>
+                    <td><span class="btn sm">Inspect</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="nm">2026/05/15 18:42:01</div><div class="sub">ended 18:44:53</div></td>
+                    <td><div class="nm">li.wei</div><div class="sub">oidc:google</div></td>
+                    <td><div class="nm">prod-eks-node-…008</div><div class="sub">79aa12bb…0001</div></td>
+                    <td><span class="pill accent">ssh</span></td>
+                    <td><span class="pill danger">errored</span></td>
+                    <td>2m 52s</td>
+                    <td><span class="mono micro">128 B / 4.1 KB</span></td>
+                    <td class="mono micro">REDACTED-IP:51998</td>
+                    <td><span class="pill warn">▶ partial</span></td>
+                    <td><span class="btn sm">Inspect</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="nm">2026/05/15 11:22:09</div><div class="sub">ended 11:23:31</div></td>
+                    <td><div class="nm">eun.park</div><div class="sub">local:eun</div></td>
+                    <td><div class="nm">test-db-1</div><div class="sub">a73d5f4f…22ee</div></td>
+                    <td><span class="pill info">db</span></td>
+                    <td><span class="pill success">closed</span></td>
+                    <td>1m 22s</td>
+                    <td><span class="mono micro">14.4 KB / 22 KB</span></td>
+                    <td class="mono micro">REDACTED-IP:34192</td>
+                    <td><span class="pill">▶ rec · 8 KB</span></td>
+                    <td><span class="btn sm">Inspect</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="nm">2026/05/05 19:21:45</div><div class="sub">ended 19:25:17</div></td>
+                    <td><div class="nm">admin</div><div class="sub">95ba39b4…aac2</div></td>
+                    <td><div class="nm">hermes</div><div class="sub">cd7b9ad4…045d</div></td>
+                    <td><span class="pill accent">ssh</span></td>
+                    <td><span class="pill success">closed</span></td>
+                    <td>3m 31s</td>
+                    <td><span class="mono micro">81 B / 5.33 KB</span></td>
+                    <td class="mono micro">REDACTED-IP:44692</td>
+                    <td><span class="pill">▶ rec · 622 KB</span></td>
+                    <td><span class="btn sm">Inspect</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="nm">2026/05/04 09:08:11</div><div class="sub">ended 09:10:48</div></td>
+                    <td><div class="nm">li.wei</div><div class="sub">oidc:google</div></td>
+                    <td><div class="nm">winhost-prod-08</div><div class="sub">5e0aa4cc…0211</div></td>
+                    <td><span class="pill info">rdp</span></td>
+                    <td><span class="pill warn">idle‑killed</span></td>
+                    <td>2m 37s</td>
+                    <td><span class="mono micro">5.1 KB / 920 KB</span></td>
+                    <td class="mono micro">REDACTED-IP:62210</td>
+                    <td><span class="pill">▶ rec · 1.4 MB</span></td>
+                    <td><span class="btn sm">Inspect</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>09 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 10 — CONNECT (asset discovery)                                -->
+<!-- ============================================================ -->
+<section data-screen-label="10 Connect">
+  <div class="slide-pad-tight">
+    <div class="row" style="justify-content:space-between; align-items:baseline;">
+      <div>
+        <div class="eyebrow">Redesign · Connect (new top-level)</div>
+        <h3 class="title" style="margin-top:8px;">Find an asset and open it. That's the page.</h3>
+      </div>
+      <span class="micro">Tree-first · search-prominent · recents at top · "view in CMDB" preserves admin path</span>
+    </div>
+
+    <div class="app grow">
+      <div class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">OP</div>
+          <div><div class="brand-name">Ops Platform</div><div class="brand-sub">Operations console</div></div>
+        </div>
+        <div class="grp">Operate</div>
+        <div class="nav">Overview</div>
+        <div class="nav active">Connect</div>
+        <div class="nav">Sessions <span class="pill accent" style="margin-left:auto; font-size:10px; padding:1px 6px;">3</span></div>
+        <div class="nav">Access</div>
+        <div class="grp">Inventory</div>
+        <div class="nav">CMDB</div>
+        <div class="nav">Connectivity</div>
+        <div class="grp">Govern</div>
+        <div class="nav">IAM</div>
+        <div class="nav">Audit</div>
+        <div class="nav">AWS</div>
+        <div class="nav">OIDC</div>
+      </div>
+
+      <div class="main">
+        <div class="topbar">
+          <div class="crumb"><span>Operate</span><span class="sep">/</span><span style="color:var(--fg); font-weight: 500;">Connect</span></div>
+          <div style="flex:1; max-width: 560px; margin: 0 24px;">
+            <div style="display:flex; align-items:center; gap: 10px; padding: 7px 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface);">
+              <svg class="ic" viewBox="0 0 24 24" style="color: var(--fg-subtle);"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+              <span style="font-size: 13px; color: var(--fg-subtle); flex:1;">Search 99 assets by name, IP, account, tag…</span>
+              <span class="mono" style="font-size: 11px; color: var(--fg-subtle); background: var(--surface-2); padding: 2px 6px; border-radius: 4px;">⌘K</span>
+            </div>
+          </div>
+          <span class="pill">Launch by ID</span>
+          <span class="pill dark">admin</span>
+        </div>
+
+        <div class="work" style="padding: 0; flex-direction: row; gap: 0;">
+
+          <!-- Tree -->
+          <div style="width: 360px; background: var(--surface); border-right: 1px solid var(--border); display:flex; flex-direction:column; min-width:0;">
+            <div style="padding: 14px 16px; border-bottom: 1px solid var(--border); display:flex; gap: 8px;">
+              <span class="pill accent" style="font-size:11px;">Tree</span>
+              <span class="pill" style="font-size:11px;">Recents</span>
+              <span class="pill" style="font-size:11px;">Favorites</span>
+              <span style="flex:1;"></span>
+              <span class="pill" style="font-size:11px;">ssh</span>
+              <span class="pill" style="font-size:11px;">rdp</span>
+            </div>
+            <div class="tree" style="overflow:hidden; flex:1;">
+              <div class="grp-head">▾ env · default <span class="count">20</span></div>
+              <div class="vpc">vpc-REDACTED · 15</div>
+              <div class="leaf"><span class="ln">ip-10-220-51-229</span><span class="sn">REDACTED-IP · ec2_instance</span></div>
+              <div class="leaf selected"><span class="ln">ip-10-220-44-184</span><span class="sn">REDACTED-IP · ec2_instance</span></div>
+              <div class="leaf"><span class="ln">ip-10-220-35-92</span><span class="sn">REDACTED-IP · ec2_instance</span></div>
+              <div class="leaf"><span class="ln">ip-10-220-32-209</span><span class="sn">REDACTED-IP · ec2_instance</span></div>
+              <div class="leaf"><span class="ln">ip-10-220-46-95</span><span class="sn">REDACTED-IP · ec2_instance</span></div>
+              <div class="vpc">vpc-0a8c… · 5</div>
+              <div class="leaf"><span class="ln">test-db-1</span><span class="sn">rds_instance · us-east-2</span></div>
+              <div class="leaf"><span class="ln">modelhunter</span><span class="sn">rds_instance · us-east-2</span></div>
+              <div class="grp-head" style="margin-top: 8px;">▸ env · dev <span class="count">12</span></div>
+              <div class="grp-head">▸ env · prod <span class="count">67</span></div>
+            </div>
+          </div>
+
+          <!-- Detail / connect pane -->
+          <div style="flex:1; padding: 24px 28px; display:flex; flex-direction:column; gap: 18px; min-width: 0; overflow:hidden;">
+
+            <!-- Asset header -->
+            <div style="display:flex; align-items:flex-start; gap: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border);">
+              <div style="width: 44px; height: 44px; border-radius: 10px; background: var(--accent-bg); color: var(--accent-hover); display:grid; place-items:center; font-weight: 600; font-family: var(--font-mono); font-size: 13px;">EC2</div>
+              <div style="flex:1;">
+                <div style="display:flex; gap: 10px; align-items: baseline;">
+                  <h3 style="margin:0; font-size: 24px; font-weight: 600;">ip-10-220-44-184</h3>
+                  <span class="pill success">available</span>
+                  <span class="pill">default · vpc-REDACTED</span>
+                  <span class="pill">us-east-2 · REDACTED-ACCT</span>
+                </div>
+                <div class="mono small" style="margin-top: 6px;">REDACTED-IP · ec2_instance · t3.medium · launched 2026-03-14</div>
+              </div>
+              <div style="display:flex; gap: 8px;">
+                <span class="btn primary">▶ Open SSH</span>
+                <span class="btn">▶ RDP</span>
+                <span class="btn ghost">View in CMDB →</span>
+              </div>
+            </div>
+
+            <!-- Connect surface -->
+            <div class="grid-2" style="grid-template-columns: 1.4fr 1fr; gap: 24px; flex:1; min-height: 0;">
+              <div class="card" style="padding: 0; overflow: hidden; display:flex; flex-direction: column;">
+                <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display:flex; align-items: center; justify-content: space-between;">
+                  <div>
+                    <div class="card-eyebrow">Connection profile</div>
+                    <div class="card-title" style="font-size: 16px;">bastion-default · ssh-22</div>
+                  </div>
+                  <span class="pill success">✓ reachable</span>
+                </div>
+                <div style="padding: 16px 20px; display:flex; flex-direction: column; gap: 12px;">
+                  <div style="display:grid; grid-template-columns: 140px 1fr; gap: 8px 16px; font-size: 13px;">
+                    <span class="micro" style="font-weight:600; text-transform: uppercase; letter-spacing: 0.08em;">Bastion</span>   <span class="mono">jumpbox-default.ops.internal:22</span>
+                    <span class="micro" style="font-weight:600; text-transform: uppercase; letter-spacing: 0.08em;">Login as</span>   <span class="mono">ec2-user · key: ops-default</span>
+                    <span class="micro" style="font-weight:600; text-transform: uppercase; letter-spacing: 0.08em;">Path</span>       <span class="mono">you → bastion → target · 2 hops</span>
+                    <span class="micro" style="font-weight:600; text-transform: uppercase; letter-spacing: 0.08em;">Probe</span>      <span><span class="pill success">tcp 22 open · 31ms</span> <span class="micro">checked 8s ago</span></span>
+                    <span class="micro" style="font-weight:600; text-transform: uppercase; letter-spacing: 0.08em;">Recording</span>  <span><span class="pill accent">enforced · s3://ops-platform-rec</span></span>
+                    <span class="micro" style="font-weight:600; text-transform: uppercase; letter-spacing: 0.08em;">Idle limit</span> <span class="mono">15m → auto-disconnect</span>
+                  </div>
+
+                  <div style="margin-top: 8px; padding: 12px 14px; border-radius: 8px; background: var(--accent-bg); border: 1px solid var(--accent-border); display:flex; align-items:center; gap: 12px;">
+                    <svg class="ic" viewBox="0 0 24 24" style="color: var(--accent-hover); width:18px; height:18px;"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+                    <div style="flex:1; font-size: 13px;">
+                      <b>You can open this now.</b> Active grant <span class="mono">bastion.session:ssh</span> on default/* expires in <b>4h 12m</b>.
+                    </div>
+                    <span style="font-size: 12px; color: var(--accent-hover); font-weight: 500;">Open SSH →</span>
+                  </div>
+
+                  <div style="margin-top: 4px;" class="micro">If you needed access, you would see "Request access" here instead — the same surface handles both states.</div>
+                </div>
+              </div>
+
+              <div class="col" style="gap: 16px; min-height: 0;">
+                <div class="card">
+                  <div class="card-eyebrow">Recent on this host</div>
+                  <div class="stack-1" style="margin-top: 8px; font-size: 13px;">
+                    <div style="display:flex; justify-content:space-between; padding: 6px 0; border-bottom: 1px solid var(--border);"><span>admin · ssh · 3m 24s</span><span class="micro">15h ago · ▶</span></div>
+                    <div style="display:flex; justify-content:space-between; padding: 6px 0; border-bottom: 1px solid var(--border);"><span>admin · ssh · 35s</span><span class="micro">22h ago · ▶</span></div>
+                    <div style="display:flex; justify-content:space-between; padding: 6px 0;"><span>li.wei · ssh · 4m 02s</span><span class="micro">3d ago · ▶</span></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-eyebrow">Who has access</div>
+                  <div class="stack-1" style="margin-top: 8px; font-size: 13px;">
+                    <div style="display:flex; justify-content:space-between; padding: 4px 0;"><span>admin</span><span class="pill accent">always</span></div>
+                    <div style="display:flex; justify-content:space-between; padding: 4px 0;"><span>ops</span><span class="pill">via role</span></div>
+                    <div style="display:flex; justify-content:space-between; padding: 4px 0;"><span>li.wei</span><span class="pill warn">expires 12h</span></div>
+                    <div style="display:flex; justify-content:space-between; padding: 4px 0; color: var(--fg-muted);"><span>3 others</span><span class="micro">see in IAM →</span></div>
+                  </div>
+                </div>
+                <div class="card" style="background: var(--surface-2); border-color: transparent;">
+                  <div class="card-eyebrow">Tags · from CMDB</div>
+                  <div class="tags" style="margin-top: 8px;">
+                    <span class="pill">env · default</span>
+                    <span class="pill">service · api</span>
+                    <span class="pill">owner · platform</span>
+                    <span class="pill">tier · web</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>10 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 11 — IAM REDESIGN                                            -->
+<!-- ============================================================ -->
+<section data-screen-label="11 IAM">
+  <div class="slide-pad-tight">
+    <div class="row" style="justify-content:space-between; align-items:baseline;">
+      <div>
+        <div class="eyebrow">Redesign · IAM</div>
+        <h3 class="title" style="margin-top:8px;">From "user has roles" to "who can do what".</h3>
+      </div>
+      <span class="micro">Capability matrix as primary view · roles &amp; users still editable, but secondary</span>
+    </div>
+
+    <div class="app grow">
+      <div class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">OP</div>
+          <div><div class="brand-name">Ops Platform</div><div class="brand-sub">Operations console</div></div>
+        </div>
+        <div class="grp">Operate</div>
+        <div class="nav">Overview</div>
+        <div class="nav">Connect</div>
+        <div class="nav">Sessions</div>
+        <div class="nav">Access</div>
+        <div class="grp">Inventory</div>
+        <div class="nav">CMDB</div>
+        <div class="nav">Connectivity</div>
+        <div class="grp">Govern</div>
+        <div class="nav active">IAM</div>
+        <div class="nav">Audit</div>
+        <div class="nav">AWS</div>
+        <div class="nav">OIDC</div>
+      </div>
+
+      <div class="main">
+        <div class="topbar">
+          <div class="crumb"><span>Govern</span><span class="sep">/</span><span style="color:var(--fg); font-weight: 500;">IAM</span></div>
+          <div class="spacer"></div>
+          <span class="pill accent">view · capabilities</span>
+          <span class="pill">view · users</span>
+          <span class="pill">view · roles</span>
+          <span class="pill dark">admin</span>
+        </div>
+
+        <div class="work" style="padding: 24px 28px; gap: 18px; flex-direction: column;">
+
+          <!-- Header + filter -->
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap: 24px;">
+            <div>
+              <h3 style="margin:0; font-size: 26px; font-weight: 600;">Capability matrix</h3>
+              <p class="small" style="margin: 6px 0 0; max-width: 720px;">Who can do what, across which resources. The row is the capability (verb on a resource class). The column is the role. Click any cell to see the principals, scopes, and the grants that produce it.</p>
+            </div>
+            <div style="display:flex; gap: 8px; align-items:center;">
+              <span class="pill">Resource scope · all</span>
+              <span class="pill">Source · all</span>
+              <span class="pill warn">3 unscoped grants</span>
+              <span class="btn sm">+ New role</span>
+            </div>
+          </div>
+
+          <!-- Capability matrix grid -->
+          <div class="perm-grid" style="grid-template-columns: 280px repeat(3, 1fr) 220px;">
+            <div class="cell h">Capability</div>
+            <div class="cell h" style="justify-content:center;">admin</div>
+            <div class="cell h" style="justify-content:center;">ops</div>
+            <div class="cell h" style="justify-content:center;">viewer</div>
+            <div class="cell h">Principals · today</div>
+
+            <div class="cell role"><span class="mono">bastion.session:ssh</span></div>
+            <div class="cell yes">all</div>
+            <div class="cell partial">env=default,dev</div>
+            <div class="cell no">—</div>
+            <div class="cell"><span class="mono small">2 users · 1 group</span></div>
+
+            <div class="cell role"><span class="mono">bastion.session:rdp</span></div>
+            <div class="cell yes">all</div>
+            <div class="cell partial">env=default</div>
+            <div class="cell no">—</div>
+            <div class="cell"><span class="mono small">2 users</span></div>
+
+            <div class="cell role"><span class="mono">bastion.session:read</span></div>
+            <div class="cell yes">all</div>
+            <div class="cell yes">all</div>
+            <div class="cell yes">all</div>
+            <div class="cell"><span class="mono small">5 users · 2 groups</span></div>
+
+            <div class="cell role"><span class="mono">access.request:create</span></div>
+            <div class="cell yes">all</div>
+            <div class="cell yes">all</div>
+            <div class="cell yes">all</div>
+            <div class="cell"><span class="mono small">all signed-in</span></div>
+
+            <div class="cell role"><span class="mono">access.request:approve</span></div>
+            <div class="cell yes">all</div>
+            <div class="cell partial">env≠prod</div>
+            <div class="cell no">—</div>
+            <div class="cell"><span class="mono small">3 users</span></div>
+
+            <div class="cell role"><span class="mono">cmdb.asset:read</span></div>
+            <div class="cell yes">all</div>
+            <div class="cell yes">all</div>
+            <div class="cell yes">all</div>
+            <div class="cell"><span class="mono small">all signed-in</span></div>
+
+            <div class="cell role"><span class="mono">cmdb.asset:write</span></div>
+            <div class="cell yes">all</div>
+            <div class="cell partial">source=aws</div>
+            <div class="cell no">—</div>
+            <div class="cell"><span class="mono small">2 users</span></div>
+
+            <div class="cell role"><span class="mono">iam.role:write</span></div>
+            <div class="cell yes">all</div>
+            <div class="cell no">—</div>
+            <div class="cell no">—</div>
+            <div class="cell"><span class="mono small">1 user</span></div>
+
+            <div class="cell role" style="border-bottom: none;"><span class="mono">system:admin</span></div>
+            <div class="cell yes" style="border-bottom: none;">all</div>
+            <div class="cell no" style="border-bottom: none;">—</div>
+            <div class="cell no" style="border-bottom: none;">—</div>
+            <div class="cell" style="border-bottom: none;"><span class="mono small">1 user</span></div>
+          </div>
+
+          <!-- Cell-focus inspector -->
+          <div class="grid-2" style="gap: 18px;">
+            <div class="card">
+              <div class="card-h">
+                <div>
+                  <div class="card-eyebrow">Selected cell</div>
+                  <div class="card-title" style="font-size: 16px;"><span class="mono">bastion.session:ssh</span> · role <span class="mono">ops</span></div>
+                </div>
+                <span class="pill warn">partial</span>
+              </div>
+              <p class="small" style="margin: 8px 0 12px;">2 of the 3 grants behind this cell restrict the scope to specific environments. Listed by source so admins can see whether the policy comes from a base role or an ad-hoc grant.</p>
+              <div class="stack-1" style="font-size: 13px;">
+                <div style="display:flex; justify-content:space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;"><span><b>role:ops</b> · default·dev · ssh</span><span class="micro">since 2026-04-02 · base</span></div>
+                <div style="display:flex; justify-content:space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;"><span>grant · li.wei · prod-eks-node-…008</span><span class="micro">expires 12h · request #114</span></div>
+                <div style="display:flex; justify-content:space-between; padding: 8px 10px; border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-fg); border-radius: 6px;"><span>grant · ops-bot · <b>unscoped</b></span><span class="micro" style="color: var(--warn-fg);">flag · review</span></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-h">
+                <div>
+                  <div class="card-eyebrow">Answer my question</div>
+                  <div class="card-title" style="font-size: 16px;">Can li.wei SSH into prod-eks-node-…008?</div>
+                </div>
+                <span class="pill success">yes · for 12h</span>
+              </div>
+              <p class="small" style="margin: 8px 0 12px;">Capability resolver — the same query an admin can run from any user or asset detail. Returns yes/no plus the path that produces it. This is the question the current IAM page can't answer.</p>
+              <div class="stack-1" style="font-size: 13px;">
+                <div style="display:flex; justify-content:space-between; padding: 8px 10px; border-radius: 6px; background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success-fg);"><b>bastion.session:ssh</b> ✓<span class="micro" style="color: var(--success-fg);">from grant #114 · approved by admin</span></div>
+                <div style="display:flex; justify-content:space-between; padding: 8px 10px; border-radius: 6px; background: var(--surface-2);"><span>bastion.session:read</span><span class="micro">from role · ops</span></div>
+                <div style="display:flex; justify-content:space-between; padding: 8px 10px; border-radius: 6px; background: var(--surface-2);"><span>recording · enforced</span><span class="micro">from connection profile</span></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>11 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 12 — FLOW 1: find → request → ssh                            -->
+<!-- ============================================================ -->
+<section data-screen-label="12 Flow A">
+  <div class="slide-pad">
+    <div>
+      <div class="eyebrow">End-to-end flow · A</div>
+      <h2 class="title" style="margin-top: 12px;">Find asset → request access → open SSH.</h2>
+      <p class="lede" style="margin-top: 12px;">Operator opens the console, needs to SSH into a prod host they don't currently have access to. The flow is five steps; the user stays in the Operate group the whole way.</p>
+    </div>
+
+    <div class="flow grow">
+
+      <div class="step step-arrow">
+        <div class="step-h"><div class="step-num">1</div><div class="step-t">Land on Connect</div></div>
+        <div class="step-d">Connect is the new default route in Operate. Tree on the left, recents at the top, asset detail on the right.</div>
+        <div class="step-mock">
+          <div class="row"><span class="l">▾ env · prod</span><span class="r">67</span></div>
+          <div class="row"><span class="l">vpc-0a8c…</span><span class="r">23</span></div>
+          <div class="row"><span class="l">ip-10-42-18-7</span><span class="r">·</span></div>
+          <div class="row"><span class="l">prod-eks-node-…008</span><span class="r">·</span></div>
+          <div class="row"><span class="l">prod-eks-node-…009</span><span class="r">·</span></div>
+        </div>
+      </div>
+
+      <div class="step step-arrow">
+        <div class="step-h"><div class="step-num">2</div><div class="step-t">Search and pick</div></div>
+        <div class="step-d">⌘K opens search. Type "prod-eks-…008" or filter by tag. Picking the host loads its detail pane.</div>
+        <div class="step-mock">
+          <div class="row" style="background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent-hover);"><span class="l">⌘K  prod-eks-…008</span><span class="r">↵</span></div>
+          <div class="row active"><span class="l">prod-eks-node-…008</span><span class="r">match</span></div>
+          <div class="row"><span class="l">prod-eks-cluster-…</span><span class="r">match</span></div>
+          <div class="row"><span class="l">tag · service=eks</span><span class="r">23</span></div>
+        </div>
+      </div>
+
+      <div class="step step-arrow">
+        <div class="step-h"><div class="step-num">3</div><div class="step-t">Request access</div></div>
+        <div class="step-d">Detail pane shows "you don't have access yet" instead of "open SSH". One click drafts a request; reason, duration, capability are pre-filled.</div>
+        <div class="step-mock">
+          <div class="row"><span class="l">prod-eks-node-…008</span><span class="r">ec2</span></div>
+          <div class="row" style="background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn-fg);"><span class="l">no grant · request</span><span class="r">+ ssh</span></div>
+          <div class="row"><span class="l">duration · 4h</span><span class="r">▾</span></div>
+          <div class="row"><span class="l">reason</span><span class="r">…</span></div>
+          <div class="row active"><span class="l">submit request</span><span class="r">→</span></div>
+        </div>
+      </div>
+
+      <div class="step step-arrow">
+        <div class="step-h"><div class="step-num">4</div><div class="step-t">Approved → grant lands</div></div>
+        <div class="step-d">Approver sees the request in Access. Approves. Operator gets a toast and the same Connect page now offers Open SSH.</div>
+        <div class="step-mock">
+          <div class="row"><span class="l">request #114</span><span class="r">→ ops</span></div>
+          <div class="row" style="background: var(--success-bg); border-color: var(--success-border); color: var(--success-fg);"><span class="l">approved · 4h</span><span class="r">✓</span></div>
+          <div class="row"><span class="l">grant active</span><span class="r">12h</span></div>
+          <div class="row active"><span class="l">▶ Open SSH</span><span class="r">enter</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-h"><div class="step-num">5</div><div class="step-t">Session opens in Sessions</div></div>
+        <div class="step-d">A new tab appears in Sessions. The flow lands the operator in the live terminal with recording enforced.</div>
+        <div class="step-mock" style="background:#0b0c0d; color:#e6e8eb;">
+          <div style="font-family: var(--font-mono); color: #4ade80;">● ssh · prod-eks-node-…008</div>
+          <div style="font-family: var(--font-mono); color: #6b7178; font-size: 10px;"># bastion · recording on</div>
+          <div style="font-family: var(--font-mono); color: var(--accent); font-size: 10px;">ec2-user@prod-eks-…$</div>
+          <div style="font-family: var(--font-mono); color: #e6e8eb; font-size: 10px;">uptime</div>
+          <div style="font-family: var(--font-mono); color: #97a0aa; font-size: 10px;">up 18 days · load 0.4</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="callout" style="margin-top: 8px;">
+      <h4>Why this works</h4>
+      <p>Every step happens inside the Operate group. The operator never switches mental model between "browse" and "request" and "open" — Connect handles the first three; Sessions handles the fourth. Access stays the canonical request-management surface but isn't the entry point.</p>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>12 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 13 — FLOW 2: live → audit → recording                        -->
+<!-- ============================================================ -->
+<section data-screen-label="13 Flow B">
+  <div class="slide-pad">
+    <div>
+      <div class="eyebrow">End-to-end flow · B</div>
+      <h2 class="title" style="margin-top: 12px;">Inspect active session → review past one → open recording.</h2>
+      <p class="lede" style="margin-top: 12px;">Audit story. The user is a reviewer (could be an admin, an approver, or the operator themselves the next day). They start in Sessions, follow a thread of curiosity backward in time, and end inside a recording.</p>
+    </div>
+
+    <div class="flow grow">
+
+      <div class="step step-arrow">
+        <div class="step-h"><div class="step-num">1</div><div class="step-t">Active session</div></div>
+        <div class="step-d">Reviewer opens Sessions, sees three live ones, clicks the long-running one to inspect.</div>
+        <div class="step-mock">
+          <div class="row active"><span class="l">ssh · ip-10-220-51-229</span><span class="r">04:21 ●</span></div>
+          <div class="row"><span class="l">ssh · ip-10-220-44-184</span><span class="r">01:08</span></div>
+          <div class="row"><span class="l">rdp · winhost-prod-08</span><span class="r">12:46</span></div>
+        </div>
+      </div>
+
+      <div class="step step-arrow">
+        <div class="step-h"><div class="step-num">2</div><div class="step-t">Pivot to history</div></div>
+        <div class="step-d">From any active session, "history for this asset" jumps to Audit pre-filtered to hermes.</div>
+        <div class="step-mock">
+          <div class="row"><span class="l">asset · hermes</span><span class="r">→</span></div>
+          <div class="row active"><span class="l">history for this asset</span><span class="r">↗ audit</span></div>
+          <div class="row"><span class="l">who has access</span><span class="r">↗ iam</span></div>
+          <div class="row"><span class="l">view in cmdb</span><span class="r">↗</span></div>
+        </div>
+      </div>
+
+      <div class="step step-arrow">
+        <div class="step-h"><div class="step-num">3</div><div class="step-t">Audit table · scoped</div></div>
+        <div class="step-d">Audit page opens in Govern with the filter pre-set. Reviewer picks the prior session of interest.</div>
+        <div class="step-mock">
+          <div class="row"><span class="l">asset = hermes</span><span class="r">×</span></div>
+          <div class="row"><span class="l">06:07 · admin · 35s</span><span class="r">▶</span></div>
+          <div class="row active"><span class="l">15/05 21:12 · admin · 3m</span><span class="r">▶ inspect</span></div>
+          <div class="row"><span class="l">05/05 19:21 · admin · 3m</span><span class="r">▶</span></div>
+        </div>
+      </div>
+
+      <div class="step step-arrow">
+        <div class="step-h"><div class="step-num">4</div><div class="step-t">Recording inspector</div></div>
+        <div class="step-d">Inspect opens the recording in its own page (not a modal): asciinema-style scrubber, keystroke timeline, output search.</div>
+        <div class="step-mock" style="background:#0b0c0d; color:#e6e8eb;">
+          <div style="font-family: var(--font-mono); color: #97a0aa; font-size: 10px;">▶ 00:38 / 03:24 · 1× · 412 KB</div>
+          <div style="font-family: var(--font-mono); color: var(--accent); font-size: 10px;">admin@hermes:~$</div>
+          <div style="font-family: var(--font-mono); color: #e6e8eb; font-size: 10px;">grep ERROR /var/log/…</div>
+          <div style="font-family: var(--font-mono); color: #f87171; font-size: 10px;">[ERROR] db pool exhausted</div>
+          <div style="font-family: var(--font-mono); color: #97a0aa; font-size: 10px;">━━━●━━━━━━━━━━━━━━</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-h"><div class="step-num">5</div><div class="step-t">Cross-link back to IAM</div></div>
+        <div class="step-d">From the recording the reviewer asks "what grant let this happen?" and follows the link into IAM's capability resolver.</div>
+        <div class="step-mock">
+          <div class="row active"><span class="l">grant #114 · approved</span><span class="r">↗ iam</span></div>
+          <div class="row"><span class="l">capability · ssh</span><span class="r">12h scope</span></div>
+          <div class="row"><span class="l">approved by</span><span class="r">admin</span></div>
+          <div class="row"><span class="l">role · ops</span><span class="r">edit</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="callout" style="margin-top: 8px;">
+      <h4>Why this works</h4>
+      <p>The three surfaces that need to cross-link (Sessions · Audit · IAM) are now siblings under explicit groups. Each pivot is a deep link with a pre-applied filter — not a "go to the other section and search again" round-trip.</p>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>13 / 14</span></div>
+</section>
+
+
+<!-- ============================================================ -->
+<!-- 14 — KEEP / DO NOT CHANGE                                    -->
+<!-- ============================================================ -->
+<section data-screen-label="14 Keep">
+  <div class="slide-pad">
+    <div>
+      <div class="eyebrow">Do not change</div>
+      <h2 class="title" style="margin-top: 12px;">What's already right.</h2>
+      <p class="lede" style="margin-top: 12px;">This list matters as much as the redesign. Most of the visual and interaction language is correct for an internal operations console; this proposal does not touch it.</p>
+    </div>
+
+    <div class="grid-3 grow">
+      <div class="card">
+        <div class="card-eyebrow">Visual language</div>
+        <div class="card-title">Dark sidebar + light surface</div>
+        <p class="small" style="margin-top: 10px;">Linear/Notion-flavoured. Sidebar reads as chrome, content reads as work. Teal accent. Inter + JetBrains Mono. All tokens (<span class="mono">--color-accent #0d9488</span>, <span class="mono">--color-fg #18181b</span>, <span class="mono">--space-3 12px</span>) stay as defined in <span class="mono">tokens.css</span>.</p>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Density</div>
+        <div class="card-title">Compact, 13px base</div>
+        <p class="small" style="margin-top: 10px;">The product earns its small text. Operators scan 99-row tables and 20-host VPC groups — generous whitespace would be a regression. <span class="mono">--text-base 13px</span> and <span class="mono">--space-3 12px</span> stay.</p>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Patterns</div>
+        <div class="card-title">Toolbar + table + drawer</div>
+        <p class="small" style="margin-top: 10px;">The drawer-for-detail / modal-for-create / table-as-primary pattern is correct for inventory work. CMDB keeps it. Audit inherits it. Only Sessions Live and Connect break from it, because they are workspaces, not lists.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Theme</div>
+        <div class="card-title">Light/dark toggle</div>
+        <p class="small" style="margin-top: 10px;">The token system already covers both modes. Nothing in this proposal forces dark or light — every new surface uses the same variables and inherits both themes for free.</p>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Approval model</div>
+        <div class="card-title">Mine / Approve in Access</div>
+        <p class="small" style="margin-top: 10px;">The two-mode toggle inside Access (Mine vs Approve) is appropriate — same surface, two filters, same actions. We don't recommend changing it.</p>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Terminal/RDP</div>
+        <div class="card-title">In-browser session</div>
+        <p class="small" style="margin-top: 10px;">The decision to render terminals inline (not pop-out a native client) is the right operator-console move — recording, idle limits, and audit only work because the platform owns the pipe.</p>
+      </div>
+
+      <div class="card" style="background: var(--surface-2); border-color: transparent;">
+        <div class="card-eyebrow">Copy &amp; tone</div>
+        <div class="card-title">Quiet, factual, no marketing</div>
+        <p class="small" style="margin-top: 10px;">"No active sessions · Pick an asset from the left rail to open a new session." That voice — short, declarative, no exclamation marks — is correct. Keep it.</p>
+      </div>
+      <div class="card" style="background: var(--surface-2); border-color: transparent;">
+        <div class="card-eyebrow">Asset rail metaphor</div>
+        <div class="card-title">env → vpc → host grouping</div>
+        <p class="small" style="margin-top: 10px;">The hierarchy currently used in Sessions Live's left rail is exactly the right grouping for asset discovery. We're not changing it — we're <i>moving</i> it to a more discoverable surface (Connect).</p>
+      </div>
+      <div class="card" style="background: var(--surface-2); border-color: transparent;">
+        <div class="card-eyebrow">Legacy escape</div>
+        <div class="card-title">"Old portal" link</div>
+        <p class="small" style="margin-top: 10px;">Keep the "Old portal" affordance for one release after IA rollout. Internal users have muscle memory; a deprecation ramp is cheap insurance.</p>
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top: 8px;">
+      <h4>Net change</h4>
+      <p>Zero changes to colour, type, density, theme, drawer pattern, table pattern, terminal chrome, or copy tone. The IA shifts; the surfaces it produces use the same building blocks the team has already invested in.</p>
+    </div>
+  </div>
+  <div class="footer"><span>Ops Platform · Design review v1</span><span>14 / 14</span></div>
+</section>
+
+</deck-stage>
+
+<script src="deck-stage.js"></script>
+</body>
+</html>
