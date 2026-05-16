@@ -5,6 +5,8 @@ import {
   Database,
   Eye,
   FilterX,
+  FolderTree,
+  List,
   MonitorPlay,
   Pencil,
   Play,
@@ -49,7 +51,18 @@ import {
 } from "../../api/cmdb";
 import { PanelState } from "../../components/PanelState";
 import { formatAssetRange, nextAssetOffset, previousAssetOffset } from "../../lib/assets";
-import { buildLaunchSearch, isConnectableAsset, type LaunchProtocol } from "../../lib/launch";
+import {
+  readAssetViewMode,
+  writeAssetViewMode,
+  type AssetViewMode,
+} from "../../lib/assetView";
+import {
+  buildAssetTree,
+  buildLaunchSearch,
+  isConnectableAsset,
+  type AssetTreeEnv,
+  type LaunchProtocol,
+} from "../../lib/launch";
 import { useAuth } from "../auth/AuthProvider";
 import { AssetForm } from "./AssetForm";
 
@@ -951,6 +964,58 @@ function FilterSelect({
   );
 }
 
+// Shared SSH / RDP / Details cluster so the flat table and the tree view
+// expose identical actions and behaviour.
+function AssetActions({
+  asset,
+  showTerminal,
+  onConnect,
+  onDetails,
+}: {
+  asset: Asset;
+  showTerminal: boolean;
+  onConnect: (asset: Asset, protocol: LaunchProtocol) => void;
+  onDetails: (asset: Asset, trigger: HTMLButtonElement) => void;
+}) {
+  return (
+    <div className="request-actions">
+      {showTerminal ? (
+        <>
+          <button
+            type="button"
+            className="secondary-button compact"
+            onClick={() => onConnect(asset, "ssh")}
+            aria-label={`Open SSH session to ${asset.name || asset.id}`}
+            title="Open SSH terminal in Sessions"
+          >
+            <SquareTerminal size={14} aria-hidden="true" />
+            <span>SSH</span>
+          </button>
+          <button
+            type="button"
+            className="secondary-button compact"
+            onClick={() => onConnect(asset, "rdp")}
+            aria-label={`Open RDP session to ${asset.name || asset.id}`}
+            title="Open RDP session in Sessions"
+          >
+            <MonitorPlay size={14} aria-hidden="true" />
+            <span>RDP</span>
+          </button>
+        </>
+      ) : null}
+      <button
+        type="button"
+        className="secondary-button compact"
+        onClick={(event) => onDetails(asset, event.currentTarget)}
+        aria-label={`View details for ${asset.name || asset.id}`}
+      >
+        <Eye size={14} aria-hidden="true" />
+        <span>Details</span>
+      </button>
+    </div>
+  );
+}
+
 export function AssetsPage() {
   const auth = useAuth();
   const queryClient = useQueryClient();
@@ -980,6 +1045,7 @@ export function AssetsPage() {
 
   const [filters, setFilters] = useState<AssetFilters>(initialFilters);
   const [offset, setOffset] = useState(0);
+  const [viewMode, setViewModeState] = useState<AssetViewMode>(() => readAssetViewMode());
   const [selectedAssetID, setSelectedAssetID] = useState("");
   const [activeDrawerTab, setActiveDrawerTab] = useState<DrawerTab>("summary");
   const [creating, setCreating] = useState(false);
@@ -994,7 +1060,19 @@ export function AssetsPage() {
   const assets = useQuery({
     queryKey: ["cmdb", "assets", "list", userID, options],
     queryFn: () => listAssets(options),
-    enabled: canReadAssets && Boolean(userID),
+    enabled: canReadAssets && Boolean(userID) && viewMode === "list",
+  });
+  // Tree view groups the *whole* filtered set client-side (env -> vpc),
+  // so it pulls a wide window instead of a 25-row page. Mirrors the
+  // legacy portal's limit:500 grouping. Only runs while tree is active.
+  const treeOptions = useMemo<ListAssetsOptions>(
+    () => ({ ...buildAssetListOptions(filters, 0), limit: 500 }),
+    [filters],
+  );
+  const assetsTree = useQuery({
+    queryKey: ["cmdb", "assets", "tree", userID, treeOptions],
+    queryFn: () => listAssets(treeOptions),
+    enabled: canReadAssets && Boolean(userID) && viewMode === "tree",
   });
   const facets = useQuery({
     queryKey: ["cmdb", "assets", "facets", userID],
@@ -1167,9 +1245,24 @@ export function AssetsPage() {
   const items = assets.data?.items || [];
   const total = assets.data?.total || 0;
   const range = formatAssetRange(total, offset, items.length);
+  const treeItems = useMemo(() => assetsTree.data?.items || [], [assetsTree.data]);
+  const assetTree: AssetTreeEnv[] = useMemo(() => buildAssetTree(treeItems), [treeItems]);
   const selectedAsset = assetDetail.data;
   const canGoPrevious = offset > 0;
   const canGoNext = offset + pageSize < total;
+
+  function setViewMode(next: AssetViewMode) {
+    setViewModeState(next);
+    writeAssetViewMode(next);
+  }
+
+  function openAssetDetails(asset: Asset, trigger: HTMLButtonElement) {
+    detailTriggerRef.current = trigger;
+    saveConnection.reset();
+    testConnection.reset();
+    setActiveDrawerTab("summary");
+    setSelectedAssetID(asset.id);
+  }
   const activeFilterCount = [
     filters.env,
     filters.query,
@@ -1409,27 +1502,62 @@ export function AssetsPage() {
               <span>Reset {activeFilterCount}</span>
             </button>
           ) : null}
+          <div className="view-toggle" role="group" aria-label="Asset view mode">
+            <button
+              type="button"
+              className={`view-toggle-btn${viewMode === "list" ? " active" : ""}`}
+              onClick={() => setViewMode("list")}
+              aria-pressed={viewMode === "list"}
+              title="Flat table"
+            >
+              <List size={14} aria-hidden="true" />
+              <span>List</span>
+            </button>
+            <button
+              type="button"
+              className={`view-toggle-btn${viewMode === "tree" ? " active" : ""}`}
+              onClick={() => setViewMode("tree")}
+              aria-pressed={viewMode === "tree"}
+              title="Group by env / VPC"
+            >
+              <FolderTree size={14} aria-hidden="true" />
+              <span>Tree</span>
+            </button>
+          </div>
           <span className="status-pill">
             <Database size={14} aria-hidden="true" />
-            {range}
+            {viewMode === "tree" ? `${treeItems.length} grouped` : range}
           </span>
           <button
             type="button"
             className="secondary-button compact"
-            onClick={() => void assets.refetch()}
-            disabled={!canReadAssets || assets.isFetching}
+            onClick={() => void (viewMode === "tree" ? assetsTree.refetch() : assets.refetch())}
+            disabled={
+              !canReadAssets || (viewMode === "tree" ? assetsTree.isFetching : assets.isFetching)
+            }
           >
             <RefreshCw size={14} aria-hidden="true" />
-            <span>{assets.isFetching ? "Refreshing" : "Refresh"}</span>
+            <span>
+              {(viewMode === "tree" ? assetsTree.isFetching : assets.isFetching)
+                ? "Refreshing"
+                : "Refresh"}
+            </span>
           </button>
         </div>
 
         {!canReadAssets ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
 
-        {canReadAssets && assets.isError ? (
+        {canReadAssets && viewMode === "list" && assets.isError ? (
           <PanelState
             kind="error"
             message={assets.error instanceof Error ? assets.error.message : "Failed to load assets."}
+          />
+        ) : null}
+
+        {canReadAssets && viewMode === "tree" && assetsTree.isError ? (
+          <PanelState
+            kind="error"
+            message={assetsTree.error instanceof Error ? assetsTree.error.message : "Failed to load assets."}
           />
         ) : null}
 
@@ -1440,16 +1568,85 @@ export function AssetsPage() {
           />
         ) : null}
 
-        {canReadAssets && assets.isLoading ? <PanelState kind="loading" message="Loading assets" /> : null}
+        {canReadAssets && viewMode === "list" && assets.isLoading ? (
+          <PanelState kind="loading" message="Loading assets" />
+        ) : null}
 
-        {canReadAssets && !assets.isLoading && !assets.isError && items.length === 0 ? (
+        {canReadAssets && viewMode === "tree" && assetsTree.isLoading ? (
+          <PanelState kind="loading" message="Loading assets" />
+        ) : null}
+
+        {canReadAssets && viewMode === "list" && !assets.isLoading && !assets.isError && items.length === 0 ? (
           <PanelState
             kind="empty"
             message={activeFilterCount > 0 ? "No assets match the current filters." : "No assets yet."}
           />
         ) : null}
 
-        {items.length > 0 ? (
+        {canReadAssets &&
+        viewMode === "tree" &&
+        !assetsTree.isLoading &&
+        !assetsTree.isError &&
+        treeItems.length === 0 ? (
+          <PanelState
+            kind="empty"
+            message={activeFilterCount > 0 ? "No assets match the current filters." : "No assets yet."}
+          />
+        ) : null}
+
+        {viewMode === "tree" && treeItems.length > 0 ? (
+          <div className="asset-tree assets-tree-view">
+            {assetTree.map((env) => (
+              <details className="asset-tree-env" key={env.envName} open>
+                <summary>
+                  <span>env · {env.envName}</span>
+                  <span className="muted">({env.total})</span>
+                </summary>
+                {env.vpcs.map((vpc) => (
+                  <details className="asset-tree-vpc" key={`${env.envName}::${vpc.vpcKey}`} open>
+                    <summary>
+                      <span>
+                        vpc · <code>{vpc.vpcLabel}</code>
+                      </span>
+                      <span className="muted">({vpc.count})</span>
+                    </summary>
+                    <div className="asset-tree-members">
+                      {[...vpc.bastions, ...vpc.members].map((asset) => {
+                        const addr = asset.public_ip || asset.private_ip || asset.private_dns;
+                        return (
+                          <div
+                            className={`asset-tree-leaf${asset.is_vpc_proxy ? " bastion" : ""}`}
+                            key={asset.id}
+                          >
+                            <div className="asset-tree-leaf-main">
+                              <span className="asset-tree-name">{asset.name || asset.id}</span>
+                              {asset.is_vpc_proxy ? (
+                                <span className="status-pill ok tiny">bastion</span>
+                              ) : null}
+                              <span className={`status-pill ${statusTone(asset.status)} tiny`}>
+                                {asset.status || "unknown"}
+                              </span>
+                              <span className="asset-tree-meta">{friendlyType(asset)}</span>
+                              {addr ? <span className="asset-tree-addr">{addr}</span> : null}
+                            </div>
+                            <AssetActions
+                              asset={asset}
+                              showTerminal={supportsTerminal(asset)}
+                              onConnect={connectAsset}
+                              onDetails={openAssetDetails}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                ))}
+              </details>
+            ))}
+          </div>
+        ) : null}
+
+        {viewMode === "list" && items.length > 0 ? (
           <div className="table-wrap">
             <table className="data-table assets-table">
               <thead>
@@ -1503,47 +1700,12 @@ export function AssetsPage() {
                       </td>
                       <td className="nowrap">{asset.owner || <span className="muted">—</span>}</td>
                       <td className="col-actions">
-                        <div className="request-actions">
-                          {showTerminal ? (
-                            <>
-                              <button
-                                type="button"
-                                className="secondary-button compact"
-                                onClick={() => connectAsset(asset, "ssh")}
-                                aria-label={`Open SSH session to ${asset.name || asset.id}`}
-                                title="Open SSH terminal in Sessions"
-                              >
-                                <SquareTerminal size={14} aria-hidden="true" />
-                                <span>SSH</span>
-                              </button>
-                              <button
-                                type="button"
-                                className="secondary-button compact"
-                                onClick={() => connectAsset(asset, "rdp")}
-                                aria-label={`Open RDP session to ${asset.name || asset.id}`}
-                                title="Open RDP session in Sessions"
-                              >
-                                <MonitorPlay size={14} aria-hidden="true" />
-                                <span>RDP</span>
-                              </button>
-                            </>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="secondary-button compact"
-                            onClick={(event) => {
-                              detailTriggerRef.current = event.currentTarget;
-                              saveConnection.reset();
-                              testConnection.reset();
-                              setActiveDrawerTab("summary");
-                              setSelectedAssetID(asset.id);
-                            }}
-                            aria-label={`View details for ${asset.name || asset.id}`}
-                          >
-                            <Eye size={14} aria-hidden="true" />
-                            <span>Details</span>
-                          </button>
-                        </div>
+                        <AssetActions
+                          asset={asset}
+                          showTerminal={showTerminal}
+                          onConnect={connectAsset}
+                          onDetails={openAssetDetails}
+                        />
                       </td>
                     </tr>
                   );
@@ -1553,7 +1715,7 @@ export function AssetsPage() {
           </div>
         ) : null}
 
-        {canReadAssets && total > pageSize ? (
+        {canReadAssets && viewMode === "list" && total > pageSize ? (
           <div className="pagination-row">
             <span className="muted">Page size {pageSize}</span>
             <div className="request-actions">

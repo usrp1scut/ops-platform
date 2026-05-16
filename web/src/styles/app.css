@@ -936,6 +936,100 @@ a {
   white-space: nowrap;
 }
 
+/* CMDB main-content tree view: taller than the Sessions rail tree and
+   each leaf is a full row (name + meta + status + actions) rather than a
+   single launch button. */
+.assets-tree-view {
+  max-height: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  gap: 4px;
+}
+
+.assets-tree-view .asset-tree-members {
+  gap: 4px;
+}
+
+.asset-tree-leaf {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+}
+
+.asset-tree-leaf:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-subtle);
+}
+
+.asset-tree-leaf.bastion {
+  border-left: 2px solid var(--color-accent);
+}
+
+.asset-tree-leaf-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.asset-tree-leaf .asset-tree-name {
+  flex: 0 1 auto;
+  font-weight: 600;
+}
+
+.asset-tree-meta {
+  color: var(--color-fg-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.asset-tree-leaf .request-actions {
+  flex: 0 0 auto;
+}
+
+/* List | Tree segmented toggle in the assets toolbar. */
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 0;
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.view-toggle-btn + .view-toggle-btn {
+  border-left: 1px solid var(--color-border-strong);
+}
+
+.view-toggle-btn:hover {
+  color: var(--color-fg);
+  background: var(--color-bg-subtle);
+}
+
+.view-toggle-btn.active {
+  background: var(--color-accent-bg);
+  color: var(--color-accent-hover);
+}
+
 .status-pill.tiny {
   padding: 1px 6px;
   font-size: 0.7rem;
