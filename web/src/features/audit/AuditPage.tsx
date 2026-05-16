@@ -3,6 +3,7 @@ import { Download, MonitorPlay, RefreshCw, Search, ShieldCheck, SquareTerminal, 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { listAssets } from "../../api/cmdb";
 import { getSessionRecording, listSessions, type SessionAuditRecord } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
@@ -53,6 +54,11 @@ function updateFilter<K extends keyof SessionFilters>(
   value: SessionFilters[K],
 ) {
   setFilters((current) => ({ ...current, [key]: value }));
+}
+
+function assetPickerLabel(name: string, env: string | undefined, ip: string | undefined) {
+  const detail = [env, ip].filter(Boolean).join(" / ");
+  return detail ? `${name} (${detail})` : name;
 }
 
 function trafficLabel(session: SessionAuditRecord) {
@@ -122,6 +128,49 @@ export function AuditPage() {
     () => filterSessionsByStatus(sessionItems, filters.status),
     [filters.status, sessionItems],
   );
+
+  // Asset picker: search CMDB (the page already requires cmdb.asset:read,
+  // so this needs no extra permission). No status filter — audited
+  // sessions may target assets that are now inactive/deleted.
+  const [assetQuery, setAssetQuery] = useState("");
+  const assetSearch = useQuery({
+    queryKey: ["cmdb", "assets", "audit-filter-picker", userID, assetQuery],
+    queryFn: () => listAssets({ limit: 30, query: assetQuery.trim() || undefined }),
+    enabled: canReadSessions && Boolean(userID),
+  });
+  const assetPickerOptions = useMemo(() => {
+    const opts = (assetSearch.data?.items || []).map((asset) => ({
+      id: asset.id,
+      label: assetPickerLabel(asset.name || asset.id, asset.env, asset.private_ip || asset.public_ip),
+    }));
+    // Keep the currently-chosen asset selectable even when it isn't in the
+    // latest search results (e.g. arrived via a deep link, or the query
+    // changed after selection).
+    const chosen = draftFilters.assetID.trim();
+    if (chosen && !opts.some((o) => o.id === chosen)) {
+      opts.unshift({ id: chosen, label: `selected: ${chosen}` });
+    }
+    return opts;
+  }, [assetSearch.data, draftFilters.assetID]);
+  // User picker is sourced from the rows currently in view — no extra
+  // endpoint or permission, and the only users worth filtering to are
+  // ones that actually have sessions here. A deep-linked user id that
+  // isn't in view is still kept selectable.
+  const userPickerOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const session of sessionItems) {
+      if (session.user_id && !seen.has(session.user_id)) {
+        seen.set(session.user_id, session.user_name || session.user_id);
+      }
+    }
+    const chosen = draftFilters.userID.trim();
+    if (chosen && !seen.has(chosen)) {
+      seen.set(chosen, `selected: ${chosen}`);
+    }
+    return [...seen.entries()]
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [sessionItems, draftFilters.userID]);
   const inspectRecording = useMutation({
     mutationFn: async (session: SessionAuditRecord) => {
       const rawText = await getSessionRecording(session.id);
@@ -235,23 +284,42 @@ export function AuditPage() {
           <form className="request-form" onSubmit={applyFilters}>
             <div className="form-grid">
               <label className="form-field">
-                <span>User ID</span>
-                <input
+                <span>User</span>
+                <select
                   value={draftFilters.userID}
                   onChange={(event) => updateFilter(setDraftFilters, "userID", event.target.value)}
-                  placeholder={canReadAllSessions ? "Filter by user UUID" : "Own sessions only"}
                   disabled={!canReadSessions || !canReadAllSessions}
-                />
+                >
+                  <option value="">{canReadAllSessions ? "Any user" : "Own sessions only"}</option>
+                  {userPickerOptions.map((user) => (
+                    <option value={user.id} key={user.id}>
+                      {user.label}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="form-field">
-                <span>Asset ID</span>
+                <span>Asset</span>
                 <input
-                  value={draftFilters.assetID}
-                  onChange={(event) => updateFilter(setDraftFilters, "assetID", event.target.value)}
-                  placeholder="Filter by asset UUID"
+                  type="search"
+                  value={assetQuery}
+                  onChange={(event) => setAssetQuery(event.target.value)}
+                  placeholder="Search asset by name, IP, env"
                   disabled={!canReadSessions}
                 />
+                <select
+                  value={draftFilters.assetID}
+                  onChange={(event) => updateFilter(setDraftFilters, "assetID", event.target.value)}
+                  disabled={!canReadSessions}
+                >
+                  <option value="">Any asset</option>
+                  {assetPickerOptions.map((asset) => (
+                    <option value={asset.id} key={asset.id}>
+                      {asset.label}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="form-field">

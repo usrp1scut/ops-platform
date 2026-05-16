@@ -88,3 +88,15 @@
   - 新增 `.table-link` 样式（`app.css`）：常态继承文字色，hover/focus 显 accent + 下划线，用于表格内不破坏密度的链接。
 - 严格停在阶段 5：未改后端，未新增接口；除上述链接外未改 `features/` 既有页面逻辑（`AuditPage` 筛选改为 URL-seed 但 Apply/Reset 行为不变）；阶段 2.5 多会话标签页、Connect 右侧卡片真实数据、IAM 过滤 pill 仍属后续。
 - 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（bundle >500kB 警告为既有，与本次无关）。本环境无浏览器，未做手测；建议 review 时在浏览器确认：① live tab 的 Audit 图标跳转并按资产预筛；② 审计表点用户名落到 IAM directory 视图并预选该用户、点资产名同页重筛；③ 解析器结果的 "See this user's sessions →" 落到按用户预筛的 Audit；④ 旧 `/portal/sessions?mode=audit&asset=…` 重定向后仍带 query；⑤ 直接打开 `/audit`（无参数）回归与改动前一致。
+
+## 2026-05-16 · 阶段 6：Audit 筛选选择器（去掉手粘 UUID，纯前端）
+
+- 背景：调研各模块功能缺口后，与 review 约定先做最高频且零风险的一项——`AuditPage` 的 User/Asset 筛选原是裸 UUID 文本框（`Filter by user UUID` / `Filter by asset UUID`），实际没法用；这与刚交付的阶段 5 深链互补（深链负责"带上下文跳进来"，本阶段负责"在页内手动选"）。
+- 决策（与 review 确认）：用户选择器**数据源取自当前已加载的会话行**（`sessionItems` 去重），而非 `listIamUsers`——后者需 `iam.user:read`，而 Audit 的"全部会话"只需 `bastion.session:read`，两权限不必然同持；且唯一值得筛的用户就是在表里出现过的人。资产选择器用 `listAssets`（页面本就需要 `cmdb.asset:read`，无新增权限）。
+- `AuditPage`：
+  - User 字段：文本框 → `<select>`，选项 = 当前会话行里出现过的用户（`user_name||user_id`，按 label 排序去重）；空选项随权限显示 `Any user` / `Own sessions only`，disabled 条件与原先一致（`!canReadAllSessions`）。
+  - Asset 字段：文本框 → 搜索框 + `<select>`。搜索框驱动 `listAssets({limit:30,query})`（**不带 status 过滤**——被审计的会话可能指向已停用/删除资产）；选项标签 `name (env / ip)`。
+  - 两个选择器都保留"当前已选但不在候选里"的合成项（`selected: <id>`）——保证 URL 深链（阶段 5 的 `?asset=`/`?user=`）或选后改搜索词时，select 仍能正确回显当前筛选值。
+  - `effectiveAssetID`/`effectiveUserID`、`applyFilters`/`resetFilters`、URL seeding effect 全部不变；选择器只是改了 `draftFilters.assetID/userID` 的录入方式。
+- 严格停在阶段 6：未改后端，未新增接口；未碰 Audit 表格/录屏/统计卡片；调研清单里的 Connect 右栏真实数据、Overview 仪表盘、Audit RDP 录屏回放等仍属后续。
+- 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未做手测；建议 review 时在浏览器确认：① 资产搜索框输入后下拉收敛、选中即筛；② 用户下拉只列当前结果里的人、选中即筛；③ 阶段 5 深链 `/audit?asset=…` / `?user=…` 进来时两个 select 正确回显（含不在候选时的 `selected:` 合成项）；④ 无 `bastion.session:read` 时 User 选择器仍正确禁用并显示 `Own sessions only`；⑤ Reset 清空回全量。
