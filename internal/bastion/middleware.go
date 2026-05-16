@@ -58,7 +58,14 @@ func RequireSessionAuthorization(repo *Repository, action, paramName string) fun
 			if found {
 				attrs = iam.ResourceAttrs{"env": env, "source": source}
 			}
-			if identity.Authorize(capability, attrs).Allowed {
+			// A scoped capability only admits this asset when we could resolve
+			// the asset's scope attributes. With found=false attrs is nil and
+			// Authorize would answer the *general* question ("can ever do X")
+			// and pass a scoped holder — fail closed instead. Unscoped / coarse
+			// / admin (non-partial) still pass so behaviour is unchanged when
+			// no scope data exists. Branch 3 (JIT grant) still gets its chance.
+			dec := identity.Authorize(capability, attrs)
+			if dec.Allowed && (found || !dec.Partial) {
 				next.ServeHTTP(w, r)
 				return
 			}

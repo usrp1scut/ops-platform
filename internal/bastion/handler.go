@@ -85,7 +85,8 @@ func canSeeAllBastionRecords(identity iam.UserIdentity) bool {
 // and reject stay coarse — removing/denying access is always safe and should
 // never be blocked by scope. Returns false (and writes the response) when the
 // caller is out of scope. found=false (asset/request gone) falls back to the
-// coarse permission rather than hard-failing. Backward compatible: with
+// coarse permission for unscoped/admin holders, but fails closed for a scoped
+// holder (the asset's scope is unprovable). Backward compatible: with
 // scope_json NULL, Authorize behaves exactly like RequirePermission.
 func (h *Handler) enforceGrantScope(
 	w http.ResponseWriter,
@@ -97,7 +98,12 @@ func (h *Handler) enforceGrantScope(
 	if found {
 		attrs = iam.ResourceAttrs{"env": env, "source": source}
 	}
-	if identity.Authorize("bastion.grant:write", attrs).Allowed {
+	// With found=false attrs is nil; Authorize would answer the general
+	// question and pass a scoped holder. Unscoped / coarse / admin
+	// (non-partial) still fall back to the coarse allow as documented; a
+	// scoped grant approver must fail closed when the asset is unresolved.
+	dec := identity.Authorize("bastion.grant:write", attrs)
+	if dec.Allowed && (found || !dec.Partial) {
 		return true
 	}
 	httpx.WriteError(w, http.StatusForbidden, "permission denied")
