@@ -70,6 +70,22 @@ export function ConnectPage() {
     };
   }, []);
 
+  // The header advertises ⌘K — wire it so the shortcut actually does what
+  // the hint says (jump to the full asset search) instead of being a dead
+  // affordance. Ctrl+K covers non-mac. Ignore it while typing in the rail
+  // search so it doesn't hijack an in-field keystroke.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "k" || !(event.metaKey || event.ctrlKey)) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      event.preventDefault();
+      navigate("/cmdb");
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [navigate]);
+
   // Mirrors the Sessions sidebar: a wide window of assets grouped client
   // side by the shared AssetRail. Same query key/shape as elsewhere so the
   // react-query cache is shared, not duplicated.
