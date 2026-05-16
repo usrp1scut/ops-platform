@@ -1,5 +1,6 @@
 import {
   Activity,
+  Cable,
   Cloud,
   Database,
   KeyRound,
@@ -28,8 +29,8 @@ type NavItem = {
 };
 
 const operateNav: NavItem[] = [
-  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/cmdb", label: "Connect", icon: Database, badge: "new", isAlias: true },
+  { to: "/overview", label: "Overview", icon: LayoutDashboard },
+  { to: "/connect", label: "Connect", icon: Cable, badge: "new" },
   {
     to: "/sessions",
     label: "Sessions",

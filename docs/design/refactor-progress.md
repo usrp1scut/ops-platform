@@ -23,3 +23,15 @@
 - 旧地址 `/portal/sessions?mode=audit` 现在会自动重定向到 `/portal/audit`，侧栏 Govern 分组下的 `Audit` 也从占位链接切换为真实路由。
 - 本阶段严格停在阶段 2：未提前实现阶段 2.5 的多会话标签页，也未扩展到新的 Connect 页面或后端接口调整。
 - 验证：`cd web && npm run typecheck`、`cd web && npm run build` 通过；浏览器手测确认旧路径重定向、`Open Audit →` 跳转、Audit 表格与 `Inspect` 录屏预览均可用。
+
+## 2026-05-16 · 阶段 3：Connect 新页
+
+- 新增 `web/src/features/connect/ConnectPage.tsx`，按设计评审第 10 页落地三栏布局：左 360px 资产树、中部所选资产详情头部 + 连接面板、右侧三张上下文卡片（近期使用 / 谁有访问权 / 标签）。
+- 把原先内联在 `SessionsPage` 的 asset rail 抽成共享组件 `web/src/features/sessions/AssetRail.tsx`（保留 env→vpc→host 分组、搜索、bastion 标记、两行行样式），`SessionsPage` 改为消费它且 Live 行为保持不变（点击=启动、SSH/RDP 切换、刷新照旧）；`ConnectPage` 复用同一组件，点击=选中并高亮。
+- 详情头部：资产名 + 状态 pill + `Open SSH` / `Open RDP` / `View in CMDB`；连接面板按是否有 grant 分支——有 grant 显示倒计时（`formatGrantTimeRemaining`）与 `Open SSH`/`Open RDP`，无 grant 同位置显示 `Request access`（跳 `/access`）。
+- 顶栏中央放 ⌘K 搜索框样式，功能先指向现有 CMDB 搜索（点击跳 `/cmdb`）。
+- 数据层不新增接口：rail 复用 `listAssets({limit:500})`、详情复用 `getAsset`、grant 复用 `listMyActiveBastionGrants`，查询键与 CMDB/Access 一致以共享 react-query 缓存。
+- 路由：`/portal/` 默认路由从 Overview 改为 Connect（index `<Navigate to="/connect">`，新增 `/connect`、`/overview` 两条路由）。
+- 取舍说明（待 review 确认）：设计要求“Connect 设为默认路由”与“Overview 侧栏项不动”存在冲突——Overview 原本就是 index（`to:"/"`）。为同时满足“Connect 是默认落地页”且“Overview 仍可达且仍是 Operate 第一项”，把侧栏 Overview 指向新增的 `/overview`，位置/顺序保持第一项不动，但 `to` 必然随默认路由迁移而改变；Connect 占位别名升级为真实 `/connect`，保留 `new` 徽章。
+- 本阶段严格停在阶段 3：未重构数据层，未新增后端接口，未触碰其它 `features/` 页面逻辑（仅 `SessionsPage` 因抽取 rail 做了等价替换）。
+- 验证：`cd web && npm run typecheck`、`cd web && npm run build` 通过；本环境未跑浏览器手测（worktree 无运行实例），建议 review 时在浏览器确认 Connect 三栏、rail 选中高亮、grant 分支与 Sessions Live rail 回归。

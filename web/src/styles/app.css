@@ -2321,3 +2321,145 @@ body.fullwidth-mode .page-section { width: 100%; max-width: none; }
 }
 .iam-perms-summary > summary::-webkit-details-marker { display: none; }
 .iam-perms-summary[open] > summary { margin-bottom: 10px; }
+
+/* ========== Connect (Operate) ==========
+ * Three-column connection hub: asset rail (reused from Sessions) on the
+ * left, the selected asset's connection panel in the middle, and context
+ * cards on the right. Lives in fullwidth-mode so it uses the screen
+ * width without the centered page cap. */
+.connect-page { min-height: 0; }
+
+.connect-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.connect-header > div { flex: 0 0 auto; }
+.connect-header > .status-pill { flex: 0 0 auto; }
+
+.connect-cmdk {
+  flex: 1 1 auto;
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-subtle);
+  color: var(--color-fg-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.connect-cmdk:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+.connect-cmdk > span { flex: 1; text-align: left; }
+.connect-cmdk kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
+}
+
+.connect-workspace {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr) 320px;
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .connect-workspace { grid-template-columns: 320px minmax(0, 1fr); }
+  .connect-workspace > .connect-side { display: none; }
+}
+@media (max-width: 820px) {
+  .connect-workspace { grid-template-columns: 1fr; }
+}
+
+/* The rail reuses .sessions-rail; cap its height here so the tree scrolls
+ * inside the column instead of stretching the whole page. */
+.connect-workspace > .sessions-rail {
+  max-height: calc(100vh - 170px);
+}
+
+.asset-tree-row.selected {
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+.asset-tree-row.selected .asset-tree-name { color: var(--color-accent-hover); }
+
+.connect-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.connect-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-subtle);
+  min-height: 280px;
+}
+.connect-empty h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+.connect-empty p { margin: 0; max-width: 460px; }
+
+.connect-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+}
+.connect-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.connect-detail-title h2 { margin: 0; font-size: 18px; font-weight: 700; }
+.connect-detail-head p.muted { margin: 6px 0 0; font-size: 13px; }
+.connect-detail-head p.muted code { font-size: 12.5px; }
+
+.connect-conn-panel { padding: 16px; }
+.connect-conn-panel .form-actions { margin-top: 12px; }
+
+.connect-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.connect-card { padding: 14px 16px; }
+.connect-card > .eyebrow { margin-bottom: 10px; }
+.connect-card p { margin: 0 0 8px; font-size: 13px; }
+.connect-card .text-link-button { margin-top: 4px; }
+.connect-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.connect-card-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+}
+.connect-card-list dt { color: var(--color-fg-muted); }
+.connect-card-list dd { margin: 0; text-align: right; }

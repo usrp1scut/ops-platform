@@ -1,12 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Play,
-  RefreshCw,
-  Search,
   ShieldCheck,
   X,
 } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../../api/client";
@@ -19,14 +17,9 @@ import {
 } from "../../api/cmdb";
 import { issueRdpTicket, issueTerminalTicket } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
-import {
-  buildAssetTree,
-  filterConnectableAssets,
-  isConnectableAsset,
-  parseLaunchParams,
-  type AssetTreeEnv,
-} from "../../lib/launch";
+import { parseLaunchParams } from "../../lib/launch";
 import { useAuth } from "../auth/AuthProvider";
+import { AssetRail } from "./AssetRail";
 import { RdpSessionPane, type LiveRDPStatus } from "./RdpSessionPane";
 import { SshTerminalPane, type LiveSSHStatus } from "./SshTerminalPane";
 
@@ -136,15 +129,6 @@ export function SessionsPage() {
   });
   const assetItems = assetSearch.data?.items || [];
   const sidebarItems = sidebarAssets.data?.items || [];
-  const connectableAssets = useMemo(() => sidebarItems.filter(isConnectableAsset), [sidebarItems]);
-  const filteredConnectables = useMemo(
-    () => filterConnectableAssets(connectableAssets, sidebarSearch),
-    [connectableAssets, sidebarSearch],
-  );
-  const assetTree: AssetTreeEnv[] = useMemo(
-    () => buildAssetTree(filteredConnectables),
-    [filteredConnectables],
-  );
   const updateLiveSessionStatus = useCallback((sessionID: string, status: LiveSessionStatus, message?: string) => {
     setLiveSessions((current) =>
       current.map((session) => (session.id === sessionID ? { ...session, message, status } : session)),
@@ -263,140 +247,28 @@ export function SessionsPage() {
     setSearchParams({}, { replace: true });
   }, [canReadSessions, userID, searchParams, launchTerminal, setSearchParams]);
 
-  // ---- Sidebar (asset rail) reusable block ----
-  // Used in Live mode as the left rail. Mirrors the legacy /portal sidebar:
-  // search box, env/vpc/asset tree, click-to-launch behaviour. Protocol
-  // toggle lives at the bottom so SSH/RDP choice travels with the rail.
-  // Rail header now hosts everything that drives the launch: protocol
-  // toggle, search, refresh. Previously the SSH/RDP toggle was at the
-  // rail bottom and Refresh was hidden in the page-wide Launch panel,
-  // far from the asset list. Co-locating them removes that disconnect
-  // and frees vertical space in the pane.
-  const railSearch = (
-    <div className="sessions-rail-header">
-      <div className="sessions-rail-protocol drawer-tabs" role="tablist" aria-label="Launch protocol">
-        {[
-          { label: "SSH", value: "ssh" },
-          { label: "RDP", value: "rdp" },
-        ].map((item) => (
-          <button
-            type="button"
-            className={`drawer-tab${launchProtocol === item.value ? " active" : ""}`}
-            key={item.value}
-            onClick={() => setLaunchProtocol(item.value as LaunchProtocol)}
-            role="tab"
-            aria-selected={launchProtocol === item.value}
-            title={`Click a row to launch ${item.label} to the asset`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      <div className="sessions-rail-searchrow">
-        <div className="input-with-icon sessions-rail-search">
-          <Search size={14} aria-hidden="true" />
-          <input
-            type="search"
-            value={sidebarSearch}
-            onChange={(event) => setSidebarSearch(event.target.value)}
-            placeholder="Search name / ip / vpc"
-            disabled={!canReadSessions}
-          />
-        </div>
+  // SSH/RDP toggle injected into the shared AssetRail header so the
+  // protocol choice sits with search + refresh and travels with the rail.
+  const railProtocolToggle = (
+    <div className="sessions-rail-protocol drawer-tabs" role="tablist" aria-label="Launch protocol">
+      {[
+        { label: "SSH", value: "ssh" },
+        { label: "RDP", value: "rdp" },
+      ].map((item) => (
         <button
           type="button"
-          className="icon-button compact-icon"
-          onClick={() => void sidebarAssets.refetch()}
-          disabled={!canReadSessions || sidebarAssets.isFetching}
-          title={sidebarAssets.isFetching ? "Refreshing" : "Refresh"}
-          aria-label="Refresh assets"
+          className={`drawer-tab${launchProtocol === item.value ? " active" : ""}`}
+          key={item.value}
+          onClick={() => setLaunchProtocol(item.value as LaunchProtocol)}
+          role="tab"
+          aria-selected={launchProtocol === item.value}
+          title={`Click a row to launch ${item.label} to the asset`}
         >
-          <RefreshCw size={14} aria-hidden="true" />
+          {item.label}
         </button>
-      </div>
+      ))}
     </div>
   );
-
-  const railTree = (
-    <div className="sessions-rail-tree">
-      {!canReadSessions ? (
-        <PanelState kind="permission" message="Permission required: cmdb.asset:read" />
-      ) : null}
-      {canReadSessions && sidebarAssets.isError ? (
-        <PanelState
-          kind="error"
-          message={sidebarAssets.error instanceof Error ? sidebarAssets.error.message : "Failed to load assets."}
-        />
-      ) : null}
-      {canReadSessions && sidebarAssets.isLoading ? (
-        <PanelState kind="loading" message="Loading connectable assets" />
-      ) : null}
-      {canReadSessions && !sidebarAssets.isLoading && !sidebarAssets.isError && assetTree.length === 0 ? (
-        <PanelState kind="empty" message="No connectable assets match this filter." />
-      ) : null}
-      {assetTree.length > 0 ? (
-        <div className="asset-tree">
-          {assetTree.map((env) => (
-            <details className="asset-tree-env" key={env.envName} open>
-              <summary>
-                <span>env · {env.envName}</span>
-                <span className="muted">({env.total})</span>
-              </summary>
-              {env.vpcs.map((vpc) => (
-                <details
-                  className="asset-tree-vpc"
-                  key={`${env.envName}::${vpc.vpcKey}`}
-                  open
-                >
-                  <summary>
-                    <span>
-                      vpc · <code>{vpc.vpcLabel}</code>
-                    </span>
-                    <span className="muted">({vpc.count})</span>
-                  </summary>
-                  <div className="asset-tree-members">
-                    {[...vpc.bastions, ...vpc.members].map((asset) => {
-                      const addr = asset.public_ip || asset.private_ip || asset.private_dns;
-                      // Secondary line builds 'ip · env · type' so a
-                      // long list of biz-01 assets becomes scannable by
-                      // address + env at a glance, not just by row order.
-                      const secondaryParts: string[] = [];
-                      if (addr) secondaryParts.push(addr);
-                      if (asset.env) secondaryParts.push(asset.env);
-                      const typeLabel = (asset.type || "").replace(/^aws_/, "");
-                      if (typeLabel) secondaryParts.push(typeLabel);
-                      return (
-                        <button
-                          type="button"
-                          key={asset.id}
-                          className={`asset-tree-row${asset.is_vpc_proxy ? " bastion" : ""}`}
-                          onClick={() => quickLaunch(asset)}
-                          disabled={launchTerminal.isPending}
-                          title={`Launch ${launchProtocol.toUpperCase()} to ${asset.name || asset.id}`}
-                        >
-                          <div className="asset-tree-row-primary">
-                            {asset.is_vpc_proxy ? <span className="asset-tree-bastion" aria-label="bastion" /> : null}
-                            <span className="asset-tree-name">{asset.name || asset.id}</span>
-                          </div>
-                          {secondaryParts.length > 0 ? (
-                            <div className="asset-tree-row-secondary">{secondaryParts.join(" · ")}</div>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </details>
-              ))}
-            </details>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-
-  // (railProtocol removed: SSH/RDP toggle moved into railSearch header
-  //  so protocol choice sits with search + refresh, not as a separate
-  //  bottom strip that looked disconnected from the asset list.)
 
   return (
     <section className="page-section sessions-page live-mode">
@@ -424,10 +296,23 @@ export function SessionsPage() {
       </div>
 
       <div className="sessions-workspace">
-          <aside className="sessions-rail" aria-label="Connectable assets">
-            {railSearch}
-            {railTree}
-          </aside>
+          <AssetRail
+            assets={sidebarItems}
+            search={sidebarSearch}
+            onSearchChange={setSidebarSearch}
+            canRead={canReadSessions}
+            isLoading={sidebarAssets.isLoading}
+            isError={sidebarAssets.isError}
+            error={sidebarAssets.error}
+            onSelect={quickLaunch}
+            rowsDisabled={launchTerminal.isPending}
+            rowTitle={(asset) =>
+              `Launch ${launchProtocol.toUpperCase()} to ${asset.name || asset.id}`
+            }
+            protocolToggle={railProtocolToggle}
+            onRefresh={() => void sidebarAssets.refetch()}
+            refreshing={sidebarAssets.isFetching}
+          />
           <div className="sessions-pane">
             {launchFeedback ? (
               <div className={`sessions-toast ${launchFeedback.kind}`} role="status">

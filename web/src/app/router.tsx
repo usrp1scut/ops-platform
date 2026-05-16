@@ -7,6 +7,7 @@ import { AccessPage } from "../features/access/AccessPage";
 import { AuditPage } from "../features/audit/AuditPage";
 import { AwsPage } from "../features/aws/AwsPage";
 import { AssetsPage } from "../features/cmdb/AssetsPage";
+import { ConnectPage } from "../features/connect/ConnectPage";
 import { ConnectivityPage } from "../features/connectivity/ConnectivityPage";
 import { IamPage } from "../features/iam/IamPage";
 import { OidcPage } from "../features/oidc/OidcPage";
@@ -42,6 +43,14 @@ export const router = createBrowserRouter(
       children: [
         {
           index: true,
+          element: <Navigate to="/connect" replace />,
+        },
+        {
+          path: "connect",
+          element: <ConnectPage />,
+        },
+        {
+          path: "overview",
           element: <OverviewPage />,
         },
         {
