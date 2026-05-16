@@ -134,13 +134,6 @@ export function AppShell() {
             <span>Operations console</span>
           </div>
           <div className="topbar-user">
-            <a
-              className="legacy-portal-link"
-              href="/portal-legacy/"
-              title="Open the previous classic-script console in this tab"
-            >
-              Old portal
-            </a>
             <ThemeToggle />
             <span className="user-name">{displayName}</span>
             <button type="button" className="icon-button" onClick={auth.logout} title="Sign out">

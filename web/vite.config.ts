@@ -6,9 +6,9 @@ import react from "@vitejs/plugin-react";
 // without dragging in the full Node typings.
 declare const process: { env: Record<string, string | undefined> };
 
-// Set VITE_BASE=/portal/ when building for the embedded production mount.
-// Defaults to "/" so `npm run dev` and bare `npm run build` keep working
-// without ambient config.
+// The canonical deploy serves the SPA at the domain root via the standalone
+// nginx image, so base defaults to "/". VITE_BASE is only set if someone
+// deliberately reuses the build under a sub-path.
 const base = process.env.VITE_BASE || "/";
 
 export default defineConfig({

@@ -145,10 +145,10 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # Standalone frontend image. Builds the Vite/React SPA and serves it
-  # behind nginx, reverse-proxying the API surface to ops-api so the
-  # frontend can scale and roll independently. The all-in-one ops-api
-  # binary still serves /portal/ from its embed for dev workflows.
+  # Frontend. Builds the Vite/React SPA and serves it behind nginx,
+  # reverse-proxying the API surface (/api /auth /healthz /ws) to ops-api on
+  # the same origin. ops-api is API-only and embeds no UI, so this is the
+  # only thing that serves the console — in every environment.
   web:
     build:
       context: ./web

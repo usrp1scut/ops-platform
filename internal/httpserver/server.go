@@ -43,7 +43,7 @@ func (s *Server) Router() http.Handler {
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
-	mountUIRoutes(router)
+	mountRootRoutes(router)
 
 	iamRepo := iam.NewRepository(s.db)
 	if s.cfg.OIDCSeed.HasSettings() {

@@ -77,8 +77,7 @@ export function OverviewPage() {
           <StatusPill ok={healthOk} label={healthOk ? "operational" : "degraded"} />
         </div>
         <div className="check-list">
-          <div>React/Vite console is the primary /portal/ experience</div>
-          <div>Classic console kept at /portal-legacy/ for rollback</div>
+          <div>React/Vite console served standalone; ops-api is API-only</div>
           <div>API {healthOk ? "online" : "unavailable"} — re-checked every 30s</div>
           <div>
             Signed in as {displayName} · {auth.identity?.roles.length || 0} role

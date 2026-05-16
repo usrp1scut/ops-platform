@@ -185,23 +185,6 @@ a {
   color: var(--color-fg-muted);
 }
 
-.legacy-portal-link {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 9px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-fg-muted);
-  font-size: 12px;
-  text-decoration: none;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-.legacy-portal-link:hover {
-  background: var(--color-bg-overlay);
-  color: var(--color-fg);
-}
-
 .icon-button {
   display: grid;
   width: 30px;
