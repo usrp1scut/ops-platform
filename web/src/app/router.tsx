@@ -1,9 +1,10 @@
-import { createBrowserRouter } from "react-router-dom";
+import { Navigate, createBrowserRouter, useLocation } from "react-router-dom";
 
 import { AppShell } from "./layout/AppShell";
 import { ProtectedRoute } from "./layout/ProtectedRoute";
 import { LoginPage } from "../features/auth/LoginPage";
 import { AccessPage } from "../features/access/AccessPage";
+import { AuditPage } from "../features/audit/AuditPage";
 import { AwsPage } from "../features/aws/AwsPage";
 import { AssetsPage } from "../features/cmdb/AssetsPage";
 import { ConnectivityPage } from "../features/connectivity/ConnectivityPage";
@@ -13,6 +14,17 @@ import { OverviewPage } from "../features/overview/OverviewPage";
 import { ProfilePage } from "../features/profile/ProfilePage";
 import { SessionsPage } from "../features/sessions/SessionsPage";
 import { appBasename } from "../lib/basename";
+
+function SessionsRoute() {
+  const location = useLocation();
+  const mode = new URLSearchParams(location.search).get("mode");
+
+  if (mode === "audit") {
+    return <Navigate to="/audit" replace />;
+  }
+
+  return <SessionsPage />;
+}
 
 export const router = createBrowserRouter(
   [
@@ -38,7 +50,11 @@ export const router = createBrowserRouter(
         },
         {
           path: "sessions",
-          element: <SessionsPage />,
+          element: <SessionsRoute />,
+        },
+        {
+          path: "audit",
+          element: <AuditPage />,
         },
         {
           path: "access",

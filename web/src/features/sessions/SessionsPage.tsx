@@ -1,18 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  Download,
-  MonitorPlay,
   Play,
   RefreshCw,
   Search,
   ShieldCheck,
-  SquareTerminal,
-  Timer,
-  Video,
   X,
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../../api/client";
 import {
@@ -22,15 +17,8 @@ import {
   type Asset,
   type AssetConnectionProfile,
 } from "../../api/cmdb";
-import {
-  getSessionRecording,
-  issueRdpTicket,
-  issueTerminalTicket,
-  listSessions,
-  type SessionAuditRecord,
-} from "../../api/sessions";
+import { issueRdpTicket, issueTerminalTicket } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
-import { PermissionList } from "../../components/PermissionList";
 import {
   buildAssetTree,
   filterConnectableAssets,
@@ -38,19 +26,6 @@ import {
   parseLaunchParams,
   type AssetTreeEnv,
 } from "../../lib/launch";
-import {
-  filterSessionsByStatus,
-  formatBytes,
-  formatDurationMs,
-  parseAsciicast,
-  recordingLabel,
-  sessionCounts,
-  sessionStatus,
-  sessionStatusTone,
-  type RecordingPreview,
-  type SessionFilters,
-  type SessionStatusFilter,
-} from "../../lib/sessions";
 import { useAuth } from "../auth/AuthProvider";
 import { RdpSessionPane, type LiveRDPStatus } from "./RdpSessionPane";
 import { SshTerminalPane, type LiveSSHStatus } from "./SshTerminalPane";
@@ -58,13 +33,6 @@ import { SshTerminalPane, type LiveSSHStatus } from "./SshTerminalPane";
 type ActionFeedback = {
   kind: "error" | "success";
   message: string;
-};
-
-type RecordingPreviewState = {
-  label: string;
-  preview: RecordingPreview;
-  rawText: string;
-  sessionID: string;
 };
 
 type LaunchProtocol = "ssh" | "rdp";
@@ -86,41 +54,6 @@ type TerminalLaunchResult = {
   kind: LaunchProtocol;
   ticket: string;
 };
-
-const emptyFilters: SessionFilters = {
-  assetID: "",
-  status: "all",
-  userID: "",
-};
-
-function formatDateTime(value: string | undefined) {
-  if (!value) return "-";
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
-function updateFilter<K extends keyof SessionFilters>(
-  setFilters: (updater: (current: SessionFilters) => SessionFilters) => void,
-  key: K,
-  value: SessionFilters[K],
-) {
-  setFilters((current) => ({ ...current, [key]: value }));
-}
-
-function trafficLabel(session: SessionAuditRecord) {
-  return `${formatBytes(session.bytes_in)} / ${formatBytes(session.bytes_out)}`;
-}
-
-function downloadRecording(sessionID: string, rawText: string) {
-  const blob = new Blob([rawText], { type: "application/x-asciicast" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `${sessionID}.cast`;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
 
 function assetOptionLabel(asset: Asset) {
   const name = asset.name || asset.id;
@@ -150,23 +83,14 @@ function createLiveSessionID() {
 export function SessionsPage() {
   const auth = useAuth();
   const userID = auth.identity?.user.id || "";
-  const permissions = auth.identity?.permissions || [];
   const canReadSessions = auth.can("cmdb.asset:read");
   const canReadAllSessions = auth.can("bastion.session:read");
-  const sessionPermissions = permissions.filter(
-    (permission) =>
-      permission === "system:admin" || permission === "cmdb.asset:read" || permission === "bastion.session:read",
-  );
-  const [filters, setFilters] = useState<SessionFilters>(emptyFilters);
-  const [draftFilters, setDraftFilters] = useState<SessionFilters>(emptyFilters);
   const [assetQuery, setAssetQuery] = useState("");
   const [selectedAssetID, setSelectedAssetID] = useState("");
   const [launchProtocol, setLaunchProtocol] = useState<LaunchProtocol>("ssh");
   const [launchFeedback, setLaunchFeedback] = useState<ActionFeedback | null>(null);
   const [liveSessions, setLiveSessions] = useState<LiveSession[]>([]);
   const [activeLiveID, setActiveLiveID] = useState("");
-  const [recordingFeedback, setRecordingFeedback] = useState<ActionFeedback | null>(null);
-  const [recordingPreview, setRecordingPreview] = useState<RecordingPreviewState | null>(null);
   const [sidebarSearch, setSidebarSearch] = useState("");
   // "Launch by ID" used to live as a bottom panel under the terminal,
   // squeezing the terminal whenever it appeared. It now lives in a
@@ -174,28 +98,17 @@ export function SessionsPage() {
   // can't (or doesn't want to) find the asset in the rail.
   const [launchByIdOpen, setLaunchByIdOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
-  // Top-level Live | Audit toggle. Mirrors the legacy /portal layout where
-  // Live and Audit feel like separate operator tools rather than two
-  // sections of one stacked page. Persisted to the URL so deep-links and
-  // back/forward navigation work across the two surfaces.
-  const sessionsMode: "live" | "audit" = searchParams.get("mode") === "audit" ? "audit" : "live";
 
-  // In Live mode the Sessions page becomes a real workspace: drop the
+  // Sessions is now purely the live workspace: drop the
   // page-frame padding + .page-section width cap so the terminal can fill
   // the viewport. Driven by a body class so we can override the shell-level
-  // padding rules from a leaf component without prop-drilling. Cleaned up
-  // on unmount or when the user switches to Audit so other pages aren't
-  // affected.
+  // padding rules from a leaf component without prop-drilling.
   useEffect(() => {
-    if (sessionsMode !== "live") {
-      document.body.classList.remove("workspace-mode");
-      return;
-    }
     document.body.classList.add("workspace-mode");
     return () => {
       document.body.classList.remove("workspace-mode");
     };
-  }, [sessionsMode]);
+  }, []);
 
   // launchFeedback is a transient confirmation ("ticket issued",
   // "permission denied", etc). In a workspace it should not push the
@@ -208,22 +121,6 @@ export function SessionsPage() {
     const t = window.setTimeout(() => setLaunchFeedback(null), ttl);
     return () => window.clearTimeout(t);
   }, [launchFeedback]);
-  const setSessionsMode = useCallback(
-    (next: "live" | "audit") => {
-      setSearchParams(
-        (current) => {
-          const params = new URLSearchParams(current);
-          if (next === "live") params.delete("mode");
-          else params.set("mode", next);
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
-  const effectiveUserID = canReadAllSessions ? filters.userID.trim() : "";
-  const effectiveAssetID = filters.assetID.trim();
   const assetSearch = useQuery({
     queryKey: ["cmdb", "assets", "sessions-terminal-search", userID, assetQuery],
     queryFn: () => listAssets({ limit: 30, query: assetQuery.trim() || undefined, status: "active" }),
@@ -237,28 +134,7 @@ export function SessionsPage() {
     queryFn: () => listAssets({ limit: 500 }),
     enabled: canReadSessions && Boolean(userID),
   });
-  const sessions = useQuery({
-    queryKey: ["sessions", userID, effectiveUserID, effectiveAssetID, filters.status],
-    queryFn: () =>
-      listSessions({
-        assetID: effectiveAssetID || undefined,
-        limit: 100,
-        userID: effectiveUserID || undefined,
-      }),
-    enabled: canReadSessions && Boolean(userID),
-    refetchInterval: 10000,
-    // Default in TanStack Query v5 — set explicitly so the intent survives a
-    // future bump or a global QueryClient reconfiguration. Keeps the API
-    // quiet when the operator parks the tab in the background.
-    refetchIntervalInBackground: false,
-  });
   const assetItems = assetSearch.data?.items || [];
-  const sessionItems = sessions.data?.items || [];
-  const counts = sessionCounts(sessionItems);
-  const visibleSessions = useMemo(
-    () => filterSessionsByStatus(sessionItems, filters.status),
-    [filters.status, sessionItems],
-  );
   const sidebarItems = sidebarAssets.data?.items || [];
   const connectableAssets = useMemo(() => sidebarItems.filter(isConnectableAsset), [sidebarItems]);
   const filteredConnectables = useMemo(
@@ -354,45 +230,6 @@ export function SessionsPage() {
       });
     },
   });
-  const inspectRecording = useMutation({
-    mutationFn: async (session: SessionAuditRecord) => {
-      const rawText = await getSessionRecording(session.id);
-      return {
-        label: recordingLabel(session),
-        preview: parseAsciicast(rawText),
-        rawText,
-        sessionID: session.id,
-      };
-    },
-    onMutate: () => {
-      setRecordingFeedback(null);
-    },
-    onSuccess: (preview) => {
-      setRecordingPreview(preview);
-      setRecordingFeedback({ kind: "success", message: `Recording loaded for ${preview.label}.` });
-    },
-    onError: (error) => {
-      setRecordingFeedback({
-        kind: "error",
-        message: error instanceof Error ? error.message : "Failed to load recording.",
-      });
-    },
-  });
-
-  function applyFilters(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setFilters({
-      assetID: draftFilters.assetID.trim(),
-      status: draftFilters.status,
-      userID: canReadAllSessions ? draftFilters.userID.trim() : "",
-    });
-  }
-
-  function resetFilters() {
-    setDraftFilters(emptyFilters);
-    setFilters(emptyFilters);
-  }
-
   function launchSelectedAsset(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const assetID = selectedAssetID.trim();
@@ -562,97 +399,31 @@ export function SessionsPage() {
   //  bottom strip that looked disconnected from the asset list.)
 
   return (
-    <section className={`page-section sessions-page${sessionsMode === "live" ? " live-mode" : " audit-mode"}`}>
+    <section className="page-section sessions-page live-mode">
       <div className="page-header sessions-header">
         <h1>Sessions</h1>
-        <div className="sessions-mode-tabs" role="tablist" aria-label="Sessions mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={sessionsMode === "live"}
-            className={`sessions-mode-tab${sessionsMode === "live" ? " active" : ""}`}
-            onClick={() => setSessionsMode("live")}
-          >
-            Live
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={sessionsMode === "audit"}
-            className={`sessions-mode-tab${sessionsMode === "audit" ? " active" : ""}`}
-            onClick={() => setSessionsMode("audit")}
-          >
-            Audit
-          </button>
-        </div>
-        {/* Stats moved out of the header (was mixed with mode tabs and
-            permission pill, hard to scan). On Live they live in the
-            terminal's status corner contextually; on Audit they're the
-            metric grid below. Header carries identity + actions only. */}
         <div className="sessions-header-actions">
-          {sessionsMode === "live" && counts.errors > 0 ? (
-            <span className="status-pill warn tiny" title="Session errors waiting in Audit">
-              {counts.errors} errors
-            </span>
-          ) : null}
           <span className={`status-pill ${canReadSessions ? "ok" : "warn"}`} title="Required permission">
             <ShieldCheck size={14} aria-hidden="true" />
             {canReadAllSessions ? "all sessions" : canReadSessions ? "own sessions" : "no access"}
           </span>
-          {sessionsMode === "live" ? (
-            <button
-              type="button"
-              className="secondary-button compact"
-              onClick={() => setLaunchByIdOpen(true)}
-              disabled={!canReadSessions}
-              title="Launch a session by typing the asset ID"
-            >
-              <Play size={14} aria-hidden="true" />
-              <span>Launch by ID</span>
-            </button>
-          ) : null}
+          <Link className="secondary-button compact" to="/audit">
+            Open Audit →
+          </Link>
+          <button
+            type="button"
+            className="secondary-button compact"
+            onClick={() => setLaunchByIdOpen(true)}
+            disabled={!canReadSessions}
+            title="Launch a session by typing the asset ID"
+          >
+            <Play size={14} aria-hidden="true" />
+            <span>Launch by ID</span>
+          </button>
         </div>
       </div>
 
-      {sessionsMode === "audit" ? (
-        <div className="metric-grid">
-          <article className="metric-card">
-            <div className="metric-icon">
-              <SquareTerminal size={20} aria-hidden="true" />
-            </div>
-            <div>
-              <div className="metric-label">Shown</div>
-              <div className="metric-value">{canReadSessions ? visibleSessions.length : "-"}</div>
-            </div>
-            <span className="status-pill">{counts.total} loaded</span>
-          </article>
-
-          <article className="metric-card">
-            <div className="metric-icon">
-              <Timer size={20} aria-hidden="true" />
-            </div>
-            <div>
-              <div className="metric-label">Active now</div>
-              <div className="metric-value">{canReadSessions ? counts.active : "-"}</div>
-            </div>
-            <span className="status-pill">{counts.closed} closed</span>
-          </article>
-
-          <article className="metric-card">
-            <div className="metric-icon">
-              <Video size={20} aria-hidden="true" />
-            </div>
-            <div>
-              <div className="metric-label">Recordings</div>
-              <div className="metric-value">{canReadSessions ? counts.recordings : "-"}</div>
-            </div>
-            <span className={`status-pill ${counts.errors > 0 ? "warn" : "ok"}`}>{counts.errors} errors</span>
-          </article>
-        </div>
-      ) : null}
-
-      {sessionsMode === "live" ? (
-        <div className="sessions-workspace">
+      <div className="sessions-workspace">
           <aside className="sessions-rail" aria-label="Connectable assets">
             {railSearch}
             {railTree}
@@ -749,10 +520,9 @@ export function SessionsPage() {
               </div>
             )}
           </div>
-        </div>
-      ) : null}
+      </div>
 
-      {sessionsMode === "live" && launchByIdOpen ? (
+      {launchByIdOpen ? (
         <div className="sessions-launch-modal" role="dialog" aria-modal="true" aria-label="Launch session by asset ID">
           <button
             type="button"
@@ -852,237 +622,9 @@ export function SessionsPage() {
         </div>
       ) : null}
 
-      {sessionsMode === "audit" ? (
-        <>
-      <div className="profile-grid">
-        <article className="work-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Audit</p>
-              <h2>Session filters</h2>
-            </div>
-            <button
-              type="button"
-              className="secondary-button compact"
-              onClick={() => void sessions.refetch()}
-              disabled={!canReadSessions || sessions.isFetching}
-            >
-              <RefreshCw size={14} aria-hidden="true" />
-              <span>{sessions.isFetching ? "Refreshing" : "Refresh"}</span>
-            </button>
-          </div>
-
-          {!canReadSessions ? <PanelState kind="permission" message="Permission required: cmdb.asset:read" /> : null}
-          {canReadSessions && !canReadAllSessions ? (
-            <PanelState kind="permission" message="Showing only your own session rows." />
-          ) : null}
-
-          <form className="request-form" onSubmit={applyFilters}>
-            <div className="form-grid">
-              <label className="form-field">
-                <span>User ID</span>
-                <input
-                  value={draftFilters.userID}
-                  onChange={(event) => updateFilter(setDraftFilters, "userID", event.target.value)}
-                  placeholder={canReadAllSessions ? "Filter by user UUID" : "Own sessions only"}
-                  disabled={!canReadSessions || !canReadAllSessions}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Asset ID</span>
-                <input
-                  value={draftFilters.assetID}
-                  onChange={(event) => updateFilter(setDraftFilters, "assetID", event.target.value)}
-                  placeholder="Filter by asset UUID"
-                  disabled={!canReadSessions}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Status</span>
-                <select
-                  value={draftFilters.status}
-                  onChange={(event) =>
-                    updateFilter(setDraftFilters, "status", event.target.value as SessionStatusFilter)
-                  }
-                  disabled={!canReadSessions}
-                >
-                  <option value="all">All statuses</option>
-                  <option value="active">Active</option>
-                  <option value="closed">Closed</option>
-                  <option value="error">Error</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="form-actions">
-              <button type="submit" className="primary-button" disabled={!canReadSessions}>
-                <Search size={16} aria-hidden="true" />
-                <span>Apply filters</span>
-              </button>
-              <button type="button" className="secondary-button" onClick={resetFilters} disabled={!canReadSessions}>
-                Reset
-              </button>
-            </div>
-          </form>
-        </article>
-
-        <article className="work-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Permissions</p>
-              <h2>Session visibility</h2>
-            </div>
-            <span className={`status-pill ${canReadAllSessions ? "ok" : "info"}`}>
-              {canReadAllSessions ? "all sessions" : "own sessions"}
-            </span>
-          </div>
-          <PermissionList permissions={sessionPermissions} emptyLabel="No session permissions." />
-        </article>
-      </div>
-
-      <article className="work-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Audit</p>
-            <h2>Session records</h2>
-          </div>
-          <span className="status-pill">auto refresh 10s</span>
-        </div>
-
-        {recordingFeedback ? <PanelState kind={recordingFeedback.kind} message={recordingFeedback.message} /> : null}
-
-        {canReadSessions && sessions.isError ? (
-          <PanelState
-            kind="error"
-            message={sessions.error instanceof Error ? sessions.error.message : "Failed to load sessions."}
-          />
-        ) : null}
-
-        {canReadSessions && sessions.isLoading ? <PanelState kind="loading" message="Loading sessions" /> : null}
-
-        {canReadSessions && !sessions.isLoading && !sessions.isError && visibleSessions.length === 0 ? (
-          <PanelState kind="empty" message="No sessions match the current filters." />
-        ) : null}
-
-        {visibleSessions.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Started</th>
-                  <th>User</th>
-                  <th>Asset</th>
-                  <th>Status</th>
-                  <th>Duration</th>
-                  <th>In / Out</th>
-                  <th>Client IP</th>
-                  <th>Recording</th>
-                  <th>Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleSessions.map((session) => (
-                  <tr key={session.id}>
-                    <td>
-                      <strong>{formatDateTime(session.started_at)}</strong>
-                      {session.ended_at ? <div className="muted">ended {formatDateTime(session.ended_at)}</div> : null}
-                    </td>
-                    <td>
-                      <strong>{session.user_name || session.user_id}</strong>
-                      <div className="muted">{session.user_id}</div>
-                    </td>
-                    <td>
-                      <strong>{session.asset_name || session.asset_id}</strong>
-                      <div className="muted">{session.asset_id}</div>
-                      {session.proxy_name ? <div className="muted">via {session.proxy_name}</div> : null}
-                    </td>
-                    <td>
-                      <span className={`status-pill ${sessionStatusTone(session)}`}>
-                        {sessionStatus(session)}
-                        {session.exit_code !== undefined && session.exit_code !== null ? ` ${session.exit_code}` : ""}
-                      </span>
-                    </td>
-                    <td>{formatDurationMs(session.duration_ms)}</td>
-                    <td>{trafficLabel(session)}</td>
-                    <td>{session.client_ip || "-"}</td>
-                    <td>
-                      {session.has_recording ? (
-                        <button
-                          type="button"
-                          className="secondary-button compact"
-                          onClick={() => inspectRecording.mutate(session)}
-                          disabled={inspectRecording.isPending}
-                        >
-                          <MonitorPlay size={14} aria-hidden="true" />
-                          <span>{inspectRecording.isPending ? "Loading" : "Inspect"}</span>
-                        </button>
-                      ) : (
-                        <span className="muted">none</span>
-                      )}
-                    </td>
-                    <td>
-                      {session.error ? <span className="inline-error">{session.error}</span> : <span className="muted">-</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </article>
-
-      {recordingPreview ? (
-        <article className="work-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Recording</p>
-              <h2>{recordingPreview.label}</h2>
-            </div>
-            <div className="request-actions">
-              <button
-                type="button"
-                className="secondary-button compact"
-                onClick={() => downloadRecording(recordingPreview.sessionID, recordingPreview.rawText)}
-              >
-                <Download size={14} aria-hidden="true" />
-                <span>Download cast</span>
-              </button>
-              <button type="button" className="secondary-button compact" onClick={() => setRecordingPreview(null)}>
-                Close
-              </button>
-            </div>
-          </div>
-
-          <dl className="detail-grid">
-            <div>
-              <dt>Version</dt>
-              <dd>{recordingPreview.preview.version}</dd>
-            </div>
-            <div>
-              <dt>Size</dt>
-              <dd>
-                {recordingPreview.preview.cols} x {recordingPreview.preview.rows}
-              </dd>
-            </div>
-            <div>
-              <dt>Duration</dt>
-              <dd>{recordingPreview.preview.durationSeconds.toFixed(1)}s</dd>
-            </div>
-            <div>
-              <dt>Frames</dt>
-              <dd>{recordingPreview.preview.frames}</dd>
-            </div>
-          </dl>
-
-          <pre className="recording-preview">
-            {recordingPreview.preview.outputSample || "Recording contains no stdout frames."}
-          </pre>
-        </article>
-      ) : null}
-        </>
-      ) : null}
     </section>
   );
 }
+
+
+

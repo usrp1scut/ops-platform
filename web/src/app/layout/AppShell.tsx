@@ -47,10 +47,9 @@ const inventoryNav: NavItem[] = [
 const governNav: NavItem[] = [
   { to: "/iam", label: "IAM", icon: UsersRound },
   {
-    to: "/sessions?mode=audit",
+    to: "/audit",
     label: "Audit",
     icon: Activity,
-    matchesSearch: (search) => new URLSearchParams(search).get("mode") === "audit",
   },
   { to: "/aws", label: "AWS", icon: Cloud },
   { to: "/oidc", label: "OIDC", icon: ShieldCheck },
