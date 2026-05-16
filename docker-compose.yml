@@ -24,8 +24,9 @@ services:
 
   guacd:
     image: guacamole/guacd:1.5.5
-    ports:
-      - "127.0.0.1:4822:4822"
+    # No host port mapping: ops-api reaches guacd over the compose network
+    # (OPS_GUACD_ADDR=guacd:4822). Binding 4822 on the host is unnecessary
+    # and collides with Windows' Hyper-V reserved port ranges.
     restart: unless-stopped
 
   minio:
