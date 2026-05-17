@@ -129,3 +129,18 @@
 - `web/src/styles/app.css`：新增 `.connect-palette-*` 一组样式（顶部锚定的命令面板，结构沿用 sessions-launch modal 模式，复用既有 token：`--shadow-lg`/`--color-bg-overlay`/`--radius-md`/`--color-bg-subtle` 等）。
 - 严格停在阶段 8：零后端、无新接口；未碰左栏 rail / Connection / Tags / 右栏卡；面板搜索范围与 rail 同为 limit-500 窗口（>500 的车队同样受限，与 rail 一致，非本阶段引入的回归）。
 - 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未手测；建议 review 时确认：① ⌘K / 点按钮均打开面板且输入框自动聚焦；② 输入即时过滤、↑↓ 移动高亮、Enter/点击选中后面板关闭且 Connect 选定该资产；③ Esc 与 backdrop 均能关闭；④ 在 rail 搜索框聚焦时按 ⌘K 仍能打开面板；⑤ 无 `cmdb.asset:read` 时面板显权限提示。
+
+## 2026-05-17 · 阶段 9：Overview 运维仪表盘（纯前端）
+
+- 背景：调研清单项。OverviewPage 原为静态欢迎页（API 健康 + 角色/权限计数 + 硬编码状态条），名不副实的"概览"。
+- 决策：与阶段 7/8 同思路——**纯前端组合现有接口，零新后端聚合**。核实 `ListAssetsResponse.total` 已存在（用 `listAssets({limit:1}).total` 取总数，不拉全量）；`listSessions`/`listMyActiveBastionGrants`/`listPendingBastionRequests` 均现成，后端对无权用户自限（诚实降级）。
+- `web/src/features/overview/OverviewPage.tsx` 重写：
+  - 5 个指标卡（复用既有 `metric-card`）：API health（保留）、Assets 总数、Active sessions（`sessionCounts`，无 `bastion.session:read` 时标题转 "(yours)" 并显诚实说明）、My active grants（含最近到期 `formatGrantTimeRemaining`）、Pending requests（无 `bastion.grant:write` 时标题转 "(yours)"，对齐后端自限）。
+  - 每卡按自身权限**独立降级**：缺权限显 `—` + "no access" pill，加载显 `…`，互不阻塞，不报错。抽出 `MetricCard` 小组件 + `metricValue` 助手。
+  - **替换掉原低价值的 Identity/Permissions 计数块**；签到信息收进底部 Platform status 面板的一行。
+  - 新增 **Recent activity** 面板（`profile-grid` 两栏复用）：最近 5 条会话（时间/用户/资产/状态 pill），资产名深链 `/audit?asset=`（复用阶段 5 `buildAuditSearch`），面板头 "Open Audit →"。
+  - Refresh 按钮改为 `refreshAll()`：刷新全部已启用 query；`refreshing` 聚合各 query `isFetching`。sessions/health 30s 自动刷新。
+- 布局：Overview 原本一直用居中受限的 `page-section`（非本次回归）。仪表盘是宽网格 + 两栏面板，挂载时给 `body` 加 `fullwidth-mode` 类（与 Connect/CMDB/IAM 同一既有机制）撑满页面，卸载移除。
+- `web/src/styles/app.css`：新增 `.overview-activity*` 紧凑列表样式，沿用既有密度与 token。
+- 严格停在阶段 9：零后端、无新接口、无迁移；指标全部由现有列表接口客户端派生（assets 用 total，其余计数受各自 limit 上限与后端自限约束——诚实，与全站一致）；Audit RDP 录屏回放、Sessions rail env 过滤仍属后续。
+- 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未手测；建议 review 时确认：① 各卡按权限正确显数/降级（用不同权限账号）；② Active sessions / Pending requests 无对应"看全部"权限时标题为 "(yours)" 且数值与 Audit/Access 自己视角一致；③ My active grants 的 "next …" 取最早到期；④ Recent activity 列最近 5 条且资产名深链带 `?asset=`；⑤ Refresh 一次刷新全部、refreshing 文案与禁用态正确。
