@@ -114,3 +114,18 @@
 - `web/src/styles/app.css`：新增 `.connect-recent-list/.connect-access-list` 等紧凑列表样式，沿用 connect-card 既有密度，未改其它。
 - 严格停在阶段 7：零后端改动、无新接口、无迁移；未碰 Connect 左栏 rail / Connection 面板 / Tags 卡 / ⌘K（⌘K 仍 navigate→/cmdb，属后续）；IAM 常驻访问解析按划界明确不做。
 - 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未手测；建议 review 时在浏览器确认：① 选资产后 Recent usage 列出真实近 5 条会话、Open Audit 深链带 `?asset=`；② Who has access 列出该资产活跃 grant；③ 用 `bastion.grant:write` 与不用时分别看到"全部 / 仅自己 + 诚实说明"；④ 无 `bastion.session:read` 时 Recent usage 显示自限说明且仅本人会话；⑤ 切换资产时两卡随 `selectedAssetID` 正确刷新、空资产回到占位文案。
+
+## 2026-05-17 · 阶段 8：Connect ⌘K 真实搜索（纯前端）
+
+- 背景：调研清单项。Connect header 的 ⌘K 与按钮原本只是 `navigate("/cmdb")`——一个"假"快捷键，并未实现"找资产并连接"这条设计 handoff 强调的一等路径。
+- 决策：⌘K 打开一个**页内命令面板**（不跳走），选中资产即在 Connect 选定（`setSelectedAssetID`）。数据源**复用已缓存的 `railAssets`（limit 500）做客户端即时过滤**——零新增网络请求、结果即时，且与左栏 rail 同一搜索字段集（复用 `lib/launch` 的 `filterConnectableAssets`，纯文本过滤不丢非连接型资产）。
+- `web/src/features/connect/ConnectPage.tsx`：
+  - 新增 `paletteOpen/paletteQuery/paletteActive` 状态 + `paletteInputRef`；全局 keydown effect 改为 ⌘/Ctrl+K → `setPaletteOpen(true)`（**移除原"输入框内不触发"的回避**——带修饰键的 ⌘K 本就该在任何焦点下打开面板，这是命令面板预期），Esc → 关闭。
+  - 打开时 effect 清空 query/active 并 focus 输入框。
+  - 面板：搜索框 + 结果 listbox（最多 20 条，`name` + `env · ip/type`）；键盘 ArrowUp/Down 移动高亮、Enter 选中高亮项、Esc 关闭、点击/悬停选中；backdrop 点击关闭。`activeIndex` 对结果长度做 clamp，hover 与键盘高亮一致。
+  - 状态分支齐全：无 `cmdb.asset:read` 显权限提示；rail 加载中显 loading（避免加载时误显示"无匹配"）；空结果显 empty。
+  - header 按钮 onClick 改为 `setPaletteOpen(true)`，title 改为 "Search assets (⌘K)"。`navigate` 仍用于 openLive / View in CMDB / Manage access 等，未移除。
+  - a11y：每个选项 `id=connect-palette-opt-<i>`，combobox 输入设 `aria-activedescendant` 指向当前高亮项（屏幕阅读器能听到 ↑↓ 高亮变化）；新增 effect 在高亮变化时 `scrollIntoView({block:"nearest"})` 把高亮项滚入视口（已可见时为 no-op，hover 不抖动）。
+- `web/src/styles/app.css`：新增 `.connect-palette-*` 一组样式（顶部锚定的命令面板，结构沿用 sessions-launch modal 模式，复用既有 token：`--shadow-lg`/`--color-bg-overlay`/`--radius-md`/`--color-bg-subtle` 等）。
+- 严格停在阶段 8：零后端、无新接口；未碰左栏 rail / Connection / Tags / 右栏卡；面板搜索范围与 rail 同为 limit-500 窗口（>500 的车队同样受限，与 rail 一致，非本阶段引入的回归）。
+- 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未手测；建议 review 时确认：① ⌘K / 点按钮均打开面板且输入框自动聚焦；② 输入即时过滤、↑↓ 移动高亮、Enter/点击选中后面板关闭且 Connect 选定该资产；③ Esc 与 backdrop 均能关闭；④ 在 rail 搜索框聚焦时按 ⌘K 仍能打开面板；⑤ 无 `cmdb.asset:read` 时面板显权限提示。

@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   SquareTerminal,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { getAsset, listAssets, type Asset } from "../../api/cmdb";
@@ -17,7 +17,12 @@ import { listAssetActiveGrants, listMyActiveBastionGrants } from "../../api/bast
 import { listSessions } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
 import { formatGrantTimeRemaining } from "../../lib/bastionGrants";
-import { buildAuditSearch, buildLaunchSearch, type LaunchProtocol } from "../../lib/launch";
+import {
+  buildAuditSearch,
+  buildLaunchSearch,
+  filterConnectableAssets,
+  type LaunchProtocol,
+} from "../../lib/launch";
 import { sessionStatus, sessionStatusTone } from "../../lib/sessions";
 import { useAuth } from "../auth/AuthProvider";
 import { AssetRail } from "../sessions/AssetRail";
@@ -66,6 +71,10 @@ export function ConnectPage() {
 
   const [railSearch, setRailSearch] = useState("");
   const [selectedAssetID, setSelectedAssetID] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [paletteActive, setPaletteActive] = useState(0);
+  const paletteInputRef = useRef<HTMLInputElement>(null);
 
   // Connect is a wide three-column surface; opt into the lighter
   // fullwidth shell (same as CMDB) so the rail + panels can use the
@@ -77,21 +86,34 @@ export function ConnectPage() {
     };
   }, []);
 
-  // The header advertises ⌘K — wire it so the shortcut actually does what
-  // the hint says (jump to the full asset search) instead of being a dead
-  // affordance. Ctrl+K covers non-mac. Ignore it while typing in the rail
-  // search so it doesn't hijack an in-field keystroke.
+  // ⌘K / Ctrl+K opens an in-page asset search palette. The modifier combo
+  // is unambiguous, so it should fire even from a focused input (the old
+  // handler bailed out there) — that is exactly the command-palette
+  // expectation. Esc closes it.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "k" || !(event.metaKey || event.ctrlKey)) return;
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      event.preventDefault();
-      navigate("/cmdb");
+      if (event.key === "k" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+      if (event.key === "Escape" && paletteOpen) {
+        setPaletteOpen(false);
+      }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [navigate]);
+  }, [paletteOpen]);
+
+  // Reset + focus the field each time the palette opens so it is ready to
+  // type into immediately.
+  useEffect(() => {
+    if (!paletteOpen) return;
+    setPaletteQuery("");
+    setPaletteActive(0);
+    const id = window.setTimeout(() => paletteInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(id);
+  }, [paletteOpen]);
 
   // Mirrors the Sessions sidebar: a wide window of assets grouped client
   // side by the shared AssetRail. Same query key/shape as elsewhere so the
@@ -138,6 +160,42 @@ export function ConnectPage() {
 
   const tags = tagEntries(selectedAsset);
 
+  // The palette searches the already-loaded rail window client-side, so
+  // there is no extra request and results are instant. Capped so the
+  // list stays scannable.
+  const paletteResults = useMemo(
+    () => filterConnectableAssets(railAssets.data?.items || [], paletteQuery).slice(0, 20),
+    [railAssets.data, paletteQuery],
+  );
+  const activeIndex = paletteResults.length === 0 ? -1 : Math.min(paletteActive, paletteResults.length - 1);
+  const activeOptionID = activeIndex >= 0 ? `connect-palette-opt-${activeIndex}` : undefined;
+
+  // Keep the keyboard-highlighted row in view. block:"nearest" is a no-op
+  // when it is already visible, so hovering doesn't cause scroll jumps.
+  useEffect(() => {
+    if (!paletteOpen || !activeOptionID) return;
+    document.getElementById(activeOptionID)?.scrollIntoView({ block: "nearest" });
+  }, [paletteOpen, activeOptionID]);
+
+  function choosePaletteAsset(asset: Asset) {
+    setSelectedAssetID(asset.id);
+    setPaletteOpen(false);
+  }
+
+  function onPaletteKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setPaletteActive((i) => Math.min(i + 1, paletteResults.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setPaletteActive((i) => Math.max(i - 1, 0));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const choice = paletteResults[activeIndex];
+      if (choice) choosePaletteAsset(choice);
+    }
+  }
+
   return (
     <section className="page-section connect-page">
       <div className="page-header connect-header">
@@ -148,8 +206,8 @@ export function ConnectPage() {
         <button
           type="button"
           className="connect-cmdk"
-          onClick={() => navigate("/cmdb")}
-          title="Search the full inventory in CMDB"
+          onClick={() => setPaletteOpen(true)}
+          title="Search assets (⌘K)"
         >
           <Search size={15} aria-hidden="true" />
           <span>Search assets…</span>
@@ -425,6 +483,74 @@ export function ConnectPage() {
           </article>
         </aside>
       </div>
+
+      {paletteOpen ? (
+        <div
+          className="connect-palette-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Search assets"
+        >
+          <button
+            type="button"
+            className="connect-palette-backdrop"
+            aria-label="Close"
+            onClick={() => setPaletteOpen(false)}
+          />
+          <div className="connect-palette-card">
+            <div className="connect-palette-search">
+              <Search size={16} aria-hidden="true" />
+              <input
+                ref={paletteInputRef}
+                type="search"
+                value={paletteQuery}
+                onChange={(event) => {
+                  setPaletteQuery(event.target.value);
+                  setPaletteActive(0);
+                }}
+                onKeyDown={onPaletteKeyDown}
+                placeholder="Search assets by name, IP, env, VPC…"
+                aria-label="Search assets"
+                role="combobox"
+                aria-expanded="true"
+                aria-controls="connect-palette-list"
+                aria-activedescendant={activeOptionID}
+              />
+              <kbd>Esc</kbd>
+            </div>
+            {!canReadAssets ? (
+              <PanelState kind="permission" message="Permission required: cmdb.asset:read" />
+            ) : railAssets.isLoading ? (
+              <PanelState kind="loading" message="Loading assets" />
+            ) : paletteResults.length === 0 ? (
+              <PanelState kind="empty" message="No assets match this search." />
+            ) : (
+              <ul className="connect-palette-list" id="connect-palette-list" role="listbox">
+                {paletteResults.map((asset, index) => (
+                  <li
+                    key={asset.id}
+                    id={`connect-palette-opt-${index}`}
+                    role="option"
+                    aria-selected={index === activeIndex}
+                  >
+                    <button
+                      type="button"
+                      className={`connect-palette-item${index === activeIndex ? " active" : ""}`}
+                      onClick={() => choosePaletteAsset(asset)}
+                      onMouseEnter={() => setPaletteActive(index)}
+                    >
+                      <span className="connect-palette-name">{asset.name || asset.id}</span>
+                      <span className="muted">
+                        {[asset.env, asset.private_ip || asset.public_ip].filter(Boolean).join(" · ") || asset.type}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

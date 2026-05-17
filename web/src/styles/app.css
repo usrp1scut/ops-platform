@@ -2580,6 +2580,91 @@ body.fullwidth-mode .page-section { width: 100%; max-width: none; }
 .connect-access-list li .muted { white-space: nowrap; }
 .connect-card-note { font-size: 12px; margin-top: 4px; }
 
+/* ⌘K asset search palette (Operate · phase 8) */
+.connect-palette-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.connect-palette-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--color-bg-overlay);
+  cursor: pointer;
+}
+.connect-palette-card {
+  position: relative;
+  z-index: 1;
+  width: min(92vw, 560px);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.connect-palette-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+.connect-palette-search input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  color: var(--color-fg);
+  outline: none;
+}
+.connect-palette-search kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-fg-muted);
+}
+.connect-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+.connect-palette-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+}
+.connect-palette-item.active {
+  background: var(--color-bg-subtle);
+}
+.connect-palette-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connect-palette-item .muted { white-space: nowrap; }
+
 /* ========== IAM capability matrix (Govern · phase 4c) ==========
  * Primary IAM view: rows = capabilities, columns = roles, cells =
  * all / partial / none. Roles & users stay editable but secondary,
