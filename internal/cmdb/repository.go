@@ -549,8 +549,9 @@ func (r *Repository) UpsertAssetConnectionProfile(
 	if protocol == "" {
 		protocol = "ssh"
 	}
-	if protocol != "ssh" && protocol != "postgres" && protocol != "rdp" {
-		return AssetConnectionProfile{}, errors.New("protocol must be ssh, postgres, or rdp")
+	if protocol != "ssh" && protocol != "postgres" && protocol != "rdp" &&
+		protocol != "vnc" && protocol != "telnet" {
+		return AssetConnectionProfile{}, errors.New("protocol must be ssh, postgres, rdp, vnc, or telnet")
 	}
 	host := strings.TrimSpace(req.Host)
 	if host == "" {
@@ -563,12 +564,17 @@ func (r *Repository) UpsertAssetConnectionProfile(
 			port = 5432
 		case "rdp":
 			port = 3389
+		case "vnc":
+			port = 5900
+		case "telnet":
+			port = 23
 		default:
 			port = 22
 		}
 	}
 	username := strings.TrimSpace(req.Username)
-	if username == "" {
+	// VNC authenticates by password only; it has no user concept.
+	if username == "" && protocol != "vnc" {
 		return AssetConnectionProfile{}, errors.New("username is required")
 	}
 	authType := strings.ToLower(strings.TrimSpace(req.AuthType))
@@ -580,6 +586,9 @@ func (r *Repository) UpsertAssetConnectionProfile(
 	}
 	if protocol == "rdp" && authType != "password" {
 		return AssetConnectionProfile{}, errors.New("rdp only supports password auth")
+	}
+	if (protocol == "vnc" || protocol == "telnet") && authType != "password" {
+		return AssetConnectionProfile{}, errors.New(protocol + " only supports password auth")
 	}
 	if authType != "password" && authType != "key" {
 		return AssetConnectionProfile{}, errors.New("auth_type must be password or key")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -139,9 +140,17 @@ func (h *AdminHandler) CapabilityMatrix(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *AdminHandler) CapabilityPrincipals(w http.ResponseWriter, r *http.Request) {
-	permission := strings.TrimSpace(chi.URLParam(r, "permission"))
+	permission, err := url.PathUnescape(strings.TrimSpace(chi.URLParam(r, "permission")))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid permission encoding")
+		return
+	}
 	if permission == "" {
 		httpx.WriteError(w, http.StatusBadRequest, "permission is required")
+		return
+	}
+	if _, _, ok := splitPermission(permission); !ok {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid permission")
 		return
 	}
 	result, err := h.repo.CapabilityPrincipals(r.Context(), permission)

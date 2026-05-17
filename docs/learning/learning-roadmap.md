@@ -40,7 +40,7 @@
 
 ## Stage 4: 学会排错
 
-- 使用 `docs/debugging-playbook.md` 的步骤复现和缩小范围。
+- 使用 `docs/learning/debugging-playbook.md` 的步骤复现和缩小范围。
 - 区分编译错误、运行时错误、数据错误、权限错误和架构边界错误。
 - 学会从日志、HTTP status、数据库状态和测试失败信息中建立假设。
 
@@ -51,7 +51,7 @@
 
 ## Stage 5: 学会测试和验证
 
-- 阅读 `docs/testing-guide.md`。
+- 阅读 `docs/learning/testing-guide.md`。
 - 默认先补单元测试；跨 route、auth、数据库时考虑集成测试。
 - 理解哪些验证可以靠 `go test ./...`，哪些需要 `scripts/test-integration.sh`。
 
@@ -70,4 +70,3 @@
 
 - 为一次非平凡重构写一篇 ADR 草稿。
 - 找一篇已有 ADR，说明它今天仍然保护了哪些代码边界。
-

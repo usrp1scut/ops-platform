@@ -3,7 +3,7 @@
 Date: 2026-05-03
 Status: Baseline for frontend refactor V2
 
-This inventory starts Phase 0 from `docs/design/frontend-refactor-v2.md`.
+This inventory starts Phase 0 from `docs/archive/design/frontend-refactor-v2.md`.
 It records the legacy embedded portal surface before replacement UI is built.
 
 ## Source Files

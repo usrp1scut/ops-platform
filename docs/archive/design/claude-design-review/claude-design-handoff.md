@@ -188,13 +188,13 @@ control or upload them to a public repository.
 
 | File | What it shows | What to inspect |
 | --- | --- | --- |
-| `docs/design/assets/claude-design/01-overview.png` | Shell and overview page | Overall chrome, density, current visual language |
-| `docs/design/assets/claude-design/02-sessions-live.png` | Sessions Live workspace | Asset rail, terminal workspace, quick-launch model |
-| `docs/design/assets/claude-design/03-sessions-audit.png` | Sessions Audit mode | Whether audit deserves stronger separation |
-| `docs/design/assets/claude-design/04-cmdb-table.png` | CMDB inventory table | Table-first inventory management |
-| `docs/design/assets/claude-design/05-cmdb-drawer.png` | Asset detail drawer | Drill-down pattern and information density |
-| `docs/design/assets/claude-design/06-access.png` | Bastion access workflows | Request/approval model and page hierarchy |
-| `docs/design/assets/claude-design/07-iam.png` | IAM page | Current emphasis on role binding vs governance |
+| `assets/01-overview.png` | Shell and overview page | Overall chrome, density, current visual language |
+| `assets/02-sessions-live.png` | Sessions Live workspace | Asset rail, terminal workspace, quick-launch model |
+| `assets/03-sessions-audit.png` | Sessions Audit mode | Whether audit deserves stronger separation |
+| `assets/04-cmdb-table.png` | CMDB inventory table | Table-first inventory management |
+| `assets/05-cmdb-drawer.png` | Asset detail drawer | Drill-down pattern and information density |
+| `assets/06-access.png` | Bastion access workflows | Request/approval model and page hierarchy |
+| `assets/07-iam.png` | IAM page | Current emphasis on role binding vs governance |
 
 ## 10. Suggested first prompt
 
@@ -237,7 +237,7 @@ Please use the attached screenshots and handoff notes to:
 
 Attach these only if Claude Design can use code context directly:
 
-- `docs/design/frontend-refactor-v2.md`
+- `docs/archive/design/frontend-refactor-v2.md`
 - `web/src/app/router.tsx`
 - `web/src/app/layout/AppShell.tsx`
 - `web/src/styles/tokens.css`

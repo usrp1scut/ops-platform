@@ -14,7 +14,10 @@ import (
 // the given parameters. On success it returns a net.Conn ready for byte-level
 // tunneling with the browser. Any leftover read-buffered bytes from the
 // handshake phase are preserved in the returned connection's Read.
-func DialRDP(ctx context.Context, guacdAddr string, params RDPParams) (net.Conn, error) {
+func DialRDP(ctx context.Context, guacdAddr, protocol string, params RDPParams) (net.Conn, error) {
+	if protocol == "" {
+		protocol = "rdp"
+	}
 	dialer := net.Dialer{Timeout: 10 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", guacdAddr)
 	if err != nil {
@@ -27,7 +30,7 @@ func DialRDP(ctx context.Context, guacdAddr string, params RDPParams) (net.Conn,
 	}
 	br := bufio.NewReader(conn)
 
-	if err := WriteInstruction(conn, Instruction{Opcode: "select", Args: []string{"rdp"}}); err != nil {
+	if err := WriteInstruction(conn, Instruction{Opcode: "select", Args: []string{protocol}}); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("send select: %w", err)
 	}

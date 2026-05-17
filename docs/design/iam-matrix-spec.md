@@ -1,6 +1,6 @@
 # IAM 能力矩阵 · 设计规格（阶段 4）
 
-> 范围：仅设计文档，不含实现。对照设计评审 `Ops Platform Design Review.html` 第 11 页（IAM redesign，11/14）、当前 `web/src/features/iam/IamPage.tsx` 与数据层 `web/src/api/iam.ts` / `web/src/lib/iam.ts`。
+> 范围：仅设计文档，不含实现。对照归档设计评审 `../archive/design/claude-design-review/Ops Platform Design Review.html` 第 11 页（IAM redesign，11/14）、当前 `web/src/features/iam/IamPage.tsx` 与数据层 `web/src/api/iam.ts` / `web/src/lib/iam.ts`。
 >
 > 目标：把 IAM 从“用户拥有哪些角色”改造成“谁能在什么资源上做什么”（capability matrix），并明确这套视图需要数据层提供什么、当前缺什么。
 

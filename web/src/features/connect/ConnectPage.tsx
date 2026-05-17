@@ -13,7 +13,8 @@ import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, u
 import { useNavigate } from "react-router-dom";
 
 import { getAsset, listAssets, type Asset } from "../../api/cmdb";
-import { listAssetActiveGrants, listMyActiveBastionGrants } from "../../api/bastion";
+import { listAssetActiveGrants } from "../../api/bastion";
+import { resolveCapability } from "../../api/iam";
 import { listSessions } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
 import { formatGrantTimeRemaining } from "../../lib/bastionGrants";
@@ -128,11 +129,6 @@ export function ConnectPage() {
     queryFn: () => getAsset(selectedAssetID),
     enabled: canReadAssets && Boolean(userID) && Boolean(selectedAssetID),
   });
-  const myActiveGrants = useQuery({
-    queryKey: ["bastion", "grants", "active", "mine", userID],
-    queryFn: () => listMyActiveBastionGrants(userID, 50),
-    enabled: canReadGrants && Boolean(userID),
-  });
   const recentSessions = useQuery({
     queryKey: ["sessions", "by-asset", "connect", userID, selectedAssetID],
     queryFn: () => listSessions({ assetID: selectedAssetID, limit: 5 }),
@@ -143,15 +139,31 @@ export function ConnectPage() {
     queryFn: () => listAssetActiveGrants(selectedAssetID, 50),
     enabled: canReadGrants && Boolean(userID) && Boolean(selectedAssetID),
   });
+  // One session capability now gates every interactive remote session
+  // (SSH terminal + all guacd protocols). The actual protocol launched is
+  // decided by the asset's connection profile on the Sessions page.
+  const connectAccess = useQuery({
+    queryKey: ["iam", "resolve", "connect", userID, selectedAssetID],
+    queryFn: () =>
+      resolveCapability({
+        capability: "bastion.session:connect",
+        resource_ref: selectedAssetID,
+        user_id: userID,
+      }),
+    enabled: canReadAssets && Boolean(userID) && Boolean(selectedAssetID),
+  });
 
   const selectedAsset = assetDetail.data;
   const recentSessionItems = recentSessions.data?.items || [];
   const assetGrantItems = assetGrants.data?.items || [];
-  const grantItems = myActiveGrants.data?.items || [];
-  const activeGrant = useMemo(
-    () => grantItems.find((grant) => grant.asset_id === selectedAssetID && grant.active),
-    [grantItems, selectedAssetID],
-  );
+  const accessResult = connectAccess.data;
+  const accessLoading = connectAccess.isLoading;
+  const accessUnavailable = connectAccess.isError;
+  const hasEffectiveAccess = accessResult?.allowed ?? false;
+  const grantBackedAccess =
+    accessResult?.allowed && accessResult.expires_at ? accessResult : undefined;
+  const canOpenSSH = hasEffectiveAccess;
+  const canOpenRDP = hasEffectiveAccess;
 
   function openLive(protocol: LaunchProtocol) {
     if (!selectedAssetID) return;
@@ -276,6 +288,16 @@ export function ConnectPage() {
                     type="button"
                     className="secondary-button compact"
                     onClick={() => openLive("ssh")}
+                    disabled={!canOpenSSH && !accessLoading && !accessUnavailable}
+                    title={
+                      canOpenSSH
+                        ? "Open SSH"
+                        : accessLoading
+                          ? "Checking SSH access"
+                          : accessUnavailable
+                            ? "Access state unavailable; server will decide on launch"
+                            : "No effective SSH access"
+                    }
                   >
                     <SquareTerminal size={14} aria-hidden="true" />
                     <span>Open SSH</span>
@@ -284,6 +306,16 @@ export function ConnectPage() {
                     type="button"
                     className="secondary-button compact"
                     onClick={() => openLive("rdp")}
+                    disabled={!canOpenRDP && !accessLoading && !accessUnavailable}
+                    title={
+                      canOpenRDP
+                        ? "Open RDP"
+                        : accessLoading
+                          ? "Checking RDP access"
+                          : accessUnavailable
+                            ? "Access state unavailable; server will decide on launch"
+                            : "No effective RDP access"
+                    }
                   >
                     <MonitorPlay size={14} aria-hidden="true" />
                     <span>Open RDP</span>
@@ -303,25 +335,46 @@ export function ConnectPage() {
                 <div className="panel-header">
                   <div>
                     <p className="eyebrow">Connection</p>
-                    <h2>{activeGrant ? "You can open this now" : "Request access"}</h2>
+                    <h2>
+                      {accessLoading
+                        ? "Checking access"
+                        : hasEffectiveAccess
+                          ? "You can open this now"
+                          : accessUnavailable
+                            ? "Access state unavailable"
+                            : "Request access"}
+                    </h2>
                   </div>
-                  {activeGrant ? (
+                  {grantBackedAccess?.expires_at ? (
                     <span className="status-pill ok">
                       <Clock size={14} aria-hidden="true" />
-                      {formatGrantTimeRemaining(activeGrant.expires_at)}
+                      {formatGrantTimeRemaining(grantBackedAccess.expires_at)}
                     </span>
+                  ) : hasEffectiveAccess ? (
+                    <span className="status-pill ok">role access</span>
+                  ) : accessLoading ? (
+                    <span className="status-pill info">checking</span>
+                  ) : accessUnavailable ? (
+                    <span className="status-pill warn">unknown</span>
                   ) : (
-                    <span className="status-pill warn">no active grant</span>
+                    <span className="status-pill warn">no effective access</span>
                   )}
                 </div>
 
-                {activeGrant ? (
+                {hasEffectiveAccess ? (
                   <>
                     <p className="muted">
-                      Active access window expires {formatDateTime(activeGrant.expires_at)}.
+                      {grantBackedAccess?.expires_at
+                        ? `Active access window expires ${formatDateTime(grantBackedAccess.expires_at)}.`
+                        : "Your standing role already allows this asset."}
                     </p>
                     <div className="form-actions">
-                      <button type="button" className="primary-button compact" onClick={() => openLive("ssh")}>
+                      <button
+                        type="button"
+                        className="primary-button compact"
+                        onClick={() => openLive("ssh")}
+                        disabled={!canOpenSSH}
+                      >
                         <SquareTerminal size={16} aria-hidden="true" />
                         <span>Open SSH</span>
                       </button>
@@ -329,17 +382,23 @@ export function ConnectPage() {
                         type="button"
                         className="secondary-button compact"
                         onClick={() => openLive("rdp")}
+                        disabled={!canOpenRDP}
                       >
                         <MonitorPlay size={14} aria-hidden="true" />
                         <span>Open RDP</span>
                       </button>
                     </div>
                   </>
+                ) : accessUnavailable ? (
+                  <p className="muted">
+                    Could not resolve effective access right now. Try refreshing, or use the live buttons and let the
+                    server make the final decision.
+                  </p>
                 ) : (
                   <>
                     <p className="muted">
                       {canReadGrants
-                        ? "You don't have an active access grant for this asset yet."
+                        ? "You don't currently have effective access to this asset."
                         : "Grant visibility is limited — request access to open a session."}
                     </p>
                     <div className="form-actions">

@@ -8,7 +8,7 @@
 
 import type { Asset } from "../api/cmdb";
 
-export type LaunchProtocol = "ssh" | "rdp";
+export type LaunchProtocol = "ssh" | "rdp" | "vnc" | "telnet";
 
 // Mirrors NON_CONNECTABLE_TYPES from internal/httpserver/ui/portal/app.js.
 // Anything that is clearly a network primitive or AWS bookkeeping object —
@@ -201,7 +201,11 @@ export function buildAuditSearch(query: AuditQuery): string {
 export function parseLaunchParams(search: URLSearchParams): LaunchSpec | null {
   const assetID = search.get("launch");
   if (!assetID) return null;
+  // Protocol is advisory only: the Sessions page launches by the asset's
+  // connection-profile protocol (single source of truth), so an unknown or
+  // missing value must not drop the deep link.
   const raw = (search.get("protocol") || "ssh").toLowerCase();
-  if (raw !== "ssh" && raw !== "rdp") return null;
-  return { assetID, protocol: raw };
+  const protocol: LaunchProtocol =
+    raw === "rdp" || raw === "vnc" || raw === "telnet" ? raw : "ssh";
+  return { assetID, protocol };
 }

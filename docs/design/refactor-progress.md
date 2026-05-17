@@ -2,7 +2,7 @@
 
 ## 2026-05-16 · 阶段 0：准备
 
-- 新增 `docs/design/refactor-plan.md`，先完成一次只读代码地图，作为后续按方案 A（Operate / Inventory / Govern）迁移的基线。
+- 先完成一次只读代码地图，作为后续按方案 A（Operate / Inventory / Govern）迁移的基线；该阶段性地图已被后续进度记录与现行架构文档吸收，不再单独保留。
 - 已梳理当前路由、`AppShell` 侧栏、现有路由到未来三分区的归属、`Sessions` 的 Live / Audit 切换实现，以及 `IAM` 页面的 hook / API 数据链路。
 - 本阶段严格停在准备工作：未修改任何业务代码，未提前新增 `Connect` / `Audit` 路由，也未调整现有导航结构。
 - 验证：逐项对照 `router.tsx`、`AppShell.tsx`、`SessionsPage.tsx`、`AssetsPage.tsx`、`IamPage.tsx` 与 `api/iam.ts`；本阶段为文档整理，未运行代码测试。
@@ -163,3 +163,24 @@
 - `web/src/styles/app.css`：新增 `.sessions-rail-facets` 紧凑行样式（沿用既有 rail 密度与 token，select ≤50% 宽、tag input flex:1）。
 - 严格停在阶段 11：零后端、无新接口；未改 `SessionsPage`/`ConnectPage`/AuditPage；过滤为纯客户端视图层，不影响选中/启动/深链等既有行为。
 - 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未手测；建议 review 时确认：① env 下拉收敛到对应环境且与树 env 分组一致；② tag 输入按 key/value/`key:value` 子串过滤；③ env+tag 叠加为 AND；④ 清空两者回全量；⑤ Sessions Live 与 Connect 两处 rail 均生效且选中/启动/高亮行为不回归。
+
+## 2026-05-17 · 阶段 12：Sessions 支持 VNC/Telnet + 会话权限合并为 bastion.session:connect（前后端）
+
+- 背景：用户要 Sessions 支持更多连接类型。调研确认 guacd 的 rdp/vnc/telnet 走同一握手与图形流，guacproxy 主流程协议无关（仅 `select rdp` 与 per-arg 取值是 RDP 专有），前端 RdpSessionPane 可全复用。数据库/k8s 属大新子系统、与"内部运维控制台非 PAM"定位冲突，本期不做。
+- 鉴权模型决策（用户拍板 iii + A/B/C/D，开发阶段硬切、无兼容窗口）：把 per-protocol 的 `bastion.session:ssh`/`:rdp` **合并为单一 `bastion.session:connect`**——SSH/RDP/VNC/Telnet 同属"经堡垒机+guacd 的交互式远程会话"风险类。A：接受权限放大（原 :ssh-only 迁移后得 connect=含 rdp/vnc/telnet）。B：不做向后兼容，直接改。C：scope 取并集（迁移时任一源行无 scope 或两者 scope 不同 → connect 行 unscoped）。D：ConnectPage 两个 resolveCapability 合并为单个 `:connect`。
+- 后端 · 权限合并：
+  - `internal/iam/capability_repository.go`：内置能力目录 `bastion.session` 的 `ssh`+`rdp` 两行 → 单行 `connect`（保留 `read`）；`isBastionSessionCapability` → `== "bastion.session:connect"`。
+  - `internal/httpserver/server.go`：terminal 与 rdp 取票两条路由的 `RequireSessionAuthorization` action 由 `ssh`/`rdp` 改为 `connect`（`RequireSessionAuthorization` 自身构造 `bastion.session:<action>`，无需改）。
+  - `migrations/0023_bastion_session_connect.sql`：防御性迁移（实际无角色 seed 持 ssh/rdp，内置目录在代码侧），把任何运行时 `iam_role_permission` 的 `bastion.session` `ssh|rdp` 行按 C 规则并为 `connect` 行后删除旧行；idempotent、fresh DB 上 no-op。
+  - `test/integration/iam_capability_test.go`：目录断言改为期望 `bastion.session:connect`。
+- 后端 · VNC/Telnet：
+  - `internal/cmdb/repository.go`：连接档 protocol 白名单加 `vnc`/`telnet`；默认端口 vnc 5900 / telnet 23；vnc/telnet 仅 password 鉴权；vnc 允许空 username（VNC 无用户概念）。
+  - `internal/bastionprobe/service.go`：`ResolveAssetRDP` 由"仅 rdp"放开为 rdp/vnc/telnet（各自默认端口），`RDPResolution` 新增 `Protocol` 带出。
+  - `internal/guacproxy`：`DialRDP(ctx, addr, protocol, params)` 用 `select <protocol>`（空回退 rdp）；`OpenRDP` 传 `res.Protocol`。`params.value` 对未知 vnc/telnet arg 返回 ""（guacd 用其默认），无需改。
+- 前端：
+  - `web/src/lib/permissions.ts`：knownPermissions 的 `bastion.session:ssh`+`:rdp` → 单 `bastion.session:connect`。
+  - `web/src/lib/launch.ts`：`LaunchProtocol` 扩为 `ssh|rdp|vnc|telnet`；`parseLaunchParams` 协议改为"建议性"（未知/缺省不再 return null，落 ssh），因真正协议由连接档定。
+  - `web/src/features/connect/ConnectPage.tsx`（D）：`sshAccess`+`rdpAccess` 两个 resolve 合并为单 `connectAccess`（`bastion.session:connect`），派生量按单结果重算；`canOpenSSH`/`canOpenRDP` 均 = 单一 connect 权限。
+  - `web/src/features/sessions/SessionsPage.tsx`（option A）：移除手动协议状态/`railProtocolToggle`/AssetRail `protocolToggle`；`launchTerminal` 不再收 protocol 入参，改为读连接档 `profile.protocol` 决定（ssh→terminal 票据+SshTerminalPane；rdp/vnc/telnet→guac 票据+RdpSessionPane，pane 渲染本就是 `kind==="ssh"?Ssh:Rdp` 二元判断，自动适配）；凭据预检 ssh→hasSSHCredentials 否则 has_password；auto-launch 按 assetID（忽略 URL protocol）。
+- 严格停在阶段 12：未做数据库/k8s 连接类型；未新增 per-protocol 权限（按 iii 合并）。诚实遗留（建议后续）：ConnectPage 仍保留 "Open SSH"/"Open RDP" 两个按钮、均由单一 connect 权限门控且实际协议由连接档决定——在 option A 下两按钮语义冗余，按 D 只动了权限查询、未重排该（另一会话在改的）文件的按钮 UX，留作后续协调。
+- 验证：`go build ./...`、`go vet`（含 `-tags=integration ./test/...`）、`go test ./internal/...` 通过；`cd web && npm run typecheck`、`npm run build` 通过（既有 bundle 警告）。本环境无 guacd/浏览器/DB，未做运行期手测；建议 review 时：① 跑迁移 0023；② 配 vnc/telnet 连接档并各开一次会话确认 guacd `select` 正确、录屏（阶段10a tee 协议无关）生成；③ 给某角色配 scoped `bastion.session:connect` 验证取票三分支与 `/resolve` 一致；④ 确认 ssh-only 老角色合并后获得 connect（A 放大）符合预期；⑤ Connect 页访问判定与 Sessions 按连接档协议启动回归。

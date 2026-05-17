@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # scripts/check-deps.sh
 #
-# Static dependency-rule checks for the ops-platform refactor (see
-# docs/design/architecture-refactor-v1.md §5).
-#
+# Static dependency-rule checks for the ops-platform refactor. Durable
+# decisions live in docs/adr/; the current enforced graph lives in
+# docs/architecture/dependency-graph.md.
 # Each rule is one of:
-#   STRICT   — violation = exit 1 (gates merges)
-#   DEBT     — known violation, prints with line numbers, does NOT fail
+#   STRICT   鈥?violation = exit 1 (gates merges)
+#   DEBT     鈥?known violation, prints with line numbers, does NOT fail
 #              (used while a Phase is being worked off)
 #
 # As Phases land, flip rules from DEBT to STRICT.
@@ -76,24 +76,18 @@ bold "[STRICT] Phase 6: SSH proxy CRUD lives in internal/sshproxy"
 check STRICT "cmdb.Repository must not host SSH proxy CRUD methods" \
   bash -c 'grep -rn --include="*.go" -E "func \(r \*Repository\) (Create|Update|Delete|Get|List)SSHProxy" internal/cmdb/'
 
-bold "[STRICT] Phase 4: portal app.js must not regrow into a monolith"
-# Cap raised across redesign phases as structural code (modal infra, filter
-# chips, drawer tabs, sessions workspace, platform admin modal + sync
-# diagnosis) genuinely belongs in app.js until the eventual `assets/` /
-# `platform/` module split called out in Redesign §10.1. Current cap 4500;
-# Phase 5 should accompany this with at least one module extraction so the
-# cap can drop again.
-check STRICT "internal/httpserver/ui/portal/app.js must stay under 4500 lines (extract feature modules under ui/portal/modules/)" \
-  bash -c 'lines=$(wc -l < internal/httpserver/ui/portal/app.js); if [[ "$lines" -gt 4500 ]]; then echo "app.js is $lines lines (cap 4500)"; fi'
+bold "[STRICT] API binary must stay UI-free after the React/Vite split"
+check STRICT "legacy embedded portal tree remains removed" \
+  bash -c '[[ -d internal/httpserver/ui/portal ]] && echo "internal/httpserver/ui/portal should stay removed; frontend lives under web/" || true'
 
 # --- Summary ---
 
 echo
 if [[ $RC -ne 0 ]]; then
-  red "FAILED — strict rules violated"
+  red "FAILED 鈥?strict rules violated"
 elif [[ $have_violations -ne 0 ]]; then
-  yellow "OK — strict rules pass, debt items still present"
+  yellow "OK 鈥?strict rules pass, debt items still present"
 else
-  green "OK — clean"
+  green "OK 鈥?clean"
 fi
 exit $RC

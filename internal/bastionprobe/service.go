@@ -143,6 +143,7 @@ func (s *Service) DialAssetSSH(ctx context.Context, assetID string) (*ssh.Client
 type RDPResolution struct {
 	Target      cmdb.BastionProbeTarget
 	TargetAddr  string
+	Protocol    string // guacd protocol: rdp | vnc | telnet
 	ProxyClient *ssh.Client
 }
 
@@ -156,16 +157,25 @@ func (s *Service) ResolveAssetRDP(ctx context.Context, assetID string) (RDPResol
 		return RDPResolution{}, err
 	}
 	protocol := strings.ToLower(strings.TrimSpace(target.Protocol))
-	if protocol != "rdp" {
-		return RDPResolution{}, fmt.Errorf("asset protocol is %q, rdp required", target.Protocol)
+	var defaultPort int
+	switch protocol {
+	case "rdp":
+		defaultPort = 3389
+	case "vnc":
+		defaultPort = 5900
+	case "telnet":
+		defaultPort = 23
+	default:
+		return RDPResolution{}, fmt.Errorf("asset protocol is %q, a guacd protocol (rdp, vnc, telnet) is required", target.Protocol)
 	}
 	port := target.Port
 	if port <= 0 {
-		port = 3389
+		port = defaultPort
 	}
 	res := RDPResolution{
 		Target:     target,
 		TargetAddr: net.JoinHostPort(target.Host, strconv.Itoa(port)),
+		Protocol:   protocol,
 	}
 	if target.ProxyRequired && target.Proxy == nil {
 		return RDPResolution{}, fmt.Errorf("asset %s requires bastion proxy but none is resolved", target.AssetID)

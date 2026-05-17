@@ -1,9 +1,9 @@
 # Architecture Decision Records
 
 Short notes documenting the load-bearing structural decisions made during the
-2026-04 refactor (`docs/design/architecture-refactor-v1.md`). Each ADR is
-intentionally terse: context → decision → consequences. Append, do not edit
-once accepted; supersede with a new ADR if the call changes.
+2026-04 refactor. Each ADR is intentionally terse: context → decision →
+consequences. Append, do not edit once accepted; supersede with a new ADR if
+the call changes.
 
 Use `0000-template.md` when drafting a new ADR.
 

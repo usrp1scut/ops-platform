@@ -177,7 +177,7 @@ PLAYWRIGHT_BASE_URL=http://localhost:8080/portal PLAYWRIGHT_NO_WEBSERVER=1 npm r
 ## Migration status
 
 The migration plan and per-phase deliverables live in
-`docs/design/frontend-refactor-v2.md`. The current state:
+`docs/archive/design/frontend-refactor-v2.md`. The current state:
 
 - Phase 0–5 ✅ — all features parity-complete with legacy portal.
 - Phase 6 ✅ — `/portal/` now serves the React/Vite app; the legacy

@@ -16,7 +16,12 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+script_path=${BASH_SOURCE[0]}
+script_dir=${script_path%/*}
+if [[ "$script_dir" == "$script_path" ]]; then
+  script_dir=.
+fi
+cd "$script_dir/.."
 
 : "${OPS_TEST_DATABASE_URL:=postgres://ops:ops@localhost:5432/ops_platform_test?sslmode=disable}"
 : "${OPS_MASTER_KEY:=01234567890123456789012345678901}"

@@ -23,10 +23,40 @@ func capabilityGroup(resource string) string {
 	return resource
 }
 
-// ListCapabilities returns the authoritative catalog: every distinct
-// (resource, action) currently referenced by any role permission. This is the
-// row source for the matrix; it is broader than any single role.
+// builtInCapabilityCatalog is the product's authoritative baseline: real
+// capabilities the platform understands even when no role currently grants
+// them. The DB query in ListCapabilities is UNIONed in at runtime so custom
+// permissions added by operators still surface without a migration, but the
+// matrix never loses a first-class row just because it is currently reached
+// only through admin bypass or a JIT grant.
+var builtInCapabilityCatalog = []Capability{
+	{Resource: "aws.account", Action: "read"},
+	{Resource: "aws.account", Action: "write"},
+	{Resource: "bastion.grant", Action: "read"},
+	{Resource: "bastion.grant", Action: "write"},
+	{Resource: "bastion.request", Action: "read"},
+	{Resource: "bastion.request", Action: "write"},
+	{Resource: "bastion.session", Action: "connect"},
+	{Resource: "bastion.session", Action: "read"},
+	{Resource: "cmdb.asset", Action: "read"},
+	{Resource: "cmdb.asset", Action: "write"},
+	{Resource: "iam.user", Action: "read"},
+	{Resource: "iam.user", Action: "write"},
+	{Resource: "system", Action: "admin"},
+}
+
+// ListCapabilities returns the authoritative catalog: the built-in product
+// capabilities plus any distinct (resource, action) currently referenced by a
+// role permission. This is the row source for the matrix; it is broader than
+// any single role and remains complete even for grant-only capabilities.
 func (r *Repository) ListCapabilities(ctx context.Context) ([]Capability, error) {
+	byPermission := make(map[string]Capability, len(builtInCapabilityCatalog))
+	for _, c := range builtInCapabilityCatalog {
+		c.Permission = c.Resource + ":" + c.Action
+		c.Group = capabilityGroup(c.Resource)
+		byPermission[c.Permission] = c
+	}
+
 	rows, err := r.db.QueryContext(ctx, `
 SELECT DISTINCT resource, action
 FROM iam_role_permission
@@ -37,7 +67,6 @@ ORDER BY resource ASC, action ASC
 	}
 	defer rows.Close()
 
-	items := make([]Capability, 0, 32)
 	for rows.Next() {
 		var c Capability
 		if err := rows.Scan(&c.Resource, &c.Action); err != nil {
@@ -45,11 +74,21 @@ ORDER BY resource ASC, action ASC
 		}
 		c.Permission = c.Resource + ":" + c.Action
 		c.Group = capabilityGroup(c.Resource)
-		items = append(items, c)
+		byPermission[c.Permission] = c
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	items := make([]Capability, 0, len(byPermission))
+	for _, c := range byPermission {
+		items = append(items, c)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Resource != items[j].Resource {
+			return items[i].Resource < items[j].Resource
+		}
+		return items[i].Action < items[j].Action
+	})
 	return items, nil
 }
 
@@ -181,12 +220,10 @@ func (r *Repository) CapabilityPrincipals(ctx context.Context, permission string
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-SELECT r.name, rp.scope_json, count(DISTINCT b.user_id) AS user_count
+SELECT DISTINCT r.name, rp.scope_json
 FROM iam_role r
 JOIN iam_role_permission rp ON rp.role_id = r.id
-LEFT JOIN iam_user_role_binding b ON b.role_id = r.id
 WHERE rp.resource = $1 AND rp.action = $2
-GROUP BY r.name, rp.scope_json
 ORDER BY r.name ASC
 `, resource, action)
 	if err != nil {
@@ -196,12 +233,10 @@ ORDER BY r.name ASC
 
 	sources := make([]PermissionSource, 0, 8)
 	roleNames := map[string]struct{}{}
-	totalUsers := 0
 	for rows.Next() {
 		var roleName string
 		var scopeRaw []byte
-		var userCount int
-		if err := rows.Scan(&roleName, &scopeRaw, &userCount); err != nil {
+		if err := rows.Scan(&roleName, &scopeRaw); err != nil {
 			return CapabilityPrincipals{}, err
 		}
 		scope, err := parseScopeJSON(scopeRaw)
@@ -210,9 +245,18 @@ ORDER BY r.name ASC
 		}
 		sources = append(sources, PermissionSource{Kind: "role", Ref: roleName, Scope: scope})
 		roleNames[roleName] = struct{}{}
-		totalUsers += userCount
 	}
 	if err := rows.Err(); err != nil {
+		return CapabilityPrincipals{}, err
+	}
+
+	var totalUsers int
+	if err := r.db.QueryRowContext(ctx, `
+SELECT count(DISTINCT b.user_id)
+FROM iam_role_permission rp
+JOIN iam_user_role_binding b ON b.role_id = rp.role_id
+WHERE rp.resource = $1 AND rp.action = $2
+`, resource, action).Scan(&totalUsers); err != nil {
 		return CapabilityPrincipals{}, err
 	}
 
@@ -296,7 +340,7 @@ LIMIT 1
 }
 
 func isBastionSessionCapability(permission string) bool {
-	return permission == "bastion.session:ssh" || permission == "bastion.session:rdp"
+	return permission == "bastion.session:connect"
 }
 
 // ResolveCapability answers "can user X do Y on Z" and returns the path that

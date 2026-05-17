@@ -1,7 +1,7 @@
 # Maintenance notes
 
 How the post-refactor codebase is organized and how to extend it without
-re-introducing the boundaries Phase 0â€“5 just removed.
+re-introducing the boundaries Phase 0â€? just removed.
 
 ## Where things live
 
@@ -12,7 +12,7 @@ re-introducing the boundaries Phase 0â€“5 just removed.
 | Asset CRUD, connection profiles, relations      | `internal/cmdb`                          |
 | VPC proxy promote/demote, peer propagation      | `internal/cmdb` (`VPCProxyService`)      |
 | AWS account onboarding (credentials)            | `internal/aws`                           |
-| AWS resource sync (EC2/VPC/SG/RDS â†’ assets)     | `internal/awssync`                       |
+| AWS resource sync (EC2/VPC/SG/RDS â†?assets)     | `internal/awssync`                       |
 | Asset host-fact probe (SSH/Postgres/RDP)        | `internal/bastionprobe`                  |
 | WebSocket SSH terminal                          | `internal/terminal`                      |
 | WebSocket RDP via Guacamole                     | `internal/guacproxy`                     |
@@ -20,7 +20,7 @@ re-introducing the boundaries Phase 0â€“5 just removed.
 | Pinned host-key store (TOFU + override)         | `internal/hostkey`                       |
 | Encrypted SSH private-key store                 | `internal/keypair`                       |
 | Live-session metadata + audit                   | `internal/sessions`                      |
-| Frontend (vanilla JS, no build)                 | `internal/httpserver/ui/portal/`         |
+| Frontend React/Vite SPA                         | `web/`                                   |
 
 ## Adding a new feature
 
@@ -28,14 +28,14 @@ re-introducing the boundaries Phase 0â€“5 just removed.
 
 1. Add the handler method to the context's `handler.go`.
 2. Mount it from `internal/httpserver/server.go` under the right route group.
-3. Use `httpx.WriteJSON` / `httpx.WriteError` â€” never write a local helper.
+3. Use `httpx.WriteJSON` / `httpx.WriteError` â€?never write a local helper.
 4. If it writes any state, add an `iam.RequirePermission(...)` middleware on
    the route.
 
 ### A new resource in CMDB
 
 1. Add CRUD to `internal/cmdb/repository.go`. **Repository methods are pure
-   persistence** â€” no transactions that span aggregates, no orchestration.
+   persistence** â€?no transactions that span aggregates, no orchestration.
 2. If the operation crosses aggregates, add it to a service struct in the same
    package (see `VPCProxyService` for the pattern). The service owns the
    transaction boundary.
@@ -46,32 +46,33 @@ re-introducing the boundaries Phase 0â€“5 just removed.
 1. Extend `internal/awssync` with the SDK calls and normalization.
 2. If a new asset shape is needed, extend `awssync.AssetUpsert` (the DTO).
 3. The adapter at `internal/cmdb/aws_writer.go` translates the DTO to SQL.
-4. **Do not** import `internal/cmdb` from awssync â€” that edge is a STRICT
+4. **Do not** import `internal/cmdb` from awssync â€?that edge is a STRICT
    rule. If you need cmdb behavior, add it to a port in `awssync/port.go`.
 
 ### A new probe protocol
 
 1. Extend `internal/bastionprobe.Service` with a `dial<Proto>` method. Run any
-   `target.ProxyRequired && target.Proxy == nil` guard *before* I/O â€” see
+   `target.ProxyRequired && target.Proxy == nil` guard *before* I/O â€?see
    `dialSSH` / `dialPostgres` for the pattern (ADR-0006).
 2. Cleanup of any tunnelled SSH session must be returned to the caller (e.g.
    `dialPostgres` returns a cleanup func). Closing the protocol-level
    connection alone is not enough.
 
-### A new portal view
+### A new frontend surface
 
-1. Create `internal/httpserver/ui/portal/modules/<name>.js`. Define functions
-   only â€” no top-level code that references `state` / `elements` / `api`,
-   because module files load before `app.js`.
-2. Add the script tag to `index.html` *before* `app.js`.
-3. Wire bootstrap calls (`refresh<Name>`, `bind<Name>Events`) from `app.js`'s
-   `bootstrap()` / `bindEvents()`.
-4. The `app.js` LOC cap (3800) is enforced by `scripts/check-deps.sh`. New
-   non-trivial features should land as modules, not in `app.js`.
+1. Add API calls under `web/src/api/` and keep transport concerns there.
+2. Add route-level UI under `web/src/features/<name>/`; shared pure helpers
+   belong in `web/src/lib/`.
+3. Wire the route from `web/src/app/router.tsx` and reuse the existing shell
+   rather than re-introducing embedded UI inside `ops-api`.
+4. Validate from `web/` with `npm run typecheck`, `npm run test`, and
+   `npm run build`. The standalone `web` image is the only console server;
+   `ops-api` stays API-only.
 
 ## Testing
-
 - Unit tests live next to the code (`*_test.go`).
+- Frontend unit tests live beside the React/TS modules under `web/src/`
+  (`*.test.ts` / `*.test.tsx`).
 - The dial-guard tests (`internal/bastionprobe/service_test.go`) construct an
   empty `*Service` because the guards run before any service dependency is
   touched. Keep new guards in that prefix so they remain unit-testable.
@@ -91,10 +92,10 @@ Files in `test/integration/` are guarded by the `integration` build tag, so
 default `go test ./...` stays unit-only and fast. The harness:
 
 - creates the test DB if it doesn't exist (uses ops/ops on localhost:5432 by
-  default â€” same creds as docker-compose);
+  default â€?same creds as docker-compose);
 - re-applies every migration on each run (idempotent `IF NOT EXISTS`);
 - spins up a fresh `httptest.Server` per `Bootstrap(t)` so tests don't share
-  HTTP state. Test DB rows persist across runs â€” write tests that clean up
+  HTTP state. Test DB rows persist across runs â€?write tests that clean up
   after themselves.
 
 When adding a new STRICT dependency rule (or fixing a bug that crossed a

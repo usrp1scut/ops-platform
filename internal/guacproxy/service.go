@@ -123,7 +123,7 @@ func (s *Service) OpenRDP(ctx context.Context, assetID string, overrides RDPPara
 		}
 	}
 
-	conn, err := DialRDP(ctx, s.guacdAddr, params)
+	conn, err := DialRDP(ctx, s.guacdAddr, res.Protocol, params)
 	if err != nil {
 		if forwarder != nil {
 			forwarder.close()

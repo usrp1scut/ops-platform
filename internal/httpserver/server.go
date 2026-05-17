@@ -175,11 +175,14 @@ func (s *Server) Router() http.Handler {
 		// see the asset). Authorization is admin OR scoped role capability
 		// bastion.session:<action> admitting the asset OR an active JIT grant
 		// — see bastion.RequireSessionAuthorization.
+		// One session capability (bastion.session:connect) gates every
+		// interactive remote session — SSH terminal and all guacd protocols
+		// (RDP/VNC/Telnet) are the same access risk class.
 		r.With(iam.RequirePermission("cmdb.asset", "read")).
-			With(bastion.RequireSessionAuthorization(bastionRepo, "ssh", "assetID")).
+			With(bastion.RequireSessionAuthorization(bastionRepo, "connect", "assetID")).
 			Post("/cmdb/assets/{assetID}/terminal/ticket", terminalHandler.IssueTicket)
 		r.With(iam.RequirePermission("cmdb.asset", "read")).
-			With(bastion.RequireSessionAuthorization(bastionRepo, "rdp", "assetID")).
+			With(bastion.RequireSessionAuthorization(bastionRepo, "connect", "assetID")).
 			Post("/cmdb/assets/{assetID}/rdp/ticket", guacHandler.IssueTicket)
 		r.Mount("/bastion", bastionHandler.Routes())
 		r.Mount("/aws/accounts", awsHandler.Routes())

@@ -68,6 +68,22 @@ export function IamPage() {
     };
   }, []);
 
+  // React Router keeps this component mounted when only the search string
+  // changes, so deep-link state must follow the URL after the first render
+  // too. Returning to plain /iam restores the default capabilities view
+  // instead of leaving stale directory state behind.
+  useEffect(() => {
+    if (deepLinkUserID) {
+      setView("directory");
+      setSelectedUserID(deepLinkUserID);
+      setFeedback(null);
+      return;
+    }
+    setView("capabilities");
+    setSelectedUserID("");
+    setFeedback(null);
+  }, [deepLinkUserID]);
+
   const users = useQuery({
     queryKey: [...iamRootKey, "users", userSearch.trim()],
     queryFn: () => listIamUsers({ query: userSearch }),

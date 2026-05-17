@@ -29,7 +29,10 @@ type ActionFeedback = {
   message: string;
 };
 
-type LaunchProtocol = "ssh" | "rdp";
+// ssh runs over the terminal websocket; rdp/vnc/telnet all run over the
+// guacd path and share the RdpSessionPane (guacd renders them all to one
+// display protocol).
+type LaunchProtocol = "ssh" | "rdp" | "vnc" | "telnet";
 type LiveSessionStatus = LiveSSHStatus | LiveRDPStatus;
 
 type LiveSession = {
@@ -81,7 +84,6 @@ export function SessionsPage() {
   const canReadAllSessions = auth.can("bastion.session:read");
   const [assetQuery, setAssetQuery] = useState("");
   const [selectedAssetID, setSelectedAssetID] = useState("");
-  const [launchProtocol, setLaunchProtocol] = useState<LaunchProtocol>("ssh");
   const [launchFeedback, setLaunchFeedback] = useState<ActionFeedback | null>(null);
   const [liveSessions, setLiveSessions] = useState<LiveSession[]>([]);
   const [activeLiveID, setActiveLiveID] = useState("");
@@ -143,13 +145,7 @@ export function SessionsPage() {
     });
   }, []);
   const launchTerminal = useMutation({
-    mutationFn: async ({
-      assetID,
-      protocol,
-    }: {
-      assetID: string;
-      protocol: LaunchProtocol;
-    }): Promise<TerminalLaunchResult> => {
+    mutationFn: async ({ assetID }: { assetID: string }): Promise<TerminalLaunchResult> => {
       const asset = await getAsset(assetID);
       let profile: AssetConnectionProfile;
 
@@ -157,23 +153,24 @@ export function SessionsPage() {
         profile = await getAssetConnectionProfile(assetID);
       } catch (error) {
         if (isNotFoundError(error)) {
-          throw new Error("This asset has no connection profile. Save SSH credentials in CMDB first.");
+          throw new Error("This asset has no connection profile. Configure it in CMDB first.");
         }
         throw error;
       }
 
-      if ((profile.protocol || "ssh") !== protocol) {
-        throw new Error(
-          `${protocol.toUpperCase()} launch is only available for ${protocol} connection profiles. This asset uses ${
-            profile.protocol || "ssh"
-          }.`,
-        );
+      // The asset's connection profile is the single source of truth for
+      // which protocol to launch — there is no manual protocol choice.
+      const raw = (profile.protocol || "ssh").toLowerCase();
+      if (raw !== "ssh" && raw !== "rdp" && raw !== "vnc" && raw !== "telnet") {
+        throw new Error(`Unsupported session protocol "${raw}" on this asset's connection profile.`);
       }
+      const protocol = raw as LaunchProtocol;
+
       if (protocol === "ssh" && !hasSSHCredentials(asset, profile)) {
         throw new Error("SSH connection has no saved credentials or EC2 KeyName.");
       }
-      if (protocol === "rdp" && !hasRDPCredentials(profile)) {
-        throw new Error("RDP connection has no saved password.");
+      if (protocol !== "ssh" && !hasRDPCredentials(profile)) {
+        throw new Error(`${protocol.toUpperCase()} connection has no saved password.`);
       }
 
       const ticket = protocol === "ssh" ? await issueTerminalTicket(assetID) : await issueRdpTicket(assetID);
@@ -219,57 +216,31 @@ export function SessionsPage() {
     event.preventDefault();
     const assetID = selectedAssetID.trim();
     if (!assetID) {
-      setLaunchFeedback({ kind: "error", message: `Select an asset before launching ${launchProtocol.toUpperCase()}.` });
+      setLaunchFeedback({ kind: "error", message: "Select an asset before launching a session." });
       return;
     }
 
-    launchTerminal.mutate({ assetID, protocol: launchProtocol });
+    launchTerminal.mutate({ assetID });
   }
 
   function quickLaunch(asset: Asset) {
-    launchTerminal.mutate({ assetID: asset.id, protocol: launchProtocol });
+    launchTerminal.mutate({ assetID: asset.id });
   }
 
-  // Auto-launch when the operator arrives via /sessions?launch=...&protocol=...
-  // (e.g. from the CMDB list's Connect button). The ref keeps each
-  // (asset, protocol) tuple from re-firing on subsequent renders, and the
-  // params are cleared after the mutation is started so a refresh does not
-  // re-trigger the launch.
+  // Auto-launch when the operator arrives via /sessions?launch=<assetID>
+  // (e.g. from the CMDB list's Connect button). Protocol is decided by the
+  // asset's connection profile, so the key is the asset alone; params are
+  // cleared after the mutation starts so a refresh does not re-fire.
   const consumedLaunchKeyRef = useRef("");
   useEffect(() => {
     if (!canReadSessions || !userID) return;
     const spec = parseLaunchParams(searchParams);
     if (!spec) return;
-    const key = `${spec.assetID}|${spec.protocol}`;
-    if (consumedLaunchKeyRef.current === key) return;
-    consumedLaunchKeyRef.current = key;
-    setLaunchProtocol(spec.protocol);
-    launchTerminal.mutate({ assetID: spec.assetID, protocol: spec.protocol });
+    if (consumedLaunchKeyRef.current === spec.assetID) return;
+    consumedLaunchKeyRef.current = spec.assetID;
+    launchTerminal.mutate({ assetID: spec.assetID });
     setSearchParams({}, { replace: true });
   }, [canReadSessions, userID, searchParams, launchTerminal, setSearchParams]);
-
-  // SSH/RDP toggle injected into the shared AssetRail header so the
-  // protocol choice sits with search + refresh and travels with the rail.
-  const railProtocolToggle = (
-    <div className="sessions-rail-protocol drawer-tabs" role="tablist" aria-label="Launch protocol">
-      {[
-        { label: "SSH", value: "ssh" },
-        { label: "RDP", value: "rdp" },
-      ].map((item) => (
-        <button
-          type="button"
-          className={`drawer-tab${launchProtocol === item.value ? " active" : ""}`}
-          key={item.value}
-          onClick={() => setLaunchProtocol(item.value as LaunchProtocol)}
-          role="tab"
-          aria-selected={launchProtocol === item.value}
-          title={`Click a row to launch ${item.label} to the asset`}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
-  );
 
   return (
     <section className="page-section sessions-page live-mode">
@@ -307,10 +278,7 @@ export function SessionsPage() {
             error={sidebarAssets.error}
             onSelect={quickLaunch}
             rowsDisabled={launchTerminal.isPending}
-            rowTitle={(asset) =>
-              `Launch ${launchProtocol.toUpperCase()} to ${asset.name || asset.id}`
-            }
-            protocolToggle={railProtocolToggle}
+            rowTitle={(asset) => `Connect to ${asset.name || asset.id}`}
             onRefresh={() => void sidebarAssets.refetch()}
             refreshing={sidebarAssets.isFetching}
           />
@@ -506,7 +474,7 @@ export function SessionsPage() {
                 >
                   <Play size={16} aria-hidden="true" />
                   <span>
-                    {launchTerminal.isPending ? "Launching" : `Launch ${launchProtocol.toUpperCase()}`}
+                    {launchTerminal.isPending ? "Launching" : "Launch"}
                   </span>
                 </button>
               </div>

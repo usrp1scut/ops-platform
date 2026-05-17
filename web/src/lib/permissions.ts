@@ -10,6 +10,7 @@ export const knownPermissions = [
   "bastion.grant:write",
   "bastion.request:read",
   "bastion.request:write",
+  "bastion.session:connect",
   "bastion.session:read",
 ] as const;
 
