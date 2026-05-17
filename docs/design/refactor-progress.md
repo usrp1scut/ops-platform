@@ -152,6 +152,7 @@
 - 规格覆盖：当前 SSH/RDP 实现基线（事实）、两个本质架构抉择（采集 A 代理侧 tee vs B guacd recording-path；回放 A 浏览器内 `Guacamole.SessionRecording` vs B 服务端 `guacenc`→mp4，均给推荐与代价）、数据/存储 key/权限分发/容量取舍、隐私取舍（仅录 server→client，与 SSH 对齐）、分阶段实施计划 10a–10d、六项待 review 确认清单。
 - 推荐基线：采集 A + 回放 A（对称、自包含、复用现有 MinIO/`SetRecording`/`/recording` 鉴权、零新基建），但最终选型与容量/保留策略待 review 拍板后方可进入 10a。
 - 验证：本阶段为设计文档整理，无代码改动，未运行 typecheck / build。
+- 回填更正（记于 2026-05-17，标题"先和 review 谈"已过时）：阶段 10 实现**已完整落地**，由另一会话提交于 `c0abeb1 feat: RDP session recording capture, playback, retention (phase 10)`（位于本 spec 提交 `d2d08c9` 与阶段 11 之间；该提交未回写本进度文档，故在此回填）。按 spec 推荐基线落地——**10a 采集**：guacproxy 把 server→client Guacamole 流 tee 到录制文件（client→server 不录，与 SSH cast 隐私取舍一致），会话结束传对象存储并挂审计行，与 SSH recorder 对称（`internal/guacproxy/recorder.go`、`handler.go`）；**10b 分发**：`/recording` 按存储产物真实扩展名命名，Audit UI 区分 cast/guac，不再对非 cast 硬抛 `parseAsciicast`；**10c 回放**：浏览器内 `Guacamole.SessionRecording` 播放器（play/pause/seek，`web/src/features/audit/RdpRecordingPlayer.tsx`），SSH cast 预览不变；额外加单会话大小上限 `OPS_RECORDING_MAX_BYTES`（截在最后一条完整指令，保持可播放前缀）与保留 janitor `OPS_RECORDING_RETENTION_DAYS`（`internal/sessions/recordingjanitor.go`，覆盖 SSH+RDP），两开关默认关、存量部署不变；迁移 `0016`。**10d（guacenc→mp4 导出）按计划延后**，`rdp-recording-spec.md` 保留。即阶段 10 不再是"待 review 的设计文档"，代码已 ship。
 
 ## 2026-05-17 · 阶段 11：Sessions/Connect rail env+tag 过滤（纯前端）
 
