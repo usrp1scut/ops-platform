@@ -19,3 +19,4 @@ Use `0000-template.md` when drafting a new ADR.
 | 0008 | SSH proxy package extracted from cmdb                | Accepted |
 | 0009 | JIT bastion access via grants and requests           | Accepted |
 | 0010 | AWS asset uniqueness and cloud-wide index risk       | Accepted |
+| 0011 | Dev stage — no backward-compatibility shims          | Accepted |
