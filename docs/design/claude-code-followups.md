@@ -1,6 +1,6 @@
 # Claude Code 后续改进任务（5 项）
 
-> 基于 `docs/design/Ops Platform Design Review.html` 的设计评审。
+> 基于 `docs/archive/design/claude-design-review/Ops Platform Design Review.html` 的设计评审。
 > 第一阶段实施已完成（侧栏分组、Audit 拆分、Connect、IAM 能力矩阵），
 > 这份是收尾的 5 个细节修正。**按 P1 → P5 顺序执行，每完成一项停下让人 review。**
 
@@ -12,7 +12,7 @@
 
 ```
 请先阅读：
-- docs/design/Ops Platform Design Review.html（设计评审，14 页）
+- docs/archive/design/claude-design-review/Ops Platform Design Review.html（设计评审，14 页）
 - docs/design/claude-code-followups.md（这份后续任务）
 
 本次只做【任务 P<N>】，不要顺手优化别的代码。
