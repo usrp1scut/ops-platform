@@ -152,3 +152,13 @@
 - 规格覆盖：当前 SSH/RDP 实现基线（事实）、两个本质架构抉择（采集 A 代理侧 tee vs B guacd recording-path；回放 A 浏览器内 `Guacamole.SessionRecording` vs B 服务端 `guacenc`→mp4，均给推荐与代价）、数据/存储 key/权限分发/容量取舍、隐私取舍（仅录 server→client，与 SSH 对齐）、分阶段实施计划 10a–10d、六项待 review 确认清单。
 - 推荐基线：采集 A + 回放 A（对称、自包含、复用现有 MinIO/`SetRecording`/`/recording` 鉴权、零新基建），但最终选型与容量/保留策略待 review 拍板后方可进入 10a。
 - 验证：本阶段为设计文档整理，无代码改动，未运行 typecheck / build。
+
+## 2026-05-17 · 阶段 11：Sessions/Connect rail env+tag 过滤（纯前端）
+
+- 背景：调研清单收尾项。共享组件 `AssetRail`（Sessions Live 与 Connect 共用）此前只有名称/IP 文本搜索，缺与 CMDB 对齐的 facet 过滤；rail 本就按 env→vpc 分组，env facet 与之天然契合。
+- 决策：env 过滤 + tag 过滤都做（用户拍板，已知 tag 异构稀疏复杂度警告）；做成 `AssetRail` **内部状态**（纯视图过滤，无父组件需要它）——`SessionsPage`/`ConnectPage` **零改动、零风险**，两页同时受益。
+- `web/src/lib/launch.ts`：新增资产域 helper（与 `buildAssetTree`/`isConnectableAsset` 同处）——`assetEnvKey(asset)`（`asset.env || "default"`，与 `buildAssetTree` env 命名 1:1）、`assetMatchesTag(asset, needle)`（合并 system_tags+labels+tags，按 key / value / `key:value` 子串大小写不敏感匹配，空 needle = 全通过；处理缺失 map 与 null 值）。
+- `web/src/features/sessions/AssetRail.tsx`：新增内部 `envFilter`/`tagFilter` 状态；`envOptions` 由 connectableAssets distinct `assetEnvKey` 派生排序；新增 `facetFiltered`（env 精确匹配 + tag 子串）插在既有文本搜索与 `buildAssetTree` 之前；header 加 `sessions-rail-facets` 行（env `<select>` + tag `<input>`，均带 aria-label、`!canRead` 时禁用）。空过滤为 no-op，行为与改动前一致。
+- `web/src/styles/app.css`：新增 `.sessions-rail-facets` 紧凑行样式（沿用既有 rail 密度与 token，select ≤50% 宽、tag input flex:1）。
+- 严格停在阶段 11：零后端、无新接口；未改 `SessionsPage`/`ConnectPage`/AuditPage；过滤为纯客户端视图层，不影响选中/启动/深链等既有行为。
+- 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未手测；建议 review 时确认：① env 下拉收敛到对应环境且与树 env 分组一致；② tag 输入按 key/value/`key:value` 子串过滤；③ env+tag 叠加为 AND；④ 清空两者回全量；⑤ Sessions Live 与 Connect 两处 rail 均生效且选中/启动/高亮行为不回归。

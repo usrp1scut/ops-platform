@@ -1921,6 +1921,25 @@ body.fullwidth-mode .page-section { width: 100%; max-width: none; }
   flex: 1;
   min-width: 0;
 }
+.sessions-rail-facets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sessions-rail-facets select,
+.sessions-rail-facets input {
+  min-width: 0;
+  background: transparent;
+  border: 1px solid var(--border, var(--color-border));
+  border-radius: var(--radius-sm);
+  color: var(--text, var(--color-fg));
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.sessions-rail-facets select { flex: 0 0 auto; max-width: 50%; }
+.sessions-rail-facets input { flex: 1; }
+.sessions-rail-facets select:focus,
+.sessions-rail-facets input:focus { outline: none; border-color: var(--color-accent); }
 
 /* Two-line asset row. Primary line: bastion mark + name. Secondary:
  * a thin "addr · env · type" string that breaks the biz-01 fog. */

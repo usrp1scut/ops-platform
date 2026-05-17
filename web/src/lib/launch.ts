@@ -109,6 +109,36 @@ export function buildAssetTree(assets: Asset[]): AssetTreeEnv[] {
   });
 }
 
+// The env bucket an asset falls into, matching buildAssetTree's rule so
+// the env facet options line up 1:1 with the tree headings.
+export function assetEnvKey(asset: Asset): string {
+  return asset.env || "default";
+}
+
+// Case-insensitive match of `needle` against an asset's merged tags
+// (system_tags + labels + tags). Matches a tag key, a value, or a
+// "key:value" pair as a substring. An empty needle matches everything.
+export function assetMatchesTag(asset: Asset, needle: string): boolean {
+  const q = needle.trim().toLowerCase();
+  if (!q) return true;
+  const merged: Record<string, unknown> = {
+    ...(asset.system_tags || {}),
+    ...(asset.labels || {}),
+    ...(asset.tags || {}),
+  };
+  for (const [key, value] of Object.entries(merged)) {
+    const v = value == null ? "" : String(value);
+    if (
+      key.toLowerCase().includes(q) ||
+      v.toLowerCase().includes(q) ||
+      `${key}:${v}`.toLowerCase().includes(q)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Case-insensitive text search across the fields the legacy sidebar used
 // for filtering (name, id, type, env, ips, dns, vpc).
 export function filterConnectableAssets(assets: Asset[], query: string): Asset[] {

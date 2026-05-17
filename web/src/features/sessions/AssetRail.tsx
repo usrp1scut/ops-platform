@@ -1,9 +1,11 @@
 import { RefreshCw, Search } from "lucide-react";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 import type { Asset } from "../../api/cmdb";
 import { PanelState } from "../../components/PanelState";
 import {
+  assetEnvKey,
+  assetMatchesTag,
   buildAssetTree,
   filterConnectableAssets,
   isConnectableAsset,
@@ -58,9 +60,27 @@ export function AssetRail({
   ariaLabel = "Connectable assets",
 }: AssetRailProps) {
   const connectableAssets = useMemo(() => assets.filter(isConnectableAsset), [assets]);
+  // env/tag facets are a pure view filter the rail owns itself — no parent
+  // wiring needed, so Sessions and Connect both get it for free.
+  const [envFilter, setEnvFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  const envOptions = useMemo(() => {
+    const envs = new Set<string>();
+    for (const asset of connectableAssets) envs.add(assetEnvKey(asset));
+    return [...envs].sort();
+  }, [connectableAssets]);
+  const facetFiltered = useMemo(
+    () =>
+      connectableAssets.filter(
+        (asset) =>
+          (envFilter === "" || assetEnvKey(asset) === envFilter) &&
+          assetMatchesTag(asset, tagFilter),
+      ),
+    [connectableAssets, envFilter, tagFilter],
+  );
   const filteredConnectables = useMemo(
-    () => filterConnectableAssets(connectableAssets, search),
-    [connectableAssets, search],
+    () => filterConnectableAssets(facetFiltered, search),
+    [facetFiltered, search],
   );
   const assetTree: AssetTreeEnv[] = useMemo(
     () => buildAssetTree(filteredConnectables),
@@ -94,6 +114,30 @@ export function AssetRail({
               <RefreshCw size={14} aria-hidden="true" />
             </button>
           ) : null}
+        </div>
+        <div className="sessions-rail-facets">
+          <select
+            value={envFilter}
+            onChange={(event) => setEnvFilter(event.target.value)}
+            disabled={!canRead}
+            aria-label="Filter by environment"
+            title="Filter by environment"
+          >
+            <option value="">env · all</option>
+            {envOptions.map((env) => (
+              <option value={env} key={env}>
+                env · {env}
+              </option>
+            ))}
+          </select>
+          <input
+            type="search"
+            value={tagFilter}
+            onChange={(event) => setTagFilter(event.target.value)}
+            placeholder="tag key / value"
+            disabled={!canRead}
+            aria-label="Filter by tag"
+          />
         </div>
       </div>
 
