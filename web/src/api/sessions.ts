@@ -59,6 +59,10 @@ export function buildAssetRdpTicketPath(assetID: string) {
   return `/api/v1/cmdb/assets/${encodeURIComponent(assetID)}/rdp/ticket`;
 }
 
+export function buildAssetDbTicketPath(assetID: string) {
+  return `/api/v1/cmdb/assets/${encodeURIComponent(assetID)}/db/ticket`;
+}
+
 export function listSessions(options: ListSessionsOptions = {}) {
   const query = buildSessionsQuery({ limit: 100, ...options });
 
@@ -75,6 +79,13 @@ export function getSessionRecording(sessionID: string) {
 
 export function issueTerminalTicket(assetID: string) {
   return apiRequest<SessionTicketResponse>(buildAssetTerminalTicketPath(assetID), {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function issueDbTicket(assetID: string) {
+  return apiRequest<SessionTicketResponse>(buildAssetDbTicketPath(assetID), {
     method: "POST",
     body: "{}",
   });

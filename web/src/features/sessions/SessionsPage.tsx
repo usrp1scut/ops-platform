@@ -16,11 +16,12 @@ import {
   type Asset,
   type AssetConnectionProfile,
 } from "../../api/cmdb";
-import { issueRdpTicket, issueTerminalTicket } from "../../api/sessions";
+import { issueDbTicket, issueRdpTicket, issueTerminalTicket } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
 import { buildAuditSearch, parseLaunchParams } from "../../lib/launch";
 import { useAuth } from "../auth/AuthProvider";
 import { AssetRail } from "./AssetRail";
+import { DbAccessCard, type DbAccessInfo } from "./DbAccessCard";
 import { RdpSessionPane, type LiveRDPStatus } from "./RdpSessionPane";
 import { SshTerminalPane, type LiveSSHStatus } from "./SshTerminalPane";
 
@@ -51,6 +52,18 @@ type TerminalLaunchResult = {
   kind: LaunchProtocol;
   ticket: string;
 };
+
+// DB sessions have no in-browser renderer: instead of a live pane we hand
+// the operator a short-lived ws endpoint + ticket and the websocat/client
+// command templates (see docs/design/db-session-broker-spec.md §3a). The
+// DbAccessInfo shape lives with the card it feeds.
+type LaunchOutcome =
+  | { mode: "live"; live: TerminalLaunchResult }
+  | { mode: "db"; db: DbAccessInfo };
+
+function isDbProtocol(p: string): p is DbAccessInfo["protocol"] {
+  return p === "mysql" || p === "postgres" || p === "redis";
+}
 
 function assetOptionLabel(asset: Asset) {
   const name = asset.name || asset.id;
@@ -87,6 +100,7 @@ export function SessionsPage() {
   const [launchFeedback, setLaunchFeedback] = useState<ActionFeedback | null>(null);
   const [liveSessions, setLiveSessions] = useState<LiveSession[]>([]);
   const [activeLiveID, setActiveLiveID] = useState("");
+  const [dbAccess, setDbAccess] = useState<DbAccessInfo | null>(null);
   const [sidebarSearch, setSidebarSearch] = useState("");
   // "Launch by ID" used to live as a bottom panel under the terminal,
   // squeezing the terminal whenever it appeared. It now lives in a
@@ -145,7 +159,7 @@ export function SessionsPage() {
     });
   }, []);
   const launchTerminal = useMutation({
-    mutationFn: async ({ assetID }: { assetID: string }): Promise<TerminalLaunchResult> => {
+    mutationFn: async ({ assetID }: { assetID: string }): Promise<LaunchOutcome> => {
       const asset = await getAsset(assetID);
       let profile: AssetConnectionProfile;
 
@@ -161,6 +175,28 @@ export function SessionsPage() {
       // The asset's connection profile is the single source of truth for
       // which protocol to launch — there is no manual protocol choice.
       const raw = (profile.protocol || "ssh").toLowerCase();
+
+      // DB protocols have no in-browser renderer: issue a db ticket and
+      // hand back access-card info instead of opening a live pane.
+      if (isDbProtocol(raw)) {
+        if (!profile.has_password) {
+          throw new Error(`${raw.toUpperCase()} connection has no saved password.`);
+        }
+        const ticket = await issueDbTicket(assetID);
+        if (!ticket.ticket) throw new Error(`No ${raw.toUpperCase()} ticket returned.`);
+        return {
+          mode: "db",
+          db: {
+            asset,
+            protocol: raw,
+            ticket: ticket.ticket,
+            expiresAt: ticket.expires_at,
+            username: profile.username || "",
+            database: profile.database || "",
+          },
+        };
+      }
+
       if (raw !== "ssh" && raw !== "rdp" && raw !== "vnc" && raw !== "telnet") {
         throw new Error(`Unsupported session protocol "${raw}" on this asset's connection profile.`);
       }
@@ -177,38 +213,50 @@ export function SessionsPage() {
       if (!ticket.ticket) throw new Error(`No ${protocol.toUpperCase()} ticket returned.`);
 
       return {
-        asset,
-        expiresAt: ticket.expires_at,
-        kind: protocol,
-        ticket: ticket.ticket,
+        mode: "live",
+        live: {
+          asset,
+          expiresAt: ticket.expires_at,
+          kind: protocol,
+          ticket: ticket.ticket,
+        },
       };
     },
     onMutate: () => {
       setLaunchFeedback(null);
     },
     onSuccess: (result) => {
+      if (result.mode === "db") {
+        setDbAccess(result.db);
+        setLaunchFeedback({
+          kind: "success",
+          message: `DB access ready for ${result.db.asset.name || result.db.asset.id}.`,
+        });
+        return;
+      }
+      const live = result.live;
       const sessionID = createLiveSessionID();
       setLiveSessions((current) => [
         ...current,
         {
-          asset: result.asset,
-          expiresAt: result.expiresAt,
+          asset: live.asset,
+          expiresAt: live.expiresAt,
           id: sessionID,
-          kind: result.kind,
+          kind: live.kind,
           status: "connecting",
-          ticket: result.ticket,
+          ticket: live.ticket,
         },
       ]);
       setActiveLiveID(sessionID);
       setLaunchFeedback({
         kind: "success",
-        message: `${result.kind.toUpperCase()} ticket issued for ${result.asset.name || result.asset.id}.`,
+        message: `${live.kind.toUpperCase()} ticket issued for ${live.asset.name || live.asset.id}.`,
       });
     },
     onError: (error) => {
       setLaunchFeedback({
         kind: "error",
-        message: error instanceof Error ? error.message : "Failed to launch terminal.",
+        message: error instanceof Error ? error.message : "Failed to launch session.",
       });
     },
   });
@@ -482,6 +530,8 @@ export function SessionsPage() {
           </div>
         </div>
       ) : null}
+
+      {dbAccess ? <DbAccessCard info={dbAccess} onClose={() => setDbAccess(null)} /> : null}
 
     </section>
   );

@@ -18,6 +18,7 @@ import (
 	"ops-platform/internal/cmdb"
 	"ops-platform/internal/config"
 	"ops-platform/internal/connectivity"
+	"ops-platform/internal/dbproxy"
 	"ops-platform/internal/guacproxy"
 	"ops-platform/internal/hostkey"
 	"ops-platform/internal/iam"
@@ -136,6 +137,8 @@ func (s *Server) Router() http.Handler {
 	terminalHandler := terminal.NewHandler(terminalSvc, ticketService, bastionService, sessionsRepo, cmdbRepo, recordingStorage)
 	guacSvc := guacproxy.NewService(s.cfg.GuacdAddr, s.cfg.GuacTunnelHost, bastionService)
 	guacHandler := guacproxy.NewHandler(guacSvc, ticketService, cmdbRepo, sessionsRepo, recordingStorage, s.cfg.RecordingMaxBytes)
+	dbproxySvc := dbproxy.NewService(bastionService)
+	dbproxyHandler := dbproxy.NewHandler(dbproxySvc, ticketService, cmdbRepo, sessionsRepo)
 	awsHandler := aws.NewHandler(
 		awsRepo,
 		iamRepo,
@@ -184,6 +187,9 @@ func (s *Server) Router() http.Handler {
 		r.With(iam.RequirePermission("cmdb.asset", "read")).
 			With(bastion.RequireSessionAuthorization(bastionRepo, "connect", "assetID")).
 			Post("/cmdb/assets/{assetID}/rdp/ticket", guacHandler.IssueTicket)
+		r.With(iam.RequirePermission("cmdb.asset", "read")).
+			With(bastion.RequireSessionAuthorization(bastionRepo, "connect", "assetID")).
+			Post("/cmdb/assets/{assetID}/db/ticket", dbproxyHandler.IssueTicket)
 		r.Mount("/bastion", bastionHandler.Routes())
 		r.Mount("/aws/accounts", awsHandler.Routes())
 		r.With(iam.RequirePermission("aws.account", "read")).Get("/aws/sync/runs", awsSyncHandler.ListRuns)
@@ -195,6 +201,7 @@ func (s *Server) Router() http.Handler {
 	// WebSocket terminal uses short-lived ticket auth (see terminalHandler.IssueTicket).
 	router.Get("/ws/v1/cmdb/assets/{assetID}/terminal", terminalHandler.ServeWS)
 	router.Get("/ws/v1/cmdb/assets/{assetID}/rdp", guacHandler.ServeWS)
+	router.Get("/ws/v1/cmdb/assets/{assetID}/db", dbproxyHandler.ServeWS)
 
 	return router
 }

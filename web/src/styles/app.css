@@ -2047,6 +2047,28 @@ body.fullwidth-mode .page-section { width: 100%; max-width: none; }
   gap: 8px;
 }
 
+/* DB access card (phase 13d): no live pane — copyable tunnel + client cmds */
+.db-access-card { gap: 10px; }
+.db-access-cmd { margin: 8px 0; }
+.db-access-cmd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.db-access-pre {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* ========== AWS page ==========
  * Mirrors the Assets fullwidth pattern: a single toolbar row carries
  * stats + actions (Refresh / Run sync / Add account) so the accounts

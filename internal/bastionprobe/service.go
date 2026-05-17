@@ -190,6 +190,51 @@ func (s *Service) ResolveAssetRDP(ctx context.Context, assetID string) (RDPResol
 	return res, nil
 }
 
+// ResolveAssetDB resolves an asset for a database access session
+// (mysql/postgres/redis). It mirrors ResolveAssetRDP — same target + VPC
+// proxy resolution and the same RDPResolution carrier — but gates on the
+// database protocols and their default ports. The proxy is dialed so the
+// caller can tunnel raw TCP to the DB through it; the dbproxy bridge never
+// parses the wire protocol (L1: controlled link + audit metadata only).
+func (s *Service) ResolveAssetDB(ctx context.Context, assetID string) (RDPResolution, error) {
+	target, err := s.repo.GetBastionProbeTarget(ctx, assetID, s.cfg.MasterKey)
+	if err != nil {
+		return RDPResolution{}, err
+	}
+	protocol := strings.ToLower(strings.TrimSpace(target.Protocol))
+	var defaultPort int
+	switch protocol {
+	case "mysql":
+		defaultPort = 3306
+	case "postgres":
+		defaultPort = 5432
+	case "redis":
+		defaultPort = 6379
+	default:
+		return RDPResolution{}, fmt.Errorf("asset protocol is %q, a database protocol (mysql, postgres, redis) is required", target.Protocol)
+	}
+	port := target.Port
+	if port <= 0 {
+		port = defaultPort
+	}
+	res := RDPResolution{
+		Target:     target,
+		TargetAddr: net.JoinHostPort(target.Host, strconv.Itoa(port)),
+		Protocol:   protocol,
+	}
+	if target.ProxyRequired && target.Proxy == nil {
+		return RDPResolution{}, fmt.Errorf("asset %s requires bastion proxy but none is resolved", target.AssetID)
+	}
+	if target.Proxy != nil {
+		proxyClient, err := s.dialProxy(ctx, target.Proxy, s.cfg.ProbeTimeout)
+		if err != nil {
+			return RDPResolution{}, fmt.Errorf("proxy dial: %w", err)
+		}
+		res.ProxyClient = proxyClient
+	}
+	return res, nil
+}
+
 // ProbeAsset runs a single probe for a specific asset synchronously and returns
 // the resulting snapshot. The snapshot is persisted and connection probe status
 // is updated.

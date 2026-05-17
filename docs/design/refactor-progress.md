@@ -184,3 +184,45 @@
   - `web/src/features/sessions/SessionsPage.tsx`（option A）：移除手动协议状态/`railProtocolToggle`/AssetRail `protocolToggle`；`launchTerminal` 不再收 protocol 入参，改为读连接档 `profile.protocol` 决定（ssh→terminal 票据+SshTerminalPane；rdp/vnc/telnet→guac 票据+RdpSessionPane，pane 渲染本就是 `kind==="ssh"?Ssh:Rdp` 二元判断，自动适配）；凭据预检 ssh→hasSSHCredentials 否则 has_password；auto-launch 按 assetID（忽略 URL protocol）。
 - 严格停在阶段 12：未做数据库/k8s 连接类型；未新增 per-protocol 权限（按 iii 合并）。诚实遗留（建议后续）：ConnectPage 仍保留 "Open SSH"/"Open RDP" 两个按钮、均由单一 connect 权限门控且实际协议由连接档决定——在 option A 下两按钮语义冗余，按 D 只动了权限查询、未重排该（另一会话在改的）文件的按钮 UX，留作后续协调。
 - 验证：`go build ./...`、`go vet`（含 `-tags=integration ./test/...`）、`go test ./internal/...` 通过；`cd web && npm run typecheck`、`npm run build` 通过（既有 bundle 警告）。本环境无 guacd/浏览器/DB，未做运行期手测；建议 review 时：① 跑迁移 0023；② 配 vnc/telnet 连接档并各开一次会话确认 guacd `select` 正确、录屏（阶段10a tee 协议无关）生成；③ 给某角色配 scoped `bastion.session:connect` 验证取票三分支与 `/resolve` 一致；④ 确认 ssh-only 老角色合并后获得 connect（A 放大）符合预期；⑤ Connect 页访问判定与 Sessions 按连接档协议启动回归。
+
+## 2026-05-17 · 阶段 13：数据库会话访问代理 MySQL/PG/Redis（L1，设计文档，先和 review 谈）
+
+- 本阶段严格不写代码：产出 `docs/design/db-session-broker-spec.md`。
+- 定位把关（依 `project_positioning` 记忆 + ADR 0011）：带录制/SQL 过滤/Web 查询台的 DB 会话是 JumpServer 式 PAM 支柱，与"内部运维控制台、非 PAM"冲突；用户已选 **L1=轻量 TCP 访问代理**（仅受控建链 + 审计元数据，用户自带 mysql/psql/redis-cli），L2/L3 明确不在本规格、若做属产品定位变更需另立项。
+- 关键发现：`postgres` 仅在连接档+主机探测里，**无任何交互式 DB 会话通路**；mysql/redis 连白名单都没有。鉴权（阶段 12 已并的 `bastion.session:connect`）、票据（`connectivity.TicketService`）、到内网（`guacproxy/tunnel.go` sshForwarder）、字节代理（guac `bridge` 形态）、审计（`sessions.Start/End`）、连接档（postgres 已就绪）基建基本齐备。
+- 规格覆盖：当前基线（事实）、核心架构分叉（A ws 桥+本地 helper〔推荐〕/ B 复用 ssh -L 退化 / C 跳板监听〔不建议〕）、复用映射、前端关键差异（DB 会话无浏览器渲染器→不入 live pane，改"DB 访问"卡：端点+倒计时+客户端命令模板+显式结束）、严格不做边界、分阶段 13a–13d、六项待 review 确认清单。
+- 推荐基线：架构 A（与现有 SSH/RDP ws-bridge/ticket/sshForwarder 同构、协议无关、网络面最小）；连接档加 mysql(3306)/redis(6379)、redis 放宽 username 必填（参照 vnc）。
+- 验证：本阶段为设计文档整理，无代码改动，未运行 typecheck / build。
+
+## 2026-05-17 · 阶段 13a：连接档支持 mysql/redis（纯增量后端）
+
+- 按 spec 13a（独立、零风险、不依赖架构分叉）落地：`internal/cmdb/repository.go` `UpsertAssetConnectionProfile` 协议白名单加 `mysql`/`redis`；默认端口 mysql 3306 / redis 6379；redis 与 vnc 一样放宽 username 必填（无用户概念）；mysql/redis 同 postgres/rdp/vnc/telnet 仅 password 鉴权。与阶段 12 加 vnc/telnet 完全同构、纯增量。
+- 严格停在 13a：未碰会话通路。**13b（服务端 ws DB 代理新子系统，安全敏感）未开工**——它取决于 spec §1 的唯一架构分叉（A ws 桥+本地 helper / B 复用 ssh -L / C 跳板监听）与 §6 的 TTL/redis 语义等决策，需 review 拍板后才写码，不凭假设盲建。
+- 验证：`go build ./...` 通过；`go test ./internal/cmdb/` 通过。本环境无 DB，未做运行期手测。
+
+## 2026-05-17 · 阶段 13b：服务端数据库会话代理 dbproxy（架构 A，后端）
+
+- 用户拍板架构 A（ws 桥 + 本地 helper）。其余清单项按 spec 推荐默认且契合 ADR 0011（不引非必要逻辑）：复用既有 60s 票据 + grant 窗口、不引独立 TTL 策略；代理裸字节不解析协议，redis DB index 由用户 redis-cli `-n` 决定；L1 边界=仅桥接+审计，无录制/SQL 过滤/Web 台。
+- `internal/bastionprobe/service.go`：新增 `ResolveAssetDB`，镜像 `ResolveAssetRDP`（同样的 target + VPC proxy 解析、复用 `RDPResolution` 载体），仅协议门改为 mysql/postgres/redis + 默认端口 3306/5432/6379。刻意不重构 `ResolveAssetRDP`（安全路径，ADR 0011 不过度抽象，~20 行重复可接受）。
+- 新增 `internal/dbproxy`：
+  - `service.go`：`Service.Open` 解析后经资产 VPC proxy SSH client `Dial("tcp",addr)` 或直连拿到裸 TCP；`Conn` 关闭时连带关 proxy；用 `closer` 接口持有 proxy 避免 import x/crypto/ssh。**不解析 DB 协议**。
+  - `handler.go`：`IssueTicket`（复用 `connectivity.TicketService`，与 SSH/RDP 同款）+ `ServeWS`（ticket consume + asset 匹配 → `svc.Open` → ws 升级 → `sessions.Start` → `bridge` → `sessions.End`）+ `bridge`（ws Binary 帧 ↔ 裸 TCP 双向泵，字节计数入审计，**载荷不检视**；首个出错方结束、关 db 解阻塞对端，字节为 best-effort 与 guacproxy bridge 契约一致）。无 recorder（L1 不录）。
+- `internal/httpserver/server.go`：构造 `dbproxySvc/dbproxyHandler`（复用 `bastionService` 作 resolver、`ticketService`、`cmdbRepo` 作 meta、`sessionsRepo`）；新增 `POST /api/v1/cmdb/assets/{assetID}/db/ticket`（与 terminal/rdp **完全同一鉴权链**：`cmdb.asset:read` + `RequireSessionAuthorization(...,"connect",...)`）与 `GET /ws/v1/cmdb/assets/{assetID}/db`（ticket 鉴权）。
+- 安全姿态：新通路鉴权链与已 review 的 RDP 路径**逐字相同**（connect 能力 + 单用票据 + asset 匹配），字节对代理透明（同 RDP/guac），未引入新攻击面（"被授权用户够到其被授权的资产"即本特性意图）。
+- 严格停在 13b：**13c（本地 helper 打包：自带二进制 vs 文档化 websocat 一行）与 13d（前端 DB 访问卡）未开工**——13c 有打包决策（#2，不擅自建跨平台二进制分发）、13d 触及 ConnectPage/SessionsPage（其它会话正在改，有冲突风险），需先定再做。
+- 验证：`go build ./...`、`go vet ./internal/dbproxy/ ./internal/bastionprobe/ ./internal/httpserver/`、`go test ./internal/...` 通过。本环境无 DB/ws 客户端，未运行期手测；建议 review 时：① 配 mysql/postgres/redis 连接档；② 取 `/db/ticket` 后用 ws 客户端连 `/ws/v1/.../db` 验证经/不经 VPC proxy 的字节双通 + 审计行（has_recording 恒 false）；③ 无 `bastion.session:connect`/grant 时取票 403（与 RDP 路径回归一致）。
+
+## 2026-05-17 · 阶段 13c：本地接入文档化（决策 a，纯文档）
+
+- 用户选 (a)：不打包自带二进制（ADR 0011：不擅自引入分发/构建产物），文档化通用 `websocat --binary` 一行隧道 + mysql/psql/redis-cli 命令模板，写入 `db-session-broker-spec.md §3a`，供 13d 前端"DB 访问"卡直接渲染。要点：`--binary` 必须、ticket 单用短 TTL、本地端口用户自选、裸 TCP 透传不在隧道内做 TLS 终结。
+- 并发核实：主工作树当前对 ConnectPage/SessionsPage 无未提交改动；早前并行改动已落 `28f46e4`；4 个旁路会话工作树对相关文件均无未提交改动——13d 交织冲突顾虑解除（仅余常规"将来分支合并"风险）。
+- 严格停在 13c：纯文档；13d 前端未开工，待确认后做。
+
+## 2026-05-17 · 阶段 13d：前端"DB 访问"卡（架构 A，纯前端）
+
+- `web/src/api/sessions.ts`：新增 `buildAssetDbTicketPath` + `issueDbTicket`（POST `/cmdb/assets/{id}/db/ticket`，与 issueRdpTicket 同款）。
+- `web/src/features/sessions/SessionsPage.tsx`：option A 的 `launchTerminal` 改为返回 `LaunchOutcome` 联合——连接档 protocol ∈ {mysql,postgres,redis} 时不开 live pane，而是 `issueDbTicket` 并 `setDbAccess(...)`；其余协议走原 live 流（ssh→terminal、rdp/vnc/telnet→guac）不变。新增 `dbAccess` 状态 + 渲染 `<DbAccessCard>`。`isDbProtocol` 复用 `DbAccessCard` 导出的类型，单一来源。
+- 新增 `web/src/features/sessions/DbAccessCard.tsx`：复用既有 `sessions-launch-modal` 壳；展示 §3a 的 `websocat --binary` 隧道命令 + 按协议的 mysql/psql/redis-cli 命令（占位用连接档 username/database 填充，密码不入命令），本地端口可改（默认 13306/15432/16379），票据倒计时（过期提示重连），一键复制、Done 关闭。Connect 页经 `/sessions?launch=` 进来对 DB 资产同样落到此卡（无需改 ConnectPage）。Audit 行由后端写（has_recording 恒 false），前端无需改。
+- `web/src/styles/app.css`：新增 `.db-access-*` 小样式（复用既有 token/modal 壳）。
+- 严格停在 13d：未做 SQL 捕获/Web 台/录制（L1 边界）；未改 ConnectPage（其 Open 按钮在 option A 下的冗余仍为 phase 12 记录的诚实遗留，与本阶段无关）。
+- 验证：`cd web && npm run typecheck`、`npm run build` 通过（既有 bundle 警告）。本环境无 DB/ws，未手测；建议 review 时：① 配 mysql/postgres/redis 连接档，rail 点击→出"DB 访问"卡而非 live pane；② 按卡片命令 `websocat` 起隧道 + 客户端连通；③ 票据 60s 倒计时与过期文案；④ ssh/rdp/vnc/telnet 回归不受影响；⑤ Connect 对 DB 资产跳 Sessions 后出卡。
