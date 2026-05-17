@@ -114,6 +114,19 @@ export function listMyActiveBastionGrants(userID: string, limit = 50) {
   return apiRequest<ListBastionGrantsResponse>(`/api/v1/bastion/grants?${params.toString()}`);
 }
 
+// Active grants on one asset, across all principals. No user_id is sent on
+// purpose: the backend self-scopes callers without bastion.grant:write to
+// their own rows, so an unprivileged viewer simply gets the honest subset.
+export function listAssetActiveGrants(assetID: string, limit = 50) {
+  const params = new URLSearchParams({
+    active: "true",
+    asset_id: assetID,
+    limit: String(limit),
+  });
+
+  return apiRequest<ListBastionGrantsResponse>(`/api/v1/bastion/grants?${params.toString()}`);
+}
+
 export function createBastionRequest(payload: CreateBastionRequestPayload) {
   return apiRequest<BastionRequest>("/api/v1/bastion/requests", {
     method: "POST",

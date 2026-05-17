@@ -2552,6 +2552,34 @@ body.fullwidth-mode .page-section { width: 100%; max-width: none; }
 .connect-card-list dt { color: var(--color-fg-muted); }
 .connect-card-list dd { margin: 0; text-align: right; }
 
+.connect-recent-list,
+.connect-access-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.connect-recent-list li,
+.connect-access-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.connect-recent-when { color: var(--color-fg-muted); white-space: nowrap; }
+.connect-recent-who,
+.connect-access-who {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connect-access-list li .muted { white-space: nowrap; }
+.connect-card-note { font-size: 12px; margin-top: 4px; }
+
 /* ========== IAM capability matrix (Govern · phase 4c) ==========
  * Primary IAM view: rows = capabilities, columns = roles, cells =
  * all / partial / none. Roles & users stay editable but secondary,

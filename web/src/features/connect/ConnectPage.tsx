@@ -13,10 +13,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { getAsset, listAssets, type Asset } from "../../api/cmdb";
-import { listMyActiveBastionGrants } from "../../api/bastion";
+import { listAssetActiveGrants, listMyActiveBastionGrants } from "../../api/bastion";
+import { listSessions } from "../../api/sessions";
 import { PanelState } from "../../components/PanelState";
 import { formatGrantTimeRemaining } from "../../lib/bastionGrants";
-import { buildLaunchSearch, type LaunchProtocol } from "../../lib/launch";
+import { buildAuditSearch, buildLaunchSearch, type LaunchProtocol } from "../../lib/launch";
+import { sessionStatus, sessionStatusTone } from "../../lib/sessions";
 import { useAuth } from "../auth/AuthProvider";
 import { AssetRail } from "../sessions/AssetRail";
 
@@ -56,6 +58,11 @@ export function ConnectPage() {
   const canReadAssets = auth.can("cmdb.asset:read");
   const canReadGrants = auth.can("bastion.grant:read");
   const canRequestAccess = auth.can("bastion.request:write");
+  // Backend self-scopes session/grant lists when the caller lacks the
+  // "see everyone" permission; these flags only drive an honest note so
+  // the operator knows the card may be a subset.
+  const canReadAllSessions = auth.can("bastion.session:read");
+  const canSeeAllGrants = auth.can("bastion.grant:write");
 
   const [railSearch, setRailSearch] = useState("");
   const [selectedAssetID, setSelectedAssetID] = useState("");
@@ -104,8 +111,20 @@ export function ConnectPage() {
     queryFn: () => listMyActiveBastionGrants(userID, 50),
     enabled: canReadGrants && Boolean(userID),
   });
+  const recentSessions = useQuery({
+    queryKey: ["sessions", "by-asset", "connect", userID, selectedAssetID],
+    queryFn: () => listSessions({ assetID: selectedAssetID, limit: 5 }),
+    enabled: canReadAssets && Boolean(userID) && Boolean(selectedAssetID),
+  });
+  const assetGrants = useQuery({
+    queryKey: ["bastion", "grants", "active", "by-asset", userID, selectedAssetID],
+    queryFn: () => listAssetActiveGrants(selectedAssetID, 50),
+    enabled: canReadGrants && Boolean(userID) && Boolean(selectedAssetID),
+  });
 
   const selectedAsset = assetDetail.data;
+  const recentSessionItems = recentSessions.data?.items || [];
+  const assetGrantItems = assetGrants.data?.items || [];
   const grantItems = myActiveGrants.data?.items || [];
   const activeGrant = useMemo(
     () => grantItems.find((grant) => grant.asset_id === selectedAssetID && grant.active),
@@ -292,32 +311,47 @@ export function ConnectPage() {
         <aside className="connect-side" aria-label="Asset context">
           <article className="work-panel connect-card">
             <p className="eyebrow">Recent usage</p>
-            {selectedAsset ? (
+            {!selectedAsset ? (
+              <p className="muted">Select an asset to see its activity.</p>
+            ) : (
               <>
-                <dl className="connect-card-list">
-                  <div>
-                    <dt>Last updated</dt>
-                    <dd>{formatDateTime(selectedAsset.updated_at)}</dd>
-                  </div>
-                  <div>
-                    <dt>Created</dt>
-                    <dd>{formatDateTime(selectedAsset.created_at)}</dd>
-                  </div>
-                  <div>
-                    <dt>Source</dt>
-                    <dd>{selectedAsset.source || "manual"}</dd>
-                  </div>
-                </dl>
+                {!canReadAllSessions ? (
+                  <p className="muted">Showing only your own sessions on this asset.</p>
+                ) : null}
+                {recentSessions.isLoading ? (
+                  <PanelState kind="loading" message="Loading sessions" />
+                ) : recentSessions.isError ? (
+                  <PanelState
+                    kind="error"
+                    message={
+                      recentSessions.error instanceof Error
+                        ? recentSessions.error.message
+                        : "Failed to load sessions."
+                    }
+                  />
+                ) : recentSessionItems.length === 0 ? (
+                  <p className="muted">No recorded sessions for this asset.</p>
+                ) : (
+                  <ul className="connect-recent-list">
+                    {recentSessionItems.map((session) => (
+                      <li key={session.id}>
+                        <span className="connect-recent-when">{formatDateTime(session.started_at)}</span>
+                        <span className="connect-recent-who">{session.user_name || session.user_id}</span>
+                        <span className={`status-pill ${sessionStatusTone(session)}`}>
+                          {sessionStatus(session)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <button
                   type="button"
                   className="secondary-button compact text-link-button"
-                  onClick={() => navigate("/audit")}
+                  onClick={() => navigate(`/audit${buildAuditSearch({ assetID: selectedAssetID })}`)}
                 >
                   Open Audit →
                 </button>
               </>
-            ) : (
-              <p className="muted">Select an asset to see its activity.</p>
             )}
           </article>
 
@@ -327,15 +361,42 @@ export function ConnectPage() {
               <p className="muted">Select an asset to check access.</p>
             ) : !canReadGrants ? (
               <p className="muted">Permission required: bastion.grant:read</p>
-            ) : activeGrant ? (
-              <>
-                <p>
-                  <strong>You</strong> — active until {formatDateTime(activeGrant.expires_at)}
-                </p>
-                <p className="muted">{formatGrantTimeRemaining(activeGrant.expires_at)}</p>
-              </>
             ) : (
-              <p className="muted">No active grant for you on this asset.</p>
+              <>
+                {!canSeeAllGrants ? (
+                  <p className="muted">
+                    Showing only your own grant — bastion.grant:write required to see everyone.
+                  </p>
+                ) : null}
+                {assetGrants.isLoading ? (
+                  <PanelState kind="loading" message="Loading grants" />
+                ) : assetGrants.isError ? (
+                  <PanelState
+                    kind="error"
+                    message={
+                      assetGrants.error instanceof Error
+                        ? assetGrants.error.message
+                        : "Failed to load grants."
+                    }
+                  />
+                ) : assetGrantItems.length === 0 ? (
+                  <p className="muted">No active access grants on this asset.</p>
+                ) : (
+                  <ul className="connect-access-list">
+                    {assetGrantItems.map((grant) => (
+                      <li key={grant.id}>
+                        <span className="connect-access-who">
+                          {grant.user_id === userID ? "You" : grant.user_name || grant.user_id}
+                        </span>
+                        <span className="muted">{formatGrantTimeRemaining(grant.expires_at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="muted connect-card-note">
+                  Standing role-based access isn&rsquo;t shown here — see IAM for that.
+                </p>
+              </>
             )}
             <button
               type="button"

@@ -100,3 +100,17 @@
   - `effectiveAssetID`/`effectiveUserID`、`applyFilters`/`resetFilters`、URL seeding effect 全部不变；选择器只是改了 `draftFilters.assetID/userID` 的录入方式。
 - 严格停在阶段 6：未改后端，未新增接口；未碰 Audit 表格/录屏/统计卡片；调研清单里的 Connect 右栏真实数据、Overview 仪表盘、Audit RDP 录屏回放等仍属后续。
 - 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未做手测；建议 review 时在浏览器确认：① 资产搜索框输入后下拉收敛、选中即筛；② 用户下拉只列当前结果里的人、选中即筛；③ 阶段 5 深链 `/audit?asset=…` / `?user=…` 进来时两个 select 正确回显（含不在候选时的 `selected:` 合成项）；④ 无 `bastion.session:read` 时 User 选择器仍正确禁用并显示 `Own sessions only`；⑤ Reset 清空回全量。
+
+## 2026-05-17 · 阶段 7：Connect 右栏真实数据（纯前端）
+
+- 背景：阶段 3 起 Connect 右栏 "Recent usage / Who has access" 为"诚实受限"占位（只显示资产时间戳 / 只显示当前用户自己的 grant）。调研一度认为需新后端接口，但**核实发现 `listSessions` 与 `bastion listGrants` 后端均已支持 asset 过滤**，且 `listGrants` 已对无 `bastion.grant:write` 的调用者做自限（强制 user_id=自己）。结论：**零 Go 改动，纯前端接现有接口**即可。
+- 决策（与 review 确认的划界）："Who has access" **只显示活跃 JIT grant**，不含"靠角色 scoped 权限常驻可访问"的人——那属 IAM 能力解析（已暂停）。卡片底部加一句 "Standing role-based access isn't shown here — see IAM" 诚实说明，保留 "Manage access →"。
+- `web/src/api/bastion.ts`：新增 `listAssetActiveGrants(assetID, limit)` → `/api/v1/bastion/grants?asset_id=&active=true`（**刻意不传 user_id**，依赖后端已有自限：有 `bastion.grant:write`/admin 看全部，否则只回自己——诚实降级而非报错）。
+- `web/src/features/connect/ConnectPage.tsx`：
+  - 新增两个 query：`recentSessions = listSessions({assetID, limit:5})`（权限同页面 `cmdb.asset:read`；后端对无 `bastion.session:read` 者自限为本人会话）、`assetGrants = listAssetActiveGrants(assetID)`。
+  - **Recent usage 卡**：改为渲染最近 5 条会话（开始时间 / 用户 / 状态 pill，复用 `lib/sessions` 的 `sessionStatus`/`sessionStatusTone`），含 loading/error/empty 三态；无 `bastion.session:read` 时加 "Showing only your own sessions" 诚实说明；"Open Audit →" 升级为深链 `/audit?asset=<id>`（复用阶段 5 `buildAuditSearch`）。
+  - **Who has access 卡**：改为列出该资产**全部活跃 grant**（自己显示为 "You"，含 `formatGrantTimeRemaining`），三态齐全；无 `bastion.grant:write` 时加 "Showing only your own grant…" 诚实说明 + IAM 常驻访问划界说明。
+  - `activeGrant`（Connection 面板用）及其 `myActiveGrants` 来源不变。
+- `web/src/styles/app.css`：新增 `.connect-recent-list/.connect-access-list` 等紧凑列表样式，沿用 connect-card 既有密度，未改其它。
+- 严格停在阶段 7：零后端改动、无新接口、无迁移；未碰 Connect 左栏 rail / Connection 面板 / Tags 卡 / ⌘K（⌘K 仍 navigate→/cmdb，属后续）；IAM 常驻访问解析按划界明确不做。
+- 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未手测；建议 review 时在浏览器确认：① 选资产后 Recent usage 列出真实近 5 条会话、Open Audit 深链带 `?asset=`；② Who has access 列出该资产活跃 grant；③ 用 `bastion.grant:write` 与不用时分别看到"全部 / 仅自己 + 诚实说明"；④ 无 `bastion.session:read` 时 Recent usage 显示自限说明且仅本人会话；⑤ 切换资产时两卡随 `selectedAssetID` 正确刷新、空资产回到占位文案。
