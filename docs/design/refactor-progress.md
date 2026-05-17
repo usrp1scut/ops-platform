@@ -144,3 +144,11 @@
 - `web/src/styles/app.css`：新增 `.overview-activity*` 紧凑列表样式，沿用既有密度与 token。
 - 严格停在阶段 9：零后端、无新接口、无迁移；指标全部由现有列表接口客户端派生（assets 用 total，其余计数受各自 limit 上限与后端自限约束——诚实，与全站一致）；Audit RDP 录屏回放、Sessions rail env 过滤仍属后续。
 - 验证：`cd web && npm run typecheck`、`cd web && npm run build` 均通过（同上既有 bundle 警告）。本环境无浏览器，未手测；建议 review 时确认：① 各卡按权限正确显数/降级（用不同权限账号）；② Active sessions / Pending requests 无对应"看全部"权限时标题为 "(yours)" 且数值与 Audit/Access 自己视角一致；③ My active grants 的 "next …" 取最早到期；④ Recent activity 列最近 5 条且资产名深链带 `?asset=`；⑤ Refresh 一次刷新全部、refreshing 文案与禁用态正确。
+
+## 2026-05-17 · 阶段 10：RDP 会话录制与回放（设计文档，先和 review 谈）
+
+- 本阶段严格不写代码：仅对照调研清单 "Audit RDP 录屏回放（L）"、`internal/guacproxy/*`、`internal/terminal/*`（SSH 录屏基线）、`internal/sessions/*`、`internal/storage/*`、`web/src/features/audit/AuditPage.tsx`、`web/src/lib/guacamole.ts`，产出 `docs/design/rdp-recording-spec.md`。
+- 关键纠正（调研清单判断有误）：guacproxy **全包无任何录屏代码**，RDP 仅写审计行、`has_recording` 恒为 false、Inspect 对 RDP 从不显示。真盲区不是"录了播不了"，是"**RDP 根本没录**"——需新建采集→存储→分发→回放整条管线，名副其实 L。
+- 规格覆盖：当前 SSH/RDP 实现基线（事实）、两个本质架构抉择（采集 A 代理侧 tee vs B guacd recording-path；回放 A 浏览器内 `Guacamole.SessionRecording` vs B 服务端 `guacenc`→mp4，均给推荐与代价）、数据/存储 key/权限分发/容量取舍、隐私取舍（仅录 server→client，与 SSH 对齐）、分阶段实施计划 10a–10d、六项待 review 确认清单。
+- 推荐基线：采集 A + 回放 A（对称、自包含、复用现有 MinIO/`SetRecording`/`/recording` 鉴权、零新基建），但最终选型与容量/保留策略待 review 拍板后方可进入 10a。
+- 验证：本阶段为设计文档整理，无代码改动，未运行 typecheck / build。
