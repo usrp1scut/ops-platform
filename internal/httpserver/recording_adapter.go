@@ -22,3 +22,9 @@ func (f recordingFetcher) GetObject(ctx context.Context, key string) (io.ReadClo
 	}
 	return body, sessions.RecordingObject{Key: obj.Key, Size: obj.Size, ContentType: obj.ContentType}, nil
 }
+
+// RemoveObject lets the same adapter satisfy sessions.RecordingPurger for the
+// retention janitor.
+func (f recordingFetcher) RemoveObject(ctx context.Context, key string) error {
+	return f.store.RemoveObject(ctx, key)
+}

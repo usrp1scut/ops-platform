@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -15,7 +18,14 @@ import (
 	"ops-platform/internal/iam"
 	"ops-platform/internal/platform/httpx"
 	"ops-platform/internal/sessions"
+	"ops-platform/internal/storage"
 )
+
+// guacRecordingContentType is the stored object content-type for RDP session
+// recordings. The "rdp/" key prefix plus this type let the audit/recording
+// path tell a Guacamole recording apart from an SSH asciicast without a
+// schema migration.
+const guacRecordingContentType = "application/vnd.glyptodon.guacamole.recording"
 
 // AssetMetaLookup returns lightweight asset metadata for session audit.
 type AssetMetaLookup interface {
@@ -28,16 +38,26 @@ type Handler struct {
 	tickets  *connectivity.TicketService
 	meta     AssetMetaLookup
 	sessions *sessions.Repository
+	storage  *storage.Client // nil-safe: when nil, recordings are skipped
+	maxRec   int64           // per-session recording cap; 0 = unlimited
+	logger   *log.Logger
 
 	upgrader websocket.Upgrader
 }
 
-func NewHandler(svc *Service, tickets *connectivity.TicketService, meta AssetMetaLookup, sess *sessions.Repository) *Handler {
+// NewHandler wires the RDP proxy handler. store may be nil when recording is
+// not configured (OPS_RECORDING_ENDPOINT unset); the handler then bridges
+// sessions normally without writing a Guacamole recording. maxRecBytes caps
+// a single recording (0 = unlimited).
+func NewHandler(svc *Service, tickets *connectivity.TicketService, meta AssetMetaLookup, sess *sessions.Repository, store *storage.Client, maxRecBytes int64) *Handler {
 	return &Handler{
 		svc:      svc,
 		tickets:  tickets,
 		meta:     meta,
 		sessions: sess,
+		storage:  store,
+		maxRec:   maxRecBytes,
+		logger:   log.New(log.Writer(), "guacproxy ", log.LstdFlags),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  8192,
 			WriteBufferSize: 8192,
@@ -141,7 +161,9 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	bytesIn, bytesOut, runErr := bridge(conn, session)
+	recorder := h.openRecorder(auditID)
+
+	bytesIn, bytesOut, runErr := bridge(conn, session, recorder)
 	if runErr != nil && !isClosedErr(runErr) {
 		_ = conn.WriteMessage(websocket.TextMessage, errorInstruction(runErr.Error()))
 	}
@@ -159,6 +181,67 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 			Error:     msg,
 		})
 		endCancel()
+		// Upload runs on its own deadline, after End, so a slow upload of a
+		// large graphical recording can't drop the session-end audit row.
+		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		h.finalizeRecording(uploadCtx, auditID, recorder)
+		uploadCancel()
+		if recorder.Truncated() {
+			h.logger.Printf("recording truncated at size cap: session=%s cap=%d bytes", auditID, h.maxRec)
+		}
+	} else if recorder != nil {
+		// No audit row to attach to; drop the temp file rather than orphan it.
+		_, _ = recorder.Close()
+		_ = os.Remove(recorder.Path())
+	}
+}
+
+// openRecorder creates a per-session Guacamole recording file when storage is
+// configured and the session has an audit row to attach the upload to. A nil
+// return is the safe no-op path (recording disabled).
+func (h *Handler) openRecorder(sessionID string) *Recorder {
+	if sessionID == "" || h.storage == nil || !h.storage.IsEnabled() {
+		return nil
+	}
+	path := filepath.Join(os.TempDir(), "ops-rdp-"+sessionID+".guac")
+	rec, err := NewRecorder(path, h.maxRec)
+	if err != nil {
+		h.logger.Printf("recorder open failed: session=%s err=%v", sessionID, err)
+		return nil
+	}
+	return rec
+}
+
+// finalizeRecording closes the recording file, uploads it to object storage,
+// and persists the storage key + size on the session row. All errors are
+// logged but never bubbled — a failed upload must not break session audit.
+func (h *Handler) finalizeRecording(ctx context.Context, sessionID string, rec *Recorder) {
+	if rec == nil {
+		return
+	}
+	path := rec.Path()
+	size, err := rec.Close()
+	if err != nil {
+		h.logger.Printf("recorder close failed: session=%s err=%v", sessionID, err)
+	}
+	defer os.Remove(path)
+	if size == 0 || h.storage == nil || !h.storage.IsEnabled() {
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		h.logger.Printf("open recording failed: session=%s err=%v", sessionID, err)
+		return
+	}
+	defer f.Close()
+	key := "rdp/" + time.Now().UTC().Format("2006/01/02") + "/" + sessionID + ".guac"
+	obj, err := h.storage.PutObject(ctx, key, f, size, guacRecordingContentType)
+	if err != nil {
+		h.logger.Printf("upload recording failed: session=%s err=%v", sessionID, err)
+		return
+	}
+	if err := h.sessions.SetRecording(ctx, sessionID, obj.Key, obj.Size); err != nil {
+		h.logger.Printf("persist recording metadata failed: session=%s err=%v", sessionID, err)
 	}
 }
 
@@ -168,7 +251,7 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 // when the TCP stream is split mid-codepoint. The WS→guacd direction writes
 // each incoming frame verbatim (browser tunnels already send complete
 // instructions per frame).
-func bridge(ws *websocket.Conn, sess *Session) (bytesIn, bytesOut int64, err error) {
+func bridge(ws *websocket.Conn, sess *Session, rec *Recorder) (bytesIn, bytesOut int64, err error) {
 	errCh := make(chan error, 2)
 	var outTotal, inTotal int64
 
@@ -182,6 +265,13 @@ func bridge(ws *websocket.Conn, sess *Session) (bytesIn, bytesOut int64, err err
 			}
 			payload := []byte(ins.Encode())
 			outTotal += int64(len(payload))
+			// Record what the operator saw BEFORE forwarding, so a slow
+			// websocket send can't drop frames from the audit recording.
+			// Only this (server→client) direction is recorded; inbound
+			// keystrokes/clipboard are never written. nil rec is a no-op;
+			// a write error degrades the recording but must not kill the
+			// live session, so it is intentionally not propagated.
+			_ = rec.Write(payload)
 			if werr := ws.WriteMessage(websocket.TextMessage, payload); werr != nil {
 				bytesOut = outTotal
 				errCh <- werr

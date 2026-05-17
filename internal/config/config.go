@@ -36,6 +36,13 @@ type Config struct {
 	RecordingBucket   string
 	RecordingRegion   string
 	RecordingUseSSL   bool
+	// RecordingMaxBytes caps a single session recording. 0 = unlimited.
+	// When exceeded, capture stops at the last whole instruction so the
+	// stored artifact stays a valid (truncated) recording.
+	RecordingMaxBytes int64
+	// RecordingRetentionDays purges recordings older than N days (storage
+	// object + DB pointer). 0 = keep forever (prior behavior).
+	RecordingRetentionDays int
 }
 
 // OIDCSeedConfig is a bootstrap-only compatibility path. Runtime OIDC
@@ -94,6 +101,18 @@ func Load() (Config, error) {
 		RecordingUseSSL:   strings.EqualFold(strings.TrimSpace(getenv("OPS_RECORDING_USE_SSL", "false")), "true"),
 	}
 	cfg.RecordingEnabled = cfg.RecordingEndpoint != "" && cfg.RecordingAccessID != "" && cfg.RecordingSecret != ""
+
+	maxBytes, err := parseNonNegativeInt64(strings.TrimSpace(getenv("OPS_RECORDING_MAX_BYTES", "0")))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid OPS_RECORDING_MAX_BYTES: %w", err)
+	}
+	cfg.RecordingMaxBytes = maxBytes
+
+	retentionDays, err := parseNonNegativeInt64(strings.TrimSpace(getenv("OPS_RECORDING_RETENTION_DAYS", "0")))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid OPS_RECORDING_RETENTION_DAYS: %w", err)
+	}
+	cfg.RecordingRetentionDays = int(retentionDays)
 
 	intervalText := strings.TrimSpace(getenv("OPS_SYNC_INTERVAL", "15m"))
 	interval, err := time.ParseDuration(intervalText)
@@ -185,6 +204,17 @@ func parseCSV(input string) []string {
 		values = append(values, trimmed)
 	}
 	return values
+}
+
+func parseNonNegativeInt64(raw string) (int64, error) {
+	parsed, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if parsed < 0 {
+		return 0, errors.New("must be >= 0")
+	}
+	return parsed, nil
 }
 
 func parsePositiveInt(raw string) (int, error) {

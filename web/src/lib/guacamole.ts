@@ -36,11 +36,35 @@ export type GuacamoleClient = {
   sendMouseState: (state: GuacamoleMouseState) => void;
 };
 
+// Guacamole.SessionRecording: in-browser player for a recorded server→client
+// instruction stream. The vendored guacamole-common bundle accepts a Blob
+// source directly and derives the timeline from the embedded `sync`
+// instructions. Positions/durations are in milliseconds.
+export type GuacamoleSessionRecording = {
+  connect: (data?: string) => void;
+  disconnect: () => void;
+  getDisplay: () => GuacamoleDisplay;
+  getDuration: () => number;
+  getPosition: () => number;
+  isPlaying: () => boolean;
+  play: () => void;
+  pause: () => void;
+  seek: (position: number, callback?: () => void) => void;
+  onload: (() => void) | null;
+  onerror: ((message: string) => void) | null;
+  onabort: (() => void) | null;
+  onprogress: ((duration: number, current: number) => void) | null;
+  onplay: (() => void) | null;
+  onpause: (() => void) | null;
+  onseek: ((position: number) => void) | null;
+};
+
 export type GuacamoleNamespace = {
   Client: new (tunnel: unknown) => GuacamoleClient;
   Keyboard: new (element: HTMLElement) => GuacamoleKeyboard;
   Mouse: new (element: HTMLElement) => GuacamoleMouse;
   WebSocketTunnel: new (url: string) => unknown;
+  SessionRecording: new (source: Blob) => GuacamoleSessionRecording;
 };
 
 type GuacamoleWindow = Window &

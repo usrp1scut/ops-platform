@@ -100,6 +100,53 @@ SELECT COALESCE(recording_uri, '') FROM terminal_session WHERE id = $1::uuid`, s
 	return uri, nil
 }
 
+// ExpiredRecording is one session whose recording is past the retention
+// cutoff: the storage object should be deleted and the DB pointer cleared.
+type ExpiredRecording struct {
+	SessionID string
+	URI       string
+}
+
+// ExpiredRecordings lists recordings on sessions that started before cutoff.
+// Bounded by limit so one janitor tick can't pull an unbounded result set.
+func (r *Repository) ExpiredRecordings(ctx context.Context, cutoff time.Time, limit int) ([]ExpiredRecording, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id::text, recording_uri
+  FROM terminal_session
+ WHERE recording_uri IS NOT NULL AND recording_uri <> ''
+   AND started_at < $1
+ ORDER BY started_at ASC
+ LIMIT $2`, cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ExpiredRecording
+	for rows.Next() {
+		var e ExpiredRecording
+		if err := rows.Scan(&e.SessionID, &e.URI); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ClearRecording nulls a session's recording pointer after its storage
+// object has been purged, so the audit row stays but Inspect no longer
+// offers a broken playback.
+func (r *Repository) ClearRecording(ctx context.Context, sessionID string) error {
+	_, err := r.db.ExecContext(ctx, `
+UPDATE terminal_session
+   SET recording_uri = NULL,
+       recording_bytes = NULL
+ WHERE id = $1::uuid`, sessionID)
+	return err
+}
+
 func (r *Repository) End(ctx context.Context, in EndInput) error {
 	var exit any
 	if in.ExitCode != nil {

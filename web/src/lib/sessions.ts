@@ -86,6 +86,26 @@ export function recordingLabel(session: SessionAuditRecord) {
   return `${session.user_name || session.user_id} @ ${session.asset_name || session.asset_id}`;
 }
 
+export type RecordingKind = "asciicast" | "guac";
+
+// detectRecordingKind classifies a fetched recording body by content shape,
+// so the audit UI can route SSH casts to the text preview and RDP Guacamole
+// recordings to the session player without a schema/API change. An asciicast
+// is NDJSON whose first line is a `{"version":2,...}` object; a Guacamole
+// recording is a length-prefixed instruction stream (`<digits>.<opcode>...`).
+export function detectRecordingKind(text: string): RecordingKind {
+  const firstLine = text.split(/\r?\n/, 1)[0]?.trim() ?? "";
+  if (firstLine.startsWith("{")) {
+    try {
+      const header = JSON.parse(firstLine) as { version?: number };
+      if (header.version === 2) return "asciicast";
+    } catch {
+      // Not a cast header — fall through to guac.
+    }
+  }
+  return "guac";
+}
+
 export function parseAsciicast(text: string, sampleLimit = 4000): RecordingPreview {
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (lines.length === 0) {

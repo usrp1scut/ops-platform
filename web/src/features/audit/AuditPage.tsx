@@ -9,6 +9,7 @@ import { PanelState } from "../../components/PanelState";
 import { PermissionList } from "../../components/PermissionList";
 import { buildAuditSearch } from "../../lib/launch";
 import {
+  detectRecordingKind,
   filterSessionsByStatus,
   formatBytes,
   formatDurationMs,
@@ -22,18 +23,18 @@ import {
   type SessionStatusFilter,
 } from "../../lib/sessions";
 import { useAuth } from "../auth/AuthProvider";
+import { RdpRecordingPlayer } from "./RdpRecordingPlayer";
+
+const GUAC_RECORDING_TYPE = "application/vnd.glyptodon.guacamole.recording";
 
 type ActionFeedback = {
   kind: "error" | "success";
   message: string;
 };
 
-type RecordingPreviewState = {
-  label: string;
-  preview: RecordingPreview;
-  rawText: string;
-  sessionID: string;
-};
+type InspectedRecording =
+  | { kind: "asciicast"; label: string; preview: RecordingPreview; rawText: string; sessionID: string }
+  | { kind: "guac"; label: string; blob: Blob; sessionID: string };
 
 const emptyFilters: SessionFilters = {
   assetID: "",
@@ -65,12 +66,11 @@ function trafficLabel(session: SessionAuditRecord) {
   return `${formatBytes(session.bytes_in)} / ${formatBytes(session.bytes_out)}`;
 }
 
-function downloadRecording(sessionID: string, rawText: string) {
-  const blob = new Blob([rawText], { type: "application/x-asciicast" });
+function downloadBlob(sessionID: string, blob: Blob, extension: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `${sessionID}.cast`;
+  anchor.download = `${sessionID}.${extension}`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -107,7 +107,7 @@ export function AuditPage() {
     setDraftFilters(next);
   }, [searchParams]);
   const [recordingFeedback, setRecordingFeedback] = useState<ActionFeedback | null>(null);
-  const [recordingPreview, setRecordingPreview] = useState<RecordingPreviewState | null>(null);
+  const [inspected, setInspected] = useState<InspectedRecording | null>(null);
   const effectiveUserID = canReadAllSessions ? filters.userID.trim() : "";
   const effectiveAssetID = filters.assetID.trim();
   const sessions = useQuery({
@@ -172,21 +172,25 @@ export function AuditPage() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [sessionItems, draftFilters.userID]);
   const inspectRecording = useMutation({
-    mutationFn: async (session: SessionAuditRecord) => {
+    mutationFn: async (session: SessionAuditRecord): Promise<InspectedRecording> => {
       const rawText = await getSessionRecording(session.id);
+      const label = recordingLabel(session);
+      if (detectRecordingKind(rawText) === "asciicast") {
+        return { kind: "asciicast", label, preview: parseAsciicast(rawText), rawText, sessionID: session.id };
+      }
       return {
-        label: recordingLabel(session),
-        preview: parseAsciicast(rawText),
-        rawText,
+        kind: "guac",
+        label,
+        blob: new Blob([rawText], { type: GUAC_RECORDING_TYPE }),
         sessionID: session.id,
       };
     },
     onMutate: () => {
       setRecordingFeedback(null);
     },
-    onSuccess: (preview) => {
-      setRecordingPreview(preview);
-      setRecordingFeedback({ kind: "success", message: `Recording loaded for ${preview.label}.` });
+    onSuccess: (recording) => {
+      setInspected(recording);
+      setRecordingFeedback({ kind: "success", message: `Recording loaded for ${recording.label}.` });
     },
     onError: (error) => {
       setRecordingFeedback({
@@ -476,52 +480,75 @@ export function AuditPage() {
         ) : null}
       </article>
 
-      {recordingPreview ? (
+      {inspected ? (
         <article className="work-panel">
           <div className="panel-header">
             <div>
               <p className="eyebrow">Recording</p>
-              <h2>{recordingPreview.label}</h2>
+              <h2>{inspected.label}</h2>
             </div>
             <div className="request-actions">
-              <button
-                type="button"
-                className="secondary-button compact"
-                onClick={() => downloadRecording(recordingPreview.sessionID, recordingPreview.rawText)}
-              >
-                <Download size={14} aria-hidden="true" />
-                <span>Download cast</span>
-              </button>
-              <button type="button" className="secondary-button compact" onClick={() => setRecordingPreview(null)}>
+              {inspected.kind === "asciicast" ? (
+                <button
+                  type="button"
+                  className="secondary-button compact"
+                  onClick={() =>
+                    downloadBlob(
+                      inspected.sessionID,
+                      new Blob([inspected.rawText], { type: "application/x-asciicast" }),
+                      "cast",
+                    )
+                  }
+                >
+                  <Download size={14} aria-hidden="true" />
+                  <span>Download cast</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="secondary-button compact"
+                  onClick={() => downloadBlob(inspected.sessionID, inspected.blob, "guac")}
+                >
+                  <Download size={14} aria-hidden="true" />
+                  <span>Download recording</span>
+                </button>
+              )}
+              <button type="button" className="secondary-button compact" onClick={() => setInspected(null)}>
                 Close
               </button>
             </div>
           </div>
 
-          <dl className="detail-grid">
-            <div>
-              <dt>Version</dt>
-              <dd>{recordingPreview.preview.version}</dd>
-            </div>
-            <div>
-              <dt>Size</dt>
-              <dd>
-                {recordingPreview.preview.cols} x {recordingPreview.preview.rows}
-              </dd>
-            </div>
-            <div>
-              <dt>Duration</dt>
-              <dd>{recordingPreview.preview.durationSeconds.toFixed(1)}s</dd>
-            </div>
-            <div>
-              <dt>Frames</dt>
-              <dd>{recordingPreview.preview.frames}</dd>
-            </div>
-          </dl>
+          {inspected.kind === "asciicast" ? (
+            <>
+              <dl className="detail-grid">
+                <div>
+                  <dt>Version</dt>
+                  <dd>{inspected.preview.version}</dd>
+                </div>
+                <div>
+                  <dt>Size</dt>
+                  <dd>
+                    {inspected.preview.cols} x {inspected.preview.rows}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Duration</dt>
+                  <dd>{inspected.preview.durationSeconds.toFixed(1)}s</dd>
+                </div>
+                <div>
+                  <dt>Frames</dt>
+                  <dd>{inspected.preview.frames}</dd>
+                </div>
+              </dl>
 
-          <pre className="recording-preview">
-            {recordingPreview.preview.outputSample || "Recording contains no stdout frames."}
-          </pre>
+              <pre className="recording-preview">
+                {inspected.preview.outputSample || "Recording contains no stdout frames."}
+              </pre>
+            </>
+          ) : (
+            <RdpRecordingPlayer blob={inspected.blob} />
+          )}
         </article>
       ) : null}
     </section>

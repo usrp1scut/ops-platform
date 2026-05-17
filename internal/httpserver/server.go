@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -119,12 +120,22 @@ func (s *Server) Router() http.Handler {
 	}
 	var sessionsRecordings sessions.RecordingFetcher
 	if recordingStorage != nil {
-		sessionsRecordings = recordingFetcher{recordingStorage}
+		adapter := recordingFetcher{recordingStorage}
+		sessionsRecordings = adapter
+		if s.cfg.RecordingRetentionDays > 0 {
+			sessions.StartRecordingJanitor(
+				context.Background(),
+				sessionsRepo,
+				adapter,
+				time.Duration(s.cfg.RecordingRetentionDays)*24*time.Hour,
+				24*time.Hour,
+			)
+		}
 	}
 	sessionsHandler := sessions.NewHandler(sessionsRepo, sessionsRecordings, iam.RequirePermission("cmdb.asset", "read"))
 	terminalHandler := terminal.NewHandler(terminalSvc, ticketService, bastionService, sessionsRepo, cmdbRepo, recordingStorage)
 	guacSvc := guacproxy.NewService(s.cfg.GuacdAddr, s.cfg.GuacTunnelHost, bastionService)
-	guacHandler := guacproxy.NewHandler(guacSvc, ticketService, cmdbRepo, sessionsRepo)
+	guacHandler := guacproxy.NewHandler(guacSvc, ticketService, cmdbRepo, sessionsRepo, recordingStorage, s.cfg.RecordingMaxBytes)
 	awsHandler := aws.NewHandler(
 		awsRepo,
 		iamRepo,

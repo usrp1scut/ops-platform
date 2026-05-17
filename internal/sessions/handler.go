@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -112,7 +113,14 @@ func (h *Handler) recording(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(obj.Size, 10))
 	}
 	w.Header().Set("Cache-Control", "private, max-age=300")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+id+`.cast"`)
+	// RDP recordings are stored under an "rdp/...guac" key; SSH sessions are
+	// asciicast. Name the download by the stored artifact's real extension
+	// so a Guacamole recording doesn't masquerade as a .cast file.
+	ext := ".cast"
+	if strings.HasSuffix(uri, ".guac") {
+		ext = ".guac"
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+id+ext+`"`)
 	if _, err := io.Copy(w, body); err != nil && !errors.Is(err, context.Canceled) {
 		// The header is already flushed at this point so we can't switch to
 		// an error response — just log via the standard library writer.

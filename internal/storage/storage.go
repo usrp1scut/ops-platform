@@ -91,6 +91,19 @@ func (c *Client) PutObject(ctx context.Context, key string, body io.Reader, size
 	return Object{Key: key, Size: info.Size, ContentType: contentType}, nil
 }
 
+// RemoveObject deletes a stored artifact by key. Used by the recording
+// retention janitor. Deleting a key that does not exist is not an error in
+// S3/MinIO, so a successful return does not imply the object existed.
+func (c *Client) RemoveObject(ctx context.Context, key string) error {
+	if !c.IsEnabled() {
+		return ErrNoStorage
+	}
+	if err := c.cli.RemoveObject(ctx, c.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("remove %s: %w", key, err)
+	}
+	return nil
+}
+
 // GetObject returns a reader the caller MUST close. The size and content type
 // come from the stored metadata, not from the cfg defaults.
 func (c *Client) GetObject(ctx context.Context, key string) (io.ReadCloser, Object, error) {
